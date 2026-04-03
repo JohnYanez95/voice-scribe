@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Overview
+
+Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech in a browser UI, a GPU-accelerated containerized backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and clipboard copy. No cloud services are involved.
+
+**Current milestone:** v1 Complete — v1.1 planning in progress.
+
+**Key context:**
+- Two-service system: React frontend (host, port 5173) + FastAPI backend (Docker, port 8000) over localhost HTTP
+- Single-user, single-utterance, synchronous — no streaming, no queues, no WebSocket
+- Privacy-first: audio is transient (deleted after processing), transcripts are never logged, API binds to localhost only
+- `roadmap.md` is the single source of truth for scope decisions
+- v1.1 priority: rule-based transcript cleanup function, then state machine diagram update, then settings UI, then retention controls
+
+**Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
+
 ## Commands
 
 ```bash
