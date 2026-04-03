@@ -49,8 +49,8 @@ class TestPunctuation:
     def test_removes_space_before_comma(self):
         assert clean_transcript("hello , world") == "Hello, world"
 
-    def test_adds_space_after_period(self):
-        assert clean_transcript("hello.world") == "Hello. World"
+    def test_does_not_split_dotted_words(self):
+        assert clean_transcript("hello.world") == "Hello.world"
 
     def test_preserves_trailing_period(self):
         assert clean_transcript("hello world.") == "Hello world."
@@ -71,6 +71,23 @@ class TestCapitalization:
 
     def test_already_capitalized_unchanged(self):
         assert clean_transcript("Hello world") == "Hello world"
+
+
+class TestFilenamesAndDotNotation:
+    def test_preserves_filename(self):
+        assert clean_transcript("image.png") == "Image.png"
+
+    def test_preserves_filename_in_sentence(self):
+        assert clean_transcript("check the image.png file") == "Check the image.png file"
+
+    def test_preserves_domain(self):
+        assert clean_transcript("visit example.com today") == "Visit example.com today"
+
+    def test_preserves_extension_mid_sentence(self):
+        assert clean_transcript("the file test.mp3 is here") == "The file test.mp3 is here"
+
+    def test_real_sentence_ending_still_works(self):
+        assert clean_transcript("hello world. goodbye world") == "Hello world. Goodbye world"
 
 
 class TestCombined:

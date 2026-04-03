@@ -19,8 +19,10 @@ def clean_transcript(raw: str) -> str:
     # 2. Remove space before punctuation
     text = re.sub(r"\s+([.,!?:;])", r"\1", text)
 
-    # 3. Ensure space after punctuation (unless end of string or another punctuation)
-    text = re.sub(r"([.,!?:;])([^\s.,!?:;])", r"\1 \2", text)
+    # 3. Ensure space after non-period punctuation. Periods are excluded
+    #    because inserting space splits filenames (image.png), domains
+    #    (example.com), and abbreviations (U.S.A.)
+    text = re.sub(r"([,!?:;])([^\s.,!?:;])", r"\1 \2", text)
 
     # 4. Remove consecutive duplicate words (case-insensitive, keep first)
     text = re.sub(r"\b(\w+)(\s+\1)+\b", r"\1", text, flags=re.IGNORECASE)
@@ -29,7 +31,7 @@ def clean_transcript(raw: str) -> str:
     if text:
         text = text[0].upper() + text[1:]
 
-    # 6. Capitalize after sentence-ending punctuation
+    # 6. Capitalize after sentence-ending punctuation followed by whitespace
     text = re.sub(
         r"([.!?]\s+)(\w)", lambda m: m.group(1) + m.group(2).upper(), text
     )
