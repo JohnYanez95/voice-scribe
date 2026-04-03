@@ -47,7 +47,7 @@ def transcribe_audio(audio_path: Path, language: str | None = None) -> dict:
     if language:
         kwargs["language"] = language
 
-    segments, info = model.transcribe(str(audio_path), **kwargs)
+    segments, info = model.transcribe(str(audio_path), vad_filter=True, **kwargs)
     text = " ".join(segment.text.strip() for segment in segments)
 
     elapsed = time.monotonic() - start
