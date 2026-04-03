@@ -188,10 +188,11 @@ These are understood constraints, not defects:
 
 ## What Comes Next
 
-**v1.1**
-- Rule-based transcript cleanup (whitespace, punctuation, capitalization, repeated words)
-- Basic settings UI
-- Retention controls
+**v1.1** (priority order)
+
+1. `clean_transcript(raw: str) -> str` — single pure function in `apps/api/services/`. Rule-based only: whitespace normalization, punctuation, capitalization, repeated-word removal. No config, no toggles. API response returns both `raw` and `cleaned` fields for side-by-side quality evaluation. Run against real dictation for one week before deciding what needs to be configurable.
+2. **Settings UI** — separate work item; comes after the cleanup pass is validated.
+3. **Retention controls** — separate work item; comes after cleanup. Do not bundle with item 1.
 
 **v2**
 - Desktop packaging (Tauri)
@@ -201,3 +202,30 @@ These are understood constraints, not defects:
 - Optional streaming mode (requires WebSocket transport)
 
 Full post-v2 ideas are tracked in `roadmap.md` under the parking lot section.
+
+---
+
+## Feedback & Takeaways
+
+*Source: PM, Principal, and Senior review of this report — April 3, 2026*
+
+### v1 Close-Out Item (Not v1.1 Backlog)
+
+The CPU fallback path is wired but has not been exercised end-to-end. **Before any v1.1 work begins:** run `smoke_test.sh` with `DEVICE=cpu` and `WHISPER_MODEL=small`, confirm a transcript is returned, and record the wall-clock latency in a comment at the top of `ops/scripts/smoke_test.sh`. Budget ~30 minutes. This retires the one remaining open thread in v1.
+
+### Process Standards
+
+- **This report format is now the milestone template.** The hard-requirements compliance table is the most valuable section — it makes review fast and auditable. Every future milestone delivery (v1.1, v2) should use the same structure.
+- **Add an actual timeline section.** The roadmap estimated ~8 days of phased work. Knowing where time actually went — especially if environment setup consumed more than expected — is useful context for scoping subsequent milestones. If v1 data exists, add it retroactively. If not, start tracking now so v1.1 has it.
+
+### Pattern to Repeat
+
+The pre-kickoff design review surfaced risks that all landed as solved problems in this report: temp file handling, CORS origin variants, model cache persistence, and codec negotiation. That is what a design review is supposed to produce. Repeat this cycle for v1.1 — surface risks early, retire them in execution.
+
+### Reviewer Quotes
+
+**PM:** *"Clean delivery. Every hard requirement from the roadmap is accounted for, scope was held exactly where it was drawn, and nothing speculative crept in. That's discipline."*
+
+**Principal:** *"The team internalized the constraints as engineering standards, not as a checklist to satisfy. That's the part that matters most."*
+
+**Senior:** *"The pre-kickoff concerns that were raised — temp file handling, CORS variants, cache persistence, codec negotiation — all landed as solved problems in the delivery report. That's the outcome a design review is supposed to produce."*

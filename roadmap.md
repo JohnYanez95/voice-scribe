@@ -1,7 +1,7 @@
 # Voice Scribe — v1 Roadmap
 
-**Last Updated:** April 3, 2026
-**Status:** v1 Complete
+**Last Updated:** April 3, 2026 (updated with v1 review feedback)
+**Status:** v1 Complete — v1.1 planning in progress
 
 ---
 
@@ -381,9 +381,20 @@ Model weights are not baked into the container image. They download on first run
 
 Record audio, send to local API, transcode, transcribe, return transcript, display in editable text area, copy to clipboard. GPU and CPU execution modes.
 
+**Outstanding v1 close-out item (complete before v1.1 work begins):**
+Run `smoke_test.sh` with `DEVICE=cpu` and `WHISPER_MODEL=small`. Confirm a transcript is returned. Record wall-clock latency in a comment at the top of `ops/scripts/smoke_test.sh`. ~30 minutes of work. This is a v1 item, not v1.1 backlog.
+
 ### v1.1
 
-Rule-based transcript cleanup (whitespace, punctuation, capitalization, repeated words). Basic settings. Retention controls. A second GPU-backed model is deferred unless there is demonstrated need.
+Work items in strict priority order:
+
+1. **`clean_transcript(raw: str) -> str`** — single pure function in `apps/api/services/`. Rule-based only: whitespace normalization, punctuation, capitalization, repeated-word removal. No config, no toggles, no settings UI. The `/transcribe` response JSON returns both `raw` and `cleaned` fields for side-by-side quality evaluation. Ship it, run against real dictation for one week, then decide what needs to be configurable. Lives in the API — not the frontend. Do not put regex in the React app.
+
+2. **Settings UI** — separate work item; comes after the cleanup pass is validated.
+
+3. **Retention controls** — separate work item; comes after cleanup. Do not bundle with item 1.
+
+A second GPU-backed model is deferred unless there is demonstrated need.
 
 ### v2
 
