@@ -2,11 +2,12 @@ import { useCallback, useState } from "react";
 
 interface TranscriptProps {
   text: string;
+  rawText: string;
   isLoading: boolean;
   onTextChange: (text: string) => void;
 }
 
-export function Transcript({ text, isLoading, onTextChange }: TranscriptProps) {
+export function Transcript({ text, rawText, isLoading, onTextChange }: TranscriptProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -39,8 +40,22 @@ export function Transcript({ text, isLoading, onTextChange }: TranscriptProps) {
     return null;
   }
 
+  const showComparison = rawText && rawText !== text;
+
   return (
     <div className="transcript">
+      {showComparison && (
+        <div className="comparison">
+          <div className="comparison-pane">
+            <label className="comparison-label">Raw</label>
+            <div className="comparison-text">{rawText}</div>
+          </div>
+          <div className="comparison-pane">
+            <label className="comparison-label">Cleaned</label>
+            <div className="comparison-text">{text}</div>
+          </div>
+        </div>
+      )}
       <textarea
         value={text}
         onChange={(e) => onTextChange(e.target.value)}

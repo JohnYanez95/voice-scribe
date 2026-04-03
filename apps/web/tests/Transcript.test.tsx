@@ -5,19 +5,19 @@ import { Transcript } from "../src/features/transcript/Transcript";
 describe("Transcript", () => {
   it("renders nothing when text is empty", () => {
     const { container } = render(
-      <Transcript text="" isLoading={false} onTextChange={() => {}} />
+      <Transcript text="" isLoading={false} rawText="" onTextChange={() => {}} />
     );
     expect(container.querySelector(".transcript")).toBeNull();
   });
 
   it("shows loading state", () => {
-    render(<Transcript text="" isLoading={true} onTextChange={() => {}} />);
+    render(<Transcript text="" isLoading={true} rawText="" onTextChange={() => {}} />);
     expect(screen.getByText("Transcribing...")).toBeTruthy();
   });
 
   it("renders transcript text in textarea", () => {
     render(
-      <Transcript text="Hello world" isLoading={false} onTextChange={() => {}} />
+      <Transcript text="Hello world" isLoading={false} rawText="" onTextChange={() => {}} />
     );
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     expect(textarea.value).toBe("Hello world");
@@ -26,7 +26,7 @@ describe("Transcript", () => {
   it("calls onTextChange when edited", () => {
     const onChange = vi.fn();
     render(
-      <Transcript text="Hello" isLoading={false} onTextChange={onChange} />
+      <Transcript text="Hello" isLoading={false} rawText="" onTextChange={onChange} />
     );
     const textarea = screen.getByRole("textbox");
     fireEvent.change(textarea, { target: { value: "Hello world" } });
@@ -39,7 +39,7 @@ describe("Transcript", () => {
     });
 
     render(
-      <Transcript text="Copy me" isLoading={false} onTextChange={() => {}} />
+      <Transcript text="Copy me" isLoading={false} rawText="" onTextChange={() => {}} />
     );
     const btn = screen.getByText("Copy to Clipboard");
     fireEvent.click(btn);

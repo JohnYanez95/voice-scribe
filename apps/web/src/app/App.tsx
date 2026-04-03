@@ -7,6 +7,7 @@ import type { RecordingState } from "../types";
 export function App() {
   const [state, setState] = useState<RecordingState>("idle");
   const [transcript, setTranscript] = useState("");
+  const [rawTranscript, setRawTranscript] = useState("");
   const [error, setError] = useState("");
 
   const handleRecordingComplete = useCallback(async (blob: Blob) => {
@@ -15,6 +16,7 @@ export function App() {
 
     try {
       const result = await transcribeAudio(blob);
+      setRawTranscript(result.raw);
       setTranscript(result.cleaned);
       setState("done");
     } catch (err) {
@@ -42,6 +44,7 @@ export function App() {
       {error && <p className="error">{error}</p>}
       <Transcript
         text={transcript}
+        rawText={rawTranscript}
         isLoading={state === "processing"}
         onTextChange={setTranscript}
       />
