@@ -1,0 +1,28 @@
+services:
+  api:
+    build:
+      context: ../../apps/api
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "8000:8000"
+    environment:
+      - WHISPER_MODEL=large-v3
+      - DEVICE=cuda
+      - MAX_AUDIO_SECONDS=60
+      - MAX_UPLOAD_MB=10
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+      - MODEL_CACHE_DIR=/cache
+      - TEMP_DIR=/tmp/voice-scribe
+      - LOG_LEVEL=info
+    volumes:
+      - ../../data/cache:/cache
+      - ../../data/tmp:/tmp/voice-scribe
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+# CPU fallback: comment out the deploy block above and set DEVICE=cpu
+# To also use a smaller model for faster startup: WHISPER_MODEL=small
