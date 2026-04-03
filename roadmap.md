@@ -389,15 +389,15 @@ Run `smoke_test.sh` with `DEVICE=cpu` and `WHISPER_MODEL=small`. Confirm a trans
 
 Work items in strict priority order:
 
-1. **`clean_transcript(raw: str) -> str`** — single pure function in `apps/api/services/`. Rule-based only: whitespace normalization, punctuation, capitalization, repeated-word removal. No config, no toggles, no settings UI. The `/transcribe` response JSON returns both `raw` and `cleaned` fields for side-by-side quality evaluation. Ship it, run against real dictation for one week, then decide what needs to be configurable. Lives in the API — not the frontend. Do not put regex in the React app.
+1. **`clean_transcript(raw: str) -> str`** (complete) — minimal cleanup function in `apps/api/services/cleanup.py`. The `/transcribe` response returns both `raw` and `cleaned` fields with a side-by-side comparison view in the frontend. **Evaluation finding (2026-04-03):** Whisper large-v3 already handles punctuation, capitalization, and filler suppression on short clean audio. The full rule set (punctuation spacing, duplicate removal, post-sentence capitalization) solved problems that don't exist for this use case. Function stripped to two rules: whitespace normalization and first-letter capitalization. VAD filtering (`vad_filter=True`) enabled for hallucination prevention. A second cleanup model (LLM or GEC) was evaluated and rejected — the risk of mangling technical content outweighs the marginal quality gain over Whisper's native output.
 
-2. **Extend state machine diagram** — update `docs/v1/presentation/main.tex` state machine to cover any new states introduced by the cleanup toggle or settings before writing component code. Principal's instruction: diagram first, then code.
+2. **Extend state machine diagram** — update `docs/v1/presentation/main.tex` state machine to cover any new states introduced by settings before writing component code. Principal's instruction: diagram first, then code.
 
-3. **Settings UI** — separate work item; comes after the cleanup pass is validated.
+3. **Settings UI** — separate work item; comes after cleanup evaluation is complete.
 
-4. **Retention controls** — separate work item; comes after cleanup. Do not bundle with item 1.
+4. **Retention controls** — separate work item; comes after settings UI. Do not bundle with earlier items.
 
-A second GPU-backed model is deferred unless there is demonstrated need.
+A second GPU-backed model for cleanup is deferred — evaluated and found unnecessary for this use case. Revisit only if Whisper output quality degrades on longer recordings or non-English dictation.
 
 ### v2
 
