@@ -15,7 +15,7 @@ export function App() {
 
     try {
       const result = await transcribeAudio(blob);
-      setTranscript(result.text);
+      setTranscript(result.cleaned);
       setState("done");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Transcription failed";

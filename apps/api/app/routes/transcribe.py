@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.config import settings
 from app.schemas import ErrorResponse, TranscribeResponse
+from app.services.cleanup import clean_transcript
 from app.services.transcription import transcribe_audio
 
 log = structlog.get_logger()
@@ -148,8 +149,10 @@ async def transcribe(
             log.error("transcription failed", error=str(e))
             raise HTTPException(status_code=500, detail="Transcription failed")
 
+        raw_text = result["text"]
         return TranscribeResponse(
-            text=result["text"],
+            raw=raw_text,
+            cleaned=clean_transcript(raw_text),
             language=result["language"],
             duration=result["duration"],
             processing_mode=settings.DEVICE,

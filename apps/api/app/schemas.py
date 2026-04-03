@@ -9,7 +9,8 @@ class HealthResponse(BaseModel):
 
 
 class TranscribeResponse(BaseModel):
-    text: str
+    raw: str
+    cleaned: str
     language: str
     duration: float
     processing_mode: str

@@ -88,7 +88,8 @@ def test_transcribe_happy_path(mock_settings, mock_subprocess, mock_duration, mo
     assert response.status_code == 200
 
     data = response.json()
-    assert data["text"] == "hello world"
+    assert data["raw"] == "hello world"
+    assert data["cleaned"] == "Hello world"
     assert data["language"] == "en"
     assert data["duration"] == 3.5
     assert data["processing_mode"] == "cpu"

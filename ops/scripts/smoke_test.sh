@@ -66,10 +66,10 @@ if [ -n "$AUDIO_FILE" ]; then
         fail "/transcribe returned HTTP ${HTTP_CODE}: ${BODY}"
     fi
 
-    if echo "$BODY" | grep -q '"text"'; then
-        pass "/transcribe returns 200 with transcript text"
+    if echo "$BODY" | grep -q '"cleaned"'; then
+        pass "/transcribe returns 200 with cleaned transcript"
     else
-        fail "/transcribe returned 200 but no text field: ${BODY}"
+        fail "/transcribe returned 200 but no cleaned field: ${BODY}"
     fi
 else
     echo ""

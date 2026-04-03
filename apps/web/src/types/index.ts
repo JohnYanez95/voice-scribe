@@ -1,7 +1,8 @@
 export type RecordingState = "idle" | "recording" | "processing" | "done" | "error";
 
 export interface TranscribeResponse {
-  text: string;
+  raw: string;
+  cleaned: string;
   language: string;
   duration: number;
   processing_mode: string;
