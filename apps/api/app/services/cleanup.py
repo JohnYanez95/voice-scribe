@@ -2,38 +2,22 @@ import re
 
 
 def clean_transcript(raw: str) -> str:
-    """Rule-based transcript cleanup.
+    """Minimal transcript cleanup.
 
-    Applies whitespace normalization, punctuation spacing, repeated-word
-    removal, and sentence capitalization. Pure function — no logging,
-    no side effects, no config.
+    Whisper large-v3 handles punctuation, capitalization, and filler
+    suppression well on short clean audio. This function applies only
+    the two rules that address real segment-joining artifacts.
     """
     if not raw or not raw.strip():
         return ""
 
     text = raw
 
-    # 1. Collapse all whitespace runs into a single space
+    # 1. Collapse whitespace runs from segment joining
     text = re.sub(r"\s+", " ", text).strip()
 
-    # 2. Remove space before punctuation
-    text = re.sub(r"\s+([.,!?:;])", r"\1", text)
-
-    # 3. Ensure space after non-period punctuation. Periods are excluded
-    #    because inserting space splits filenames (image.png), domains
-    #    (example.com), and abbreviations (U.S.A.)
-    text = re.sub(r"([,!?:;])([^\s.,!?:;])", r"\1 \2", text)
-
-    # 4. Remove consecutive duplicate words (case-insensitive, keep first)
-    text = re.sub(r"\b(\w+)(\s+\1)+\b", r"\1", text, flags=re.IGNORECASE)
-
-    # 5. Capitalize first character
+    # 2. Capitalize first character (segment joining can lowercase it)
     if text:
         text = text[0].upper() + text[1:]
-
-    # 6. Capitalize after sentence-ending punctuation followed by whitespace
-    text = re.sub(
-        r"([.!?]\s+)(\w)", lambda m: m.group(1) + m.group(2).upper(), text
-    )
 
     return text

@@ -25,81 +25,31 @@ class TestWhitespaceNormalization:
         assert clean_transcript("hello\t\nworld") == "Hello world"
 
 
-class TestRepeatedWordRemoval:
-    def test_removes_consecutive_duplicate(self):
-        assert clean_transcript("the the dog") == "The dog"
-
-    def test_case_insensitive_match(self):
-        assert clean_transcript("The the dog") == "The dog"
-
-    def test_multiple_duplicates(self):
-        assert clean_transcript("I I think think so") == "I think so"
-
-    def test_does_not_remove_non_adjacent(self):
-        assert clean_transcript("the dog and the cat") == "The dog and the cat"
-
-    def test_does_not_collapse_substrings(self):
-        assert clean_transcript("the there") == "The there"
-
-
-class TestPunctuation:
-    def test_removes_space_before_period(self):
-        assert clean_transcript("hello . world") == "Hello. World"
-
-    def test_removes_space_before_comma(self):
-        assert clean_transcript("hello , world") == "Hello, world"
-
-    def test_does_not_split_dotted_words(self):
-        assert clean_transcript("hello.world") == "Hello.world"
-
-    def test_preserves_trailing_period(self):
-        assert clean_transcript("hello world.") == "Hello world."
-
-
 class TestCapitalization:
     def test_capitalizes_first_character(self):
         assert clean_transcript("hello") == "Hello"
 
-    def test_capitalizes_after_period(self):
-        assert clean_transcript("hello. world") == "Hello. World"
-
-    def test_capitalizes_after_exclamation(self):
-        assert clean_transcript("wow! great") == "Wow! Great"
-
-    def test_capitalizes_after_question(self):
-        assert clean_transcript("what? really") == "What? Really"
-
     def test_already_capitalized_unchanged(self):
         assert clean_transcript("Hello world") == "Hello world"
 
-
-class TestFilenamesAndDotNotation:
-    def test_preserves_filename(self):
-        assert clean_transcript("image.png") == "Image.png"
-
-    def test_preserves_filename_in_sentence(self):
-        assert clean_transcript("check the image.png file") == "Check the image.png file"
-
-    def test_preserves_domain(self):
-        assert clean_transcript("visit example.com today") == "Visit example.com today"
-
-    def test_preserves_extension_mid_sentence(self):
-        assert clean_transcript("the file test.mp3 is here") == "The file test.mp3 is here"
-
-    def test_real_sentence_ending_still_works(self):
-        assert clean_transcript("hello world. goodbye world") == "Hello world. Goodbye world"
-
-
-class TestCombined:
-    def test_multiple_rules(self):
-        result = clean_transcript("  the the  hello .  world  ")
-        assert result == "The hello. World"
-
-    def test_already_clean(self):
-        assert clean_transcript("Hello world.") == "Hello world."
-
     def test_single_word(self):
         assert clean_transcript("hello") == "Hello"
+
+
+class TestPassthrough:
+    """Whisper output that is already clean should pass through unchanged."""
+
+    def test_clean_sentence(self):
+        assert clean_transcript("Hello world.") == "Hello world."
+
+    def test_preserves_punctuation(self):
+        assert clean_transcript("What? Really! Yes.") == "What? Really! Yes."
+
+    def test_preserves_filename(self):
+        assert clean_transcript("Check the image.png file") == "Check the image.png file"
+
+    def test_preserves_url(self):
+        assert clean_transcript("Visit example.com today") == "Visit example.com today"
 
 
 class TestIdempotency:
@@ -107,15 +57,12 @@ class TestIdempotency:
         "text",
         [
             "hello world",
-            "the the dog",
-            "  hello .  world  ",
+            "  hello   world  ",
             "What? Really! Yes.",
-            "I I think think so",
-            "hello,world.foo",
-            "A single word",
+            "Already clean sentence.",
+            "Check image.png now",
             "",
             "   ",
-            "Already clean sentence.",
         ],
     )
     def test_idempotent(self, text):
