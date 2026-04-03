@@ -423,3 +423,33 @@ Do not publish with: permissive network exposure, transcript or audio logging en
 ## Summary
 
 Ship v1 small. Earn the right to make it bigger.
+
+---
+
+## Ideas (Post-v2 Parking Lot)
+
+Not planned. Not scoped. These surfaced naturally while building and are worth remembering when the time is right.
+
+**Docker image size reduction**
+The `nvidia/cuda:12.6` base accounts for ~2.1GB of the image on its own. Several CUDA packages installed in that layer — `libnccl` (multi-GPU communication), `libnpp` (signal/image processing) — are not used by faster-whisper for single-GPU inference. Auditing and trimming these could meaningfully reduce image size. Requires rebuilding and running the smoke test to confirm nothing breaks.
+
+**MIME magic-byte validation**
+Currently MIME type is checked from the `Content-Type` header, which is self-reported. Adding magic-byte checking (reading the first few bytes of the file and confirming they match the declared format) would be a one-line addition to the existing `validate_mime_type` function. Natural pre-condition before any networking work — not needed for a localhost single-user tool.
+
+**Security hardening as a v2 pre-condition**
+Before anything leaves localhost — any network exposure, multi-user path, or public API — the threat model should be revisited. MIME hardening, rate limiting, and bind address controls are the obvious starting points.
+
+**Model selection UI**
+`WHISPER_MODEL` is currently set via `.env`. A simple settings panel letting the user toggle between `large-v3` and `small` without editing files would be a natural quality-of-life addition once v1.1's settings UI exists.
+
+**Voice activity detection (VAD) for automatic utterance boundaries**
+Rather than manual record/stop, a lightweight VAD layer upstream of the recorder could detect when speech begins and ends automatically — removing the button interaction entirely. A simple dB threshold gate handles the easy cases (silence vs. speech). A lightweight learned VAD like Silero VAD handles harder cases (keyboard noise, background audio). Pairs naturally with streaming partials and smarter silence detection already noted in v2. Simpler version of the idle filtering pattern used in the work project — single speaker, controlled environment, no device disambiguation required.
+
+**Streaming partials**
+Faster-whisper supports segment-by-segment output. Surfacing partial transcripts as they arrive rather than waiting for the full result would make long recordings feel more responsive. Requires WebSocket transport and changes the API contract — firmly a post-v2 consideration.
+
+**Single `docker compose up` for full stack**
+Currently `docker compose up` only starts the API container — the frontend requires a separate `make web` invocation. Adding the frontend as a second service in `compose.dev.yml` with a Node container running Vite (`--host` flag required so it binds to `0.0.0.0`) would mean one command starts and stops everything together. Small change, meaningful quality of life improvement once the core product is finalized.
+
+**CPU-only deployment path**
+The CPU fallback is already wired (`DEVICE=cpu`, `int8` compute type auto-selected) but has not been exercised end-to-end. For use on machines without a GPU — such as a work laptop — the Docker container dependency becomes friction since CUDA is the primary reason the container exists. Worth exploring whether CPU inference could run outside Docker entirely, potentially accelerating the v2 Tauri packaging work. `large-v3` on CPU will be slow; `small` is the practical model choice for this path.

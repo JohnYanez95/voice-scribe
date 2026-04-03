@@ -1,0 +1,32 @@
+\frametitle{Workflow \& Tooling}
+\small
+    \textbf{Development environment:}
+    WSL2 Linux filesystem, VS Code with WSL extension,
+    Docker Desktop with WSL2 backend, Chrome for testing.
+
+    \vspace{0.3em}
+    \textbf{Makefile targets:}
+    \vspace{0.1em}
+
+    \begin{table}
+    \centering
+    \small
+    \begin{tabular}{ll}
+        \toprule
+        \textbf{Command} & \textbf{Purpose} \\
+        \midrule
+        \texttt{make dev}       & Start API container + frontend dev server \\
+        \texttt{make build}     & Build the API Docker image \\
+        \texttt{make test}      & Run all tests (pytest + vitest) \\
+        \texttt{make gpu-check} & Verify GPU/Docker readiness \\
+        \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \vspace{0.3em}
+    \textbf{Smoke test} (fastest full-stack feedback loop):
+    \begin{lstlisting}[language=bash]
+bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
+    \end{lstlisting}
+    Tests \texttt{GET /health} and \texttt{POST /transcribe} against the
+    running API with a real audio file.

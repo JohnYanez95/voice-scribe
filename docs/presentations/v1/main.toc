@@ -1,0 +1,8 @@
+\beamer@sectionintoc {1}{Motivation}{3}{0}{1}
+\beamer@sectionintoc {2}{Architecture}{5}{0}{2}
+\beamer@sectionintoc {3}{Container Strategy}{10}{0}{3}
+\beamer@sectionintoc {4}{Audio Pipeline}{15}{0}{4}
+\beamer@sectionintoc {5}{Frontend}{20}{0}{5}
+\beamer@sectionintoc {6}{Security}{24}{0}{6}
+\beamer@sectionintoc {7}{Development}{28}{0}{7}
+\beamer@sectionintoc {8}{Roadmap}{30}{0}{8}
