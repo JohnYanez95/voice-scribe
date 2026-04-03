@@ -391,9 +391,11 @@ Work items in strict priority order:
 
 1. **`clean_transcript(raw: str) -> str`** — single pure function in `apps/api/services/`. Rule-based only: whitespace normalization, punctuation, capitalization, repeated-word removal. No config, no toggles, no settings UI. The `/transcribe` response JSON returns both `raw` and `cleaned` fields for side-by-side quality evaluation. Ship it, run against real dictation for one week, then decide what needs to be configurable. Lives in the API — not the frontend. Do not put regex in the React app.
 
-2. **Settings UI** — separate work item; comes after the cleanup pass is validated.
+2. **Extend state machine diagram** — update `docs/v1/presentation/main.tex` state machine to cover any new states introduced by the cleanup toggle or settings before writing component code. Principal's instruction: diagram first, then code.
 
-3. **Retention controls** — separate work item; comes after cleanup. Do not bundle with item 1.
+3. **Settings UI** — separate work item; comes after the cleanup pass is validated.
+
+4. **Retention controls** — separate work item; comes after cleanup. Do not bundle with item 1.
 
 A second GPU-backed model is deferred unless there is demonstrated need.
 

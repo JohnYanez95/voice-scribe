@@ -405,6 +405,9 @@
         lbl/.style={font=\tiny, text=gray},
     ]
         \node[hw]   (gpu)    {NVIDIA GPU (hardware)};
+        % TODO: replace v591+ with the specific driver version validated by the team
+        %       and append the validation date, e.g. {Windows NVIDIA Driver (v591.43, validated 2026-MM-DD)}
+        %       Principal's note: "591+ will mean something different six months from now."
         \node[os,   below=of gpu]   (driver) {Windows NVIDIA Driver (v591+)};
         \node[os,   below=of driver](wsl)    {WSL2 Kernel (GPU bridge)};
         \node[dock, below=of wsl]   (docker) {Docker Desktop (WSL2 backend)};
@@ -660,6 +663,7 @@
                 \item Compute type: \texttt{float16}
                 \item Beam size: 5
                 \item Fallback: \texttt{small} on CPU, \texttt{int8}
+                      {\scriptsize\textit{(wired; end-to-end smoke test pending)}}
             \end{itemize}
         \end{column}
         \begin{column}{0.48\textwidth}

@@ -229,3 +229,27 @@ The pre-kickoff design review surfaced risks that all landed as solved problems 
 **Principal:** *"The team internalized the constraints as engineering standards, not as a checklist to satisfy. That's the part that matters most."*
 
 **Senior:** *"The pre-kickoff concerns that were raised — temp file handling, CORS variants, cache persistence, codec negotiation — all landed as solved problems in the delivery report. That's the outcome a design review is supposed to produce."*
+
+### Presentation Feedback — Principal (April 3, 2026)
+
+> *"The slide deck isn't just documentation — it's a thinking artifact. The fact that every architectural decision has a corresponding diagram that matches the delivery report tells me the team understood the system at the level they needed to before writing code."*
+
+**Specific callouts:**
+
+- **Privacy data flow diagram** — identified as the single most useful slide. Traces every piece of sensitive data from creation to deletion with color-coded sensitivity levels and an explicit deletion point. Keep this diagram updated as the system evolves; it rots fast once people stop maintaining it.
+- **State machine diagram** — clean and correct. Five states, deterministic transitions, both terminal states loop back to idle. When v1.1 adds settings or cleanup toggles, extend this diagram *before* writing the component code.
+- **GPU passthrough slide** — the `v591+` driver callout is useful specificity, but should be pinned to the version actually validated against with a validation date. "v591+" will mean something different six months from now.
+- **Deck structure** — the progression from principles → architecture → pipeline → security reads like a proof; each section builds on the prior one with no circular dependencies.
+
+**Standing instruction:** Keep the deck in the repo. It's a better onboarding document than most READMEs.
+
+### Presentation Feedback — PM (April 3, 2026)
+
+> *"This is unusually rigorous for a v1 internal presentation. The TikZ diagrams aren't decoration — they're specifications that happen to be visual."*
+
+**Specific callouts:**
+
+- **Request lifecycle diagram** — does double duty as an error budget map. The color-coded stages (validation → processing → cleanup) with annotated limits (10 MB, 30 s timeout, 60 s audio) let anyone trace where a failure will be caught without reading prose. The kind of diagram that saves a debugging session six months from now.
+- **Model caching diagram** — the "first run only" dashed arrow from HuggingFace versus the persistent bidirectional volume mount makes the expected behavior unambiguous. The senior called out cache permission issues as a real setup risk; this diagram retires that ambiguity.
+- **Driver version pin** — same note as the principal: `v591+` will age poorly. Update to `v591+ (validated against vXXX on YYYY-MM-DD)` before the deck is used for onboarding.
+- **CPU path gap in the deck** — the delivery report lists CPU as a known limitation (wired, untested). If the deck is the onboarding document, it should say so. A single bullet on the inference slide noting the fallback is unvalidated prevents a new contributor from assuming it's production-ready. *(Addressed: bullet added to inference slide.)*

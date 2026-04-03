@@ -71,6 +71,13 @@ These patterns are non-negotiable in this codebase:
 
 **Request limits** — 60s max audio, 10MB max upload, one file per request.
 
+## Presentation Maintenance
+
+`docs/v1/presentation/main.tex` is a living onboarding document, not a snapshot. Two diagrams require active maintenance:
+
+- **Privacy data flow diagram** — must stay in sync with any change to how audio or transcript data moves through the system (new storage, new endpoints, retention changes). Principal's instruction: "it rots fast once people stop maintaining it."
+- **State machine diagram** — must be updated *before* writing component code whenever v1.1+ adds UI states (settings toggle, cleanup mode, etc.). Diagram first, then code.
+
 ## Scope
 
 v1 is intentionally narrow: record one utterance, transcribe locally, display in editable textarea, copy to clipboard. Do not add streaming, continuous dictation, async queues, background workers, or reverse proxy. The roadmap (`roadmap.md`) is the source of truth for scope decisions.
