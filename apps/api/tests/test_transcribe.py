@@ -1,4 +1,5 @@
 import io
+import subprocess
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -60,3 +61,35 @@ def test_strips_codec_params_from_mime():
 
     result = validate_mime_type("audio/webm;codecs=opus")
     assert result == "audio/webm"
+
+
+@patch("app.routes.transcribe.transcribe_audio")
+@patch("app.routes.transcribe.get_wav_duration")
+@patch("app.routes.transcribe.subprocess.run")
+@patch("app.routes.transcribe.settings")
+def test_transcribe_happy_path(mock_settings, mock_subprocess, mock_duration, mock_transcribe):
+    mock_settings.max_upload_bytes = 10 * 1024 * 1024
+    mock_settings.MAX_UPLOAD_MB = 10
+    mock_settings.MAX_AUDIO_SECONDS = 60
+    mock_settings.TEMP_DIR = "/tmp"
+    mock_settings.DEVICE = "cpu"
+    mock_settings.WHISPER_MODEL = "small"
+
+    mock_subprocess.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+    mock_duration.return_value = 3.5
+    mock_transcribe.return_value = {
+        "text": "hello world",
+        "language": "en",
+        "duration": 3.5,
+    }
+
+    file = _make_audio_file()
+    response = client.post("/transcribe", files=[file])
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["text"] == "hello world"
+    assert data["language"] == "en"
+    assert data["duration"] == 3.5
+    assert data["processing_mode"] == "cpu"
+    assert data["model_name"] == "small"
