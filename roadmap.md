@@ -259,9 +259,10 @@ voice-scribe/
 │  └─ cache/                        # Model weights cache, gitignored
 │
 ├─ docs/
-│  ├─ presentations/
-│  │  └─ v1/
-│  │     ├─ main.tex                    # Beamer slide deck
+│  ├─ v1/                               # All versioned artifacts for v1
+│  │  ├─ delivery-report.md             # v1 delivery report and PM feedback
+│  │  └─ presentation/                  # Beamer slide deck
+│  │     ├─ main.tex
 │  │     └─ main.pdf
 │  ├─ architecture.md
 │  ├─ gpu-setup.md
