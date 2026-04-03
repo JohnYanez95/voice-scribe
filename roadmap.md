@@ -1,7 +1,7 @@
 # Voice Scribe — v1 Roadmap
 
-**Last Updated:** April 2, 2026
-**Status:** Approved — ready for execution
+**Last Updated:** April 3, 2026
+**Status:** v1 Complete
 
 ---
 
@@ -120,7 +120,7 @@ Error codes: `400` (unsupported MIME), `413` (too large), `422` (malformed reque
 
 The browser `MediaRecorder` produces `webm/opus`. Transcoding happens server-side, not in the frontend.
 
-Accepted inputs: `audio/webm`, `audio/ogg`, `audio/wav`, `audio/mp4`.
+Accepted inputs: `audio/webm`, `audio/ogg`, `audio/wav`, `audio/x-wav`, `audio/mp4`, `audio/mpeg`.
 
 Normalized internal format: mono 16kHz WAV via `ffmpeg`.
 
@@ -259,6 +259,10 @@ voice-scribe/
 │  └─ cache/                        # Model weights cache, gitignored
 │
 ├─ docs/
+│  ├─ presentations/
+│  │  └─ v1/
+│  │     ├─ main.tex                    # Beamer slide deck
+│  │     └─ main.pdf
 │  ├─ architecture.md
 │  ├─ gpu-setup.md
 │  ├─ privacy.md
@@ -272,6 +276,7 @@ voice-scribe/
 │
 ├─ .env.example
 ├─ .gitignore
+├─ CLAUDE.md
 ├─ Makefile
 ├─ README.md
 └─ LICENSE
@@ -372,7 +377,7 @@ Model weights are not baked into the container image. They download on first run
 
 ## Milestones
 
-### v1 (this roadmap)
+### v1 (complete)
 
 Record audio, send to local API, transcode, transcribe, return transcript, display in editable text area, copy to clipboard. GPU and CPU execution modes.
 

@@ -33,3 +33,17 @@ coverage/
 htmlcov/
 .coverage
 .pytest_cache/
+
+# LaTeX auxiliary files
+*.aux
+*.log
+*.out
+*.toc
+*.nav
+*.snm
+*.vrb
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
