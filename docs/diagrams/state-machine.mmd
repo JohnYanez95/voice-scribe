@@ -1,0 +1,31 @@
+stateDiagram-v2
+    direction LR
+
+    [*] --> idle
+
+    idle --> recording : record\n(hotkey / button)
+    recording --> processing : stop\n(hotkey / button)
+    processing --> done : 200 OK
+    processing --> error : error
+
+    done --> idle : record
+    error --> idle : record
+
+    idle --> settings : open settings\n(gear / hotkey)
+    done --> settings : open settings
+    error --> settings : open settings
+    settings --> idle : close settings
+
+    note right of settings
+        Settings is an overlay panel,
+        not a pipeline state.
+        Recording controls are
+        inaccessible while open.
+        settingsOpen: boolean
+        (orthogonal to RecordingState)
+    end note
+
+    note right of recording
+        Settings not accessible
+        during recording or processing
+    end note
