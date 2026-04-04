@@ -77,5 +77,22 @@ else
     echo "  Usage: $0 <path-to-audio-file>"
 fi
 
+# Test 3: Model list endpoint
+echo ""
+echo "Testing GET /models..."
+MODELS=$(curl -s -w "\n%{http_code}" "${API_URL}/models")
+HTTP_CODE=$(echo "$MODELS" | tail -1)
+BODY=$(echo "$MODELS" | head -n -1)
+
+if [ "$HTTP_CODE" != "200" ]; then
+    fail "/models returned HTTP ${HTTP_CODE}"
+fi
+
+if echo "$BODY" | grep -q '"current_model"'; then
+    pass "/models returns 200 with current_model"
+else
+    fail "/models returned 200 but no current_model field: ${BODY}"
+fi
+
 echo ""
 echo -e "${GREEN}Smoke test passed.${NC}"

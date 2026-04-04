@@ -405,13 +405,12 @@ Build on the web app first. Prove the interaction patterns in the browser before
 
 Broken into sequenced sub-milestones. Each builds on the prior one.
 
-#### v2.0 — Hotkeys + Settings Panel
+#### v2.0 — Hotkeys + Settings Panel (complete, 2026-04-04)
 
-No API contract change. Immediately useful. Low risk.
-
-- **Hotkey system** — dedicated keyboard shortcuts for start/stop recording, copy transcript, reset/clear. Works when app is focused. Global hotkeys (system-wide) are a v3/Tauri feature.
-- **Settings panel** — first real content: model selection (swap between `large-v3`, `small`, etc. without editing `.env`). Model selection alone justifies the panel — it's a genuine quality-of-life improvement for a single-user dev tool. Recording mode toggle (push-to-talk vs continuous) lands in v2.2 when continuous mode ships. Additional settings (VAD sensitivity, voice command phrases) land in later sub-milestones as their features are ready.
-- **State machine diagram** — update to cover settings panel states before writing component code. Principal's standing instruction: diagram first, then code.
+- **Hotkey system** — `Ctrl+Shift+Space` (record), `Ctrl+Shift+Y` (copy), `Ctrl+Shift+X` (clear), `Ctrl+Shift+S` (settings). Bindings chosen to avoid Chrome built-in conflicts. Record hotkey is a no-op while settings panel is open.
+- **Settings panel** — model selection: swap between models declared in `WHISPER_AVAILABLE_MODELS` at runtime. Backend: `GET /models`, `POST /models/swap` with threading lock and VRAM cleanup. Swap endpoint is regular `def` (not `async def`) to keep the event loop alive. Frontend: slide-out panel with loading/success/error states, record button disabled during swap. Fetch failure shows error with retry.
+- **State machine diagram** — updated in v2 Beamer deck. Settings is an orthogonal `settingsOpen: boolean`, not a sixth `RecordingState` value. Migrated to Mermaid; TikZ retained for spatial/precision diagrams.
+- **Recorder refactor** — `useRecorder` lifted from Recorder to App for hotkey access. Recorder simplified to presentational component.
 
 #### v2.1 — Streaming + VAD
 

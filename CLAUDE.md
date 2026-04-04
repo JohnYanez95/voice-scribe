@@ -6,15 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech in a browser UI, a GPU-accelerated containerized backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and clipboard copy. No cloud services are involved.
 
-**Current milestone:** v1.1 Complete — v2 planning in progress.
+**Current milestone:** v2.0 Complete — v2.1 next.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5173) + FastAPI backend (Docker, port 8000) over localhost HTTP
 - v1/v1.1: single-user, single-utterance, synchronous. v2 introduces streaming (WebSocket), VAD, and continuous recording mode
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- v1.1 delivered: minimal `clean_transcript` (whitespace + capitalization only — Whisper output needs minimal cleanup), VAD filtering enabled, `raw`+`cleaned` response fields with comparison view
-- v2 sequence: v2.0 (hotkeys + settings with model selection) → v2.1 (streaming + VAD) → v2.2 (continuous mode) → v2.3 (voice commands)
+- v2.0 delivered: hotkey system (Ctrl+Shift+Space/Y/X/S), settings panel with runtime model selection (GET /models, POST /models/swap), thread-safe model reload with VRAM cleanup
+- v2 sequence: ~~v2.0 (hotkeys + settings)~~ → v2.1 (streaming + VAD) → v2.2 (continuous mode) → v2.3 (voice commands)
 
 **Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
 
@@ -57,9 +57,10 @@ Request flow: `Browser MediaRecorder (webm/opus)` → `POST /transcribe (multipa
 
 ### Key backend files
 - `app/main.py` — FastAPI app, CORS, lifespan (model loading)
-- `app/config.py` — Settings from environment variables
+- `app/config.py` — Settings from environment variables (incl. WHISPER_AVAILABLE_MODELS)
 - `app/routes/transcribe.py` — Upload handling, MIME validation, ffmpeg, temp cleanup
-- `app/services/transcription.py` — Model singleton, inference wrapper
+- `app/routes/models.py` — Model list and runtime swap endpoints (v2.0)
+- `app/services/transcription.py` — Model singleton with threading lock, swap logic, inference wrapper
 
 ### Key frontend files
 - `src/app/App.tsx` — State management, orchestrates recorder → API → transcript
