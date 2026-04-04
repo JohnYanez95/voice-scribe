@@ -94,5 +94,42 @@ else
     fail "/models returned 200 but no current_model field: ${BODY}"
 fi
 
+# Capture startup model for swap-back
+STARTUP_MODEL=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['current_model'])")
+
+# Test 4: Model swap endpoint (swap to small, then back)
+echo ""
+echo "Testing POST /models/swap..."
+SWAP=$(curl -s -w "\n%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"model_name":"small"}' \
+    "${API_URL}/models/swap")
+HTTP_CODE=$(echo "$SWAP" | tail -1)
+BODY=$(echo "$SWAP" | head -n -1)
+
+if [ "$HTTP_CODE" != "200" ]; then
+    fail "/models/swap returned HTTP ${HTTP_CODE}: ${BODY}"
+fi
+
+if echo "$BODY" | grep -q '"current_model":"small"'; then
+    pass "/models/swap to small succeeded"
+else
+    fail "/models/swap did not set current_model to small: ${BODY}"
+fi
+
+# Swap back to startup model
+echo "Swapping back to ${STARTUP_MODEL}..."
+SWAP_BACK=$(curl -s -w "\n%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d "{\"model_name\":\"${STARTUP_MODEL}\"}" \
+    "${API_URL}/models/swap")
+HTTP_CODE=$(echo "$SWAP_BACK" | tail -1)
+
+if [ "$HTTP_CODE" != "200" ]; then
+    fail "/models/swap back to ${STARTUP_MODEL} returned HTTP ${HTTP_CODE}"
+fi
+
+pass "/models/swap back to ${STARTUP_MODEL} succeeded"
+
 echo ""
 echo -e "${GREEN}Smoke test passed.${NC}"

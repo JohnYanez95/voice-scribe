@@ -65,6 +65,8 @@ Request flow: `Browser MediaRecorder (webm/opus)` → `POST /transcribe (multipa
 ### Key frontend files
 - `src/app/App.tsx` — State management, orchestrates recorder → API → transcript
 - `src/hooks/useRecorder.ts` — MediaRecorder with explicit webm/opus codec request
+- `src/hooks/useHotkeys.ts` — Ctrl+Shift keyboard shortcuts at App level (v2.0)
+- `src/features/settings/Settings.tsx` — Settings panel with model selection (v2.0)
 - `src/services/api.ts` — Typed fetch calls to localhost:8000
 
 ### Ops
