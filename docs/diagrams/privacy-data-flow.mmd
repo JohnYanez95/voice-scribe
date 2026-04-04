@@ -2,7 +2,8 @@ flowchart TD
     mic["Microphone audio"]
     blob["Audio blob"]
 
-    mic --> blob
+    mic --> vad["VAD (browser)<br/>silence discarded"]
+    vad --> blob
     blob --> http["HTTP POST"]
     blob --> wsIn["WebSocket binary"]
 
@@ -27,6 +28,6 @@ flowchart TD
     classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
 
     class mic,blob sensitive
-    class http,wsIn,tmp1,tmp2 ephemeral
+    class vad,http,wsIn,tmp1,tmp2 ephemeral
     class txt,resp,wsOut,area,clip output
     class del deleted

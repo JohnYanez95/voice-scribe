@@ -3,6 +3,7 @@ flowchart TB
 
     subgraph Hooks ["Hooks"]
         useRecorder["useRecorder"]
+        useVAD["useVAD"]
         useHotkeys["useHotkeys"]
     end
 
@@ -17,6 +18,7 @@ flowchart TB
     end
 
     App --> useRecorder
+    App --> useVAD
     App --> useHotkeys
     App -->|"props"| Recorder
     App --> Settings
@@ -24,10 +26,12 @@ flowchart TB
     App --> api
 
     useRecorder -.->|"MediaRecorder API"| mic(["Browser"])
+    useVAD -.->|"VAD / MediaStream"| mic
     api -.->|"localhost:8000"| backend(["Backend"])
 
     style App         fill:#ddeeff,stroke:#5588bb,color:#333
     style useRecorder fill:#ffdddd,stroke:#cc4444,color:#333
+    style useVAD      fill:#ffdddd,stroke:#cc4444,color:#333
     style useHotkeys  fill:#ddeeff,stroke:#5588bb,color:#333
     style Recorder    fill:#ddf5dd,stroke:#448844,color:#333
     style Settings    fill:#ede8ff,stroke:#7755aa,color:#333
