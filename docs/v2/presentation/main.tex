@@ -716,9 +716,13 @@
     \end{center}
 
     \vspace{0.2em}
-    {\scriptsize \textcolor{blue!60}{Blue} = container (state owner),
-    \textcolor{green!50!black}{Green} = presentational (stateless),
-    \textcolor{orange!70}{Orange} = services / hooks (side effects).
+    {\scriptsize
+    \textcolor{blue!50!black}{Blue} = state owner / wiring (App, useHotkeys) \quad
+    \textcolor{red!60!black}{Red} = active-mic hooks (useRecorder, useVAD) \quad
+    \textcolor{green!50!black}{Green} = presentational components \quad
+    \textcolor{violet!60!black}{Lavender} = settings overlay \quad
+    \textcolor{orange!70!black}{Yellow} = service layer (api.ts) \quad
+    \textcolor{gray}{Gray} = external systems.
     Dashed arrows = external system boundaries.}
 \end{frame}
 
