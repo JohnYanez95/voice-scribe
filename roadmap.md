@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
 **Last Updated:** April 4, 2026
-**Status:** v2.1 Complete — v2.2 next
+**Status:** v2.2 Complete — v2.3 next
 
 ---
 
@@ -427,7 +427,7 @@ One milestone, one API contract change. The biggest architectural change in the 
 - **State machine diagram** — updated before any streaming component code is written, per project discipline. New user-visible states at minimum: WebSocket connecting (post-stop, pre-first-segment, independent failure mode from inference) and segments-receiving (partial transcript visible, no spinner). Whether these become new `RecordingState` enum values or named sub-states within `processing` is the diagram's decision to make — not the implementation's.
 - **VAD** — `vad_filter=True` is already active and complete for push-to-talk. Silero VAD runs inside `model.transcribe()`, identifies speech windows on CPU, and prevents the Whisper encoder/decoder from touching silence. No new server-side VAD code is required for v2.1. Client-side VAD (browser-side, required for continuous mode) remains the v2.2 pre-condition.
 
-#### v2.2 — Continuous Mode + Segmentation
+#### v2.2 — Continuous Mode + Segmentation (complete, 2026-04-04)
 
 Builds on v2.1 streaming and VAD.
 

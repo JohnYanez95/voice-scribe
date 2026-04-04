@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech in a browser UI, a GPU-accelerated containerized backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and clipboard copy. No cloud services are involved.
 
-**Current milestone:** v2.1 Complete — v2.2 next.
+**Current milestone:** v2.2 Complete — v2.3 next.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5173) + FastAPI backend (Docker, port 8000) over localhost HTTP
@@ -14,7 +14,8 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
 - v2.0 delivered: hotkey system (Ctrl+Shift+Space/Y/X/S), settings panel with runtime model selection (GET /models, POST /models/swap), thread-safe model reload with VRAM cleanup
-- v2 sequence: ~~v2.0 (hotkeys + settings)~~ → v2.1 (streaming + VAD) → v2.2 (continuous mode) → v2.3 (voice commands)
+- v2.2 delivered: continuous recording mode, client-side VAD (@ricky0123/vad-web, Silero VAD v4), WAV encoder, drain-then-done, paragraph breaks, recording mode toggle in Settings
+- v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → v2.3 (voice commands)
 
 **Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
 
