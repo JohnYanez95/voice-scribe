@@ -58,7 +58,7 @@
         \item \textbf{Frontend} --- React component tree and state machine
         \item \textbf{Security} --- Threat model, privacy, operational telemetry
         \item \textbf{Development} --- Workflow, tooling, and testing
-        \item \textbf{Roadmap \& v2.0} --- Milestones, what's next, and what just shipped
+        \item \textbf{Roadmap, v2.0+} --- Milestones and what just shipped
     \end{itemize}
 \end{frame}
 
@@ -700,11 +700,11 @@
               presentational --- they receive props and emit callbacks
         \item \textbf{useRecorder} and \textbf{useHotkeys} are custom hooks
               consumed by App, keeping browser API complexity out of components
-        \item \textbf{api.ts} is a thin service layer --- typed \texttt{fetch()}
-              calls for transcription, model list, and model swap
+        \item \textbf{api.ts} is a thin service layer --- typed API calls
+              for transcription, model list, model swap, and WebSocket streaming
     \end{itemize}
 
-    \vspace{0.3em}
+    \vspace{0.1em}
     \rmk No routing, no global state library, no build-time
     environment variables. Complexity is earned.
 \end{frame}
@@ -724,41 +724,37 @@
 
 
 \begin{frame}{State Machine}
+    \small
     The UI has five recording pipeline states plus a settings overlay.
 
-    \vspace{0.4em}
+    \vspace{0.3em}
     \begin{itemize}\setlength{\itemsep}{1pt}
         \item \textbf{idle} --- Ready. Record button enabled.
-        \item \textbf{recording} --- Capturing audio. Button shows ``Stop'' (red).
-        \item \textbf{processing} --- Audio sent to API. Button disabled.
+        \item \textbf{recording} --- Capturing audio. Button shows ``Stop''.
+        \item \textbf{processing} --- Transcription in progress. Button disabled.
+              Two streaming sub-phases:
+              \textit{connecting} (WebSocket open, no segments yet --- spinner shown)
+              and \textit{receiving} (segments arriving --- partial transcript visible).
         \item \textbf{done} --- Transcript in editable textarea. Copy button visible.
         \item \textbf{error} --- Error message displayed. User can retry.
     \end{itemize}
 
-    \vspace{0.3em}
+    \vspace{0.25em}
     \textbf{Settings overlay} is orthogonal to the pipeline ---
     a separate \texttt{settingsOpen: boolean}, not a sixth state.
-    Accessible from idle, done, and error.
-    Not accessible during recording or processing.
-
-    \vspace{0.3em}
-    Every state transition is triggered by a user action or an
-    API response --- never by a timer or side effect.
-    Hotkeys (\texttt{Ctrl+Shift+<key>}) trigger the same transitions
-    as button clicks.
+    Accessible from idle, done, and error only.
+    Inaccessible during recording or processing.
 \end{frame}
 
 
 \begin{frame}{State Machine --- Diagram}
     \begin{center}
-    \includegraphics[width=\textwidth]{images/state-machine.png}
+    \includegraphics[height=0.72\textheight,keepaspectratio]{images/state-machine.png}
     \end{center}
 
-    \vspace{0.2em}
-    {\scriptsize The settings node is an overlay panel, not a pipeline state.
-    Recording controls are inaccessible while settings is open.
-    Both terminal states (done and error) loop back to idle on the next
-    record action. Settings is accessible from any rest state.}
+    {\scriptsize \texttt{RecordingState} enum is unchanged.
+    Sub-phases \textit{connecting} and \textit{receiving} are derived from
+    application state (\texttt{text} empty vs.\ non-empty), not new enum values.}
 \end{frame}
 
 
@@ -802,84 +798,39 @@
 
 \begin{frame}{Privacy --- Data Flow}
     \small
-    The privacy model is defined by what data exists where, and for how long.
-
-    \vspace{0.3em}
     \begin{itemize}\setlength{\itemsep}{2pt}
-        \item Audio exists in three places: browser memory (during recording),
-              HTTP transit (localhost only), and a temp file (seconds)
-        \item The transcript exists in two places: HTTP response (localhost only)
-              and the browser textarea (until page close)
-        \item \textbf{Nothing is persisted server-side} --- the API is stateless
-              between requests
-        \item Operational logs contain only durations, formats, and detected
-              language --- never content
+        \item Audio exists in three places: browser memory, localhost transit
+              (HTTP POST or WebSocket binary), and a temp file (seconds).
+              Both transports are localhost only.
+        \item Transcript exists in two places: localhost transit (JSON response
+              or WebSocket segment stream) and the browser textarea.
+              Retention is identical for both transport paths.
+        \item \textbf{Nothing is persisted server-side} --- API is stateless
+              between requests.
+        \item Logs contain only durations, formats, and detected language ---
+              never content.
     \end{itemize}
 
     \vspace{0.2em}
     \begin{block}{Network Boundary}
-        API binds to \texttt{localhost:8000}. CORS restricted to
-        \texttt{localhost:5173} and \texttt{127.0.0.1:5173}.
-        Zero external network traffic at any point.
+        \small
+        API binds to \texttt{localhost:8000}. CORS restricted to localhost origins.
+        WebSocket origin enforced in handler (CORS middleware does not cover WS).
+        Zero external network traffic.
     \end{block}
 \end{frame}
 
 
 \begin{frame}{Privacy --- Data Flow Diagram}
     \begin{center}
-    \begin{tikzpicture}[
-        node distance=0.4cm,
-        box/.style={draw, rounded corners=2pt, minimum width=2.6cm,
-                    minimum height=0.5cm, font=\scriptsize, align=center},
-        data/.style={box, fill=red!10},
-        ephemeral/.style={box, fill=yellow!12},
-        output/.style={box, fill=green!12},
-        dead/.style={box, fill=gray!15, text=gray},
-        arr/.style={-{Stealth[length=4pt]}, thick},
-        delarr/.style={-{Stealth[length=4pt]}, thick, red!60, dashed},
-        lbl/.style={font=\tiny, text=gray},
-    ]
-        % Audio path
-        \node[data]      (mic)   at (0, 0) {Microphone audio};
-        \node[data]      (blob)  at (0, -0.8) {Audio blob (memory)};
-        \node[ephemeral] (http)  at (0, -1.6) {HTTP POST (localhost)};
-        \node[ephemeral] (tmp1)  at (0, -2.4) {Temp file (input)};
-        \node[ephemeral] (tmp2)  at (0, -3.2) {Temp file (WAV)};
-        \node[dead]      (del)   at (0, -4.0) {Deleted (finally)};
-
-        % Transcript path
-        \node[output]    (text)  at (5.5, -2.4) {Transcript text};
-        \node[output]    (resp)  at (5.5, -1.6) {JSON response};
-        \node[output]    (area)  at (5.5, -0.8) {Editable textarea};
-        \node[output]    (clip)  at (5.5, 0) {Clipboard};
-
-        % Audio flow
-        \draw[arr] (mic) -- (blob);
-        \draw[arr] (blob) -- (http);
-        \draw[arr] (http) -- (tmp1);
-        \draw[arr] (tmp1) -- (tmp2);
-        \draw[delarr] (tmp2) -- (del);
-
-        % Inference to transcript
-        \draw[arr] (tmp2.east) -- node[above, lbl]{inference} (text.west);
-
-        % Transcript flow
-        \draw[arr] (text) -- (resp);
-        \draw[arr] (resp) -- (area);
-        \draw[arr] (area) -- (clip);
-
-        % Labels
-        \node[lbl, left=0.2cm of mic] {transient};
-        \node[lbl, left=0.2cm of del] {guaranteed};
-        \node[lbl, right=0.2cm of clip] {user action};
-    \end{tikzpicture}
+    \includegraphics[height=0.72\textheight]{images/privacy-data-flow.png}
     \end{center}
 
     \vspace{0.1em}
     {\scriptsize \textcolor{red!60}{Red} = sensitive audio (transient).
     \textcolor{yellow!70!black}{Yellow} = ephemeral intermediate.
     \textcolor{green!50!black}{Green} = transcript output (user-controlled).
-    \textcolor{gray}{Gray} = deleted. Red dashed = deletion point.}
+    \textcolor{gray}{Gray} = deleted. Both transports are localhost only.}
 \end{frame}
 
 
@@ -960,22 +911,27 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \small
     \begin{columns}[T]
         \begin{column}{0.48\textwidth}
-            \textbf{Backend (pytest, 36 tests)}
+            \textbf{Backend (pytest, 41 tests)}
             \begin{itemize}\setlength{\itemsep}{0pt}
                 \item Health endpoint responses
                 \item MIME validation + codec stripping
                 \item File size rejection
                 \item Happy-path transcription
                 \item Model list and swap endpoints
+                \item WebSocket endpoint: origin enforcement,
+                      size validation, happy path, inference
+                      failure, swap concurrency contract
             \end{itemize}
         \end{column}
         \begin{column}{0.48\textwidth}
-            \textbf{Frontend (vitest, 19 tests)}
+            \textbf{Frontend (vitest, 22 tests)}
             \begin{itemize}\setlength{\itemsep}{0pt}
                 \item Recorder presentational props
                 \item Transcript rendering and copy
                 \item Settings panel: model list, swap,
                       loading, error, retry
+                \item Settings display: comparison toggle
+                      renders, fires correct callback
             \end{itemize}
         \end{column}
     \end{columns}
@@ -988,7 +944,7 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
 
 
 % =========================================================================
-\section{Roadmap \& v2.0}
+\section{Roadmap, v2.0+}
 % =========================================================================
 
 \begin{frame}{Milestone Timeline}
@@ -1008,37 +964,33 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \begin{columns}[T]
         \begin{column}{0.48\textwidth}
             \textbf{v2.0} (complete)
-            \begin{itemize}\setlength{\itemsep}{0pt}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Hotkey system
                 \item Settings panel (model selection)
                 \item State machine diagram update
             \end{itemize}
-
-            \vspace{0.2em}
-            \textbf{v2.1}
-            \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Streaming (WebSocket)
-                \item Voice activity detection (VAD)
+            \textbf{v2.1} (complete)
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item WebSocket streaming (default transport)
+                \item HTTP POST fallback (automatic)
+                \item Raw/cleaned comparison toggle
             \end{itemize}
         \end{column}
         \begin{column}{0.48\textwidth}
             \textbf{v2.2}
-            \begin{itemize}\setlength{\itemsep}{0pt}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Continuous recording mode
+                \item Client-side VAD (\texttt{@ricky0123/vad-web})
                 \item Silence-based segmentation
-                \item Recording mode toggle in settings
             \end{itemize}
-
-            \vspace{0.2em}
             \textbf{v2.3}
-            \begin{itemize}\setlength{\itemsep}{0pt}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Voice command vocabulary
                 \item Stop, submit, redo, clear phrases
             \end{itemize}
         \end{column}
     \end{columns}
 
-    \vspace{0.3em}
     \textbf{v3} --- Desktop packaging (Tauri). Global hotkeys.
     Direct injection into focused application. No Docker dependency.
 \end{frame}
@@ -1096,6 +1048,94 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         Intentionally limited to models declared in
         \texttt{WHISPER\_AVAILABLE\_MODELS}.
         No auto-discovery, no surprise downloads.
+    \end{block}
+\end{frame}
+
+
+
+\begin{frame}{v2.1 --- WebSocket Streaming}
+    \small
+    Recording flow unchanged --- start, speak, stop. What changes is delivery.
+
+    \vspace{0.25em}
+    \begin{itemize}\setlength{\itemsep}{1pt}
+        \item Client connects to \texttt{ws://localhost:8000/ws/transcribe}
+        \item Full audio blob sent as binary after recording stops
+        \item Server streams \texttt{\{"type":"segment"\}} messages as
+              faster-whisper yields each segment
+        \item Final \texttt{\{"type":"complete"\}} mirrors
+              \texttt{TranscribeResponse} --- raw, cleaned, language,
+              duration, model, device
+        \item Partial text accumulates in the textarea during inference
+    \end{itemize}
+
+    \vspace{0.2em}
+    \begin{block}{Note on GPU hardware}
+        \small
+        An RTX 3090 running \texttt{large-v3} finishes 30s of audio in
+        $\approx$2.5s --- segments arrive in a burst, indistinguishable from
+        batch. Streaming is perceptible on CPU or in v2.2 continuous mode.
+    \end{block}
+\end{frame}
+
+
+\begin{frame}{v2.1 --- Transport Architecture}
+    \small
+    \begin{table}
+    \centering\scriptsize
+    \begin{tabular}{@{} p{0.26\textwidth} p{0.32\textwidth} p{0.28\textwidth} @{}}
+        \toprule
+        \textbf{Event} & \textbf{Cause} & \textbf{Response} \\
+        \midrule
+        \texttt{ws.onerror} &
+            Server unreachable, network dropped &
+            Fall back to \texttt{POST /transcribe} \\
+        \addlinespace
+        \texttt{\{type: "error"\}} &
+            Inference or transcode failed &
+            Surface immediately --- no fallback \\
+        \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \vspace{0.2em}
+    \textbf{Enforced constraints}
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item Origin checked against \texttt{CORS\_ORIGINS} before
+              \texttt{accept()} --- CORS middleware does not cover WebSocket
+        \item Size validated after \texttt{receive\_bytes()} ---
+              same \texttt{MAX\_UPLOAD\_MB} limit as HTTP route
+        \item ffmpeg runs via \texttt{asyncio.to\_thread()} ---
+              non-blocking, 30s timeout
+        \item Temp files cleaned in \texttt{try/finally} on all exit paths
+    \end{itemize}
+\end{frame}
+
+
+\begin{frame}{v2.1 --- Concurrency Contract}
+    \small
+    \texttt{swap\_model()} can fire mid-segment-iteration. No new locks needed.
+
+    \vspace{0.2em}
+    \textbf{Why it is safe}
+    \begin{itemize}\setlength{\itemsep}{1pt}
+        \item \texttt{run\_inference()} captures \texttt{model = get\_model()}
+              at thread start --- a strong Python reference
+        \item \texttt{swap\_model()} replaces \texttt{\_model} and calls
+              \texttt{del old\_model} --- removes swap's local reference only
+        \item Python's refcount cannot reach zero while the inference
+              thread's \texttt{model} variable is alive
+        \item \texttt{gc.collect()} and \texttt{torch.cuda.empty\_cache()}
+              are benign against a live reference --- no in-use tensors freed
+        \item VRAM cleanup deferred until inference thread completes naturally
+    \end{itemize}
+
+    \vspace{0.15em}
+    \begin{block}{Model name}
+        \small
+        Captured alongside \texttt{get\_model()} at thread start.
+        Reflects the model that ran inference, not the model loaded at
+        message-send time.
     \end{block}
 \end{frame}
 
