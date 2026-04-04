@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
 **Last Updated:** April 4, 2026
-**Status:** v1.1 Complete — v2 planning in progress
+**Status:** v2.1 Complete — v2.2 next
 
 ---
 
@@ -419,7 +419,7 @@ Broken into sequenced sub-milestones. Each builds on the prior one.
 - **State machine diagram** — updated in v2 Beamer deck. Settings is an orthogonal `settingsOpen: boolean`, not a sixth `RecordingState` value. Migrated to Mermaid; TikZ retained for spatial/precision diagrams.
 - **Recorder refactor** — `useRecorder` lifted from Recorder to App for hotkey access. Recorder simplified to presentational component.
 
-#### v2.1 — Streaming + VAD
+#### v2.1 — Streaming + VAD (complete, 2026-04-04)
 
 One milestone, one API contract change. The biggest architectural change in the project.
 
