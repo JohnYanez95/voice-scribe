@@ -88,7 +88,12 @@ export function App() {
       const cleanup = streamTranscribeAudio(
         blob,
         (text) => {
-          setTranscript((prev) => (prev ? prev + " " + text : text));
+          // Push-to-talk only: stream partial text while inference runs.
+          // Continuous skips segment updates — onComplete appends the final
+          // cleaned text. Applying both would duplicate every utterance.
+          if (!append) {
+            setTranscript((prev) => (prev ? prev + " " + text : text));
+          }
         },
         (result) => {
           setRawTranscript(result.raw);

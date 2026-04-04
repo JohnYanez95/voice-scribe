@@ -160,17 +160,20 @@ describe("App — continuous mode orchestration", () => {
     // App should be in processing state — Transcript shows loading indicator
     expect(screen.getByText("Transcribing...")).toBeTruthy();
 
-    // Segment arrives before complete
+    // In continuous mode, onSegment does NOT update the transcript (avoids
+    // duplication when onComplete also appends the final cleaned text).
     act(() => {
       capturedOnSegment!("hello");
     });
+    // Transcript still empty — segment was ignored in continuous mode
+    expect(screen.queryByRole("textbox")).toBeNull();
 
     // onComplete fires — normal continuous cycle (no stop requested)
     act(() => {
       capturedOnComplete!(COMPLETE_RESULT);
     });
 
-    // Transcript should contain the cleaned segment text
+    // Transcript shows the cleaned text from onComplete only (no duplicate)
     await waitFor(() => {
       const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
       expect(textarea.value).toContain("hello");
