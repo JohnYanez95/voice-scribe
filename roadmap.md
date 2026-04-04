@@ -423,14 +423,17 @@ Broken into sequenced sub-milestones. Each builds on the prior one.
 
 One milestone, one API contract change. The biggest architectural change in the project.
 
-- **Streaming transcription** — WebSocket transport replaces (or supplements) the HTTP POST endpoint. The user sees words appearing as they speak. faster-whisper supports segment-by-segment output; the backend streams segments as they complete.
-- **Voice activity detection (VAD)** — client-side or server-side (Silero VAD is the leading candidate, already integrated with faster-whisper). Detects speech onset and offset, filters background noise.
+- **Streaming transcription** — WebSocket transport supplements (not replaces) the HTTP POST endpoint. Deliberate decision: the HTTP endpoint is mature, fully tested, and the natural automatic fallback if the WebSocket connection fails — removing it gains nothing. Streaming is the v2.1 default for the live path. The user sees words appearing as segments complete; faster-whisper's segment-by-segment output is streamed to the frontend as each segment finishes.
+- **State machine diagram** — updated before any streaming component code is written, per project discipline. New user-visible states at minimum: WebSocket connecting (post-stop, pre-first-segment, independent failure mode from inference) and segments-receiving (partial transcript visible, no spinner). Whether these become new `RecordingState` enum values or named sub-states within `processing` is the diagram's decision to make — not the implementation's.
+- **VAD** — `vad_filter=True` is already active and complete for push-to-talk. Silero VAD runs inside `model.transcribe()`, identifies speech windows on CPU, and prevents the Whisper encoder/decoder from touching silence. No new server-side VAD code is required for v2.1. Client-side VAD (browser-side, required for continuous mode) remains the v2.2 pre-condition.
 
 #### v2.2 — Continuous Mode + Segmentation
 
 Builds on v2.1 streaming and VAD.
 
-- **Continuous recording mode** — mic stays open. VAD detects speech vs silence. Transcription streams as the user talks. Accumulates until explicit reset.
+**Pre-condition (gate, not suggestion):** v2.2 does not ship without client-side VAD in place. Continuous mode keeps the mic open indefinitely. Without a client-side gate deciding "this is speech" before audio is sent, the backend processes ambient room audio continuously — GPU saturation by design. `@ricky0123/vad-web` (Silero VAD v4, ONNX/WASM, CPU-only, ~400KB) is the baseline. Energy thresholding is not sufficient — it cannot distinguish speech from background noise and fails on quiet speakers. This library must be integrated and validated against real ambient conditions before any continuous mode code ships.
+
+- **Continuous recording mode** — mic stays open. Client-side VAD detects speech onset and offset. Speech frames are sent; silence is discarded at the source. Transcription streams as the user talks. Accumulates until explicit reset.
 - **Segmentation mechanisms** (all may coexist):
   1. Silence-based paragraph breaks — extended silence inserts a visual break. Automatic, passive.
   2. Hotkey reset — keyboard shortcut for "that thought is done, start fresh below." Manual, explicit.
