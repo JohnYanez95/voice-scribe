@@ -48,7 +48,7 @@ Backend tests run on the host (the test suite mocks model loading and does not r
 
 ## Architecture
 
-Two-service system over localhost HTTP. No proxy, no WebSocket, no queue.
+Two-service system over localhost HTTP. v1/v1.1: no proxy, no WebSocket, no queue. v2.1 introduces WebSocket transport — see roadmap.
 
 - **Frontend** (`apps/web/`, port 5173): React + TypeScript + Vite. Records audio via MediaRecorder, POSTs blob to API, displays editable transcript with clipboard copy.
 - **Backend** (`apps/api/`, port 8000): FastAPI in Docker with GPU. Validates upload, transcodes via ffmpeg to 16kHz mono WAV, runs faster-whisper inference, returns transcript.

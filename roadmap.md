@@ -34,7 +34,7 @@ Both use cases demand the same underlying capabilities: accurate multilingual tr
 
 **Audio is transient, text is durable.** Raw audio is short-lived input. Transcripts are the user-facing artifact.
 
-**Scope matches the milestone.** Repo structure and services reflect v1 reality, not v3 aspirations.
+**Scope matches the milestone.** Repo structure and services reflect current reality, not future aspirations.
 
 **Public-safe defaults.** The repo and runtime assume eventual public distribution and default toward safe behavior.
 
@@ -379,8 +379,7 @@ Model weights are not baked into the container image. They download on first run
 
 Record audio, send to local API, transcode, transcribe, return transcript, display in editable text area, copy to clipboard. GPU and CPU execution modes.
 
-**Outstanding v1 close-out item (complete before v1.1 work begins):**
-Run `smoke_test.sh` with `DEVICE=cpu` and `WHISPER_MODEL=small`. Confirm a transcript is returned. Record wall-clock latency in a comment at the top of `ops/scripts/smoke_test.sh`. ~30 minutes of work. This is a v1 item, not v1.1 backlog.
+**v1 close-out item (completed 2026-04-03):** CPU smoke test run with `DEVICE=cpu` and `WHISPER_MODEL=small`. Transcript returned successfully. Wall-clock latency (~1.87s) recorded at top of `ops/scripts/smoke_test.sh`.
 
 ### v1.1 (complete)
 
@@ -429,7 +428,7 @@ Builds on v2.1 streaming and VAD.
 - **Segmentation mechanisms** (all may coexist):
   1. Silence-based paragraph breaks — extended silence inserts a visual break. Automatic, passive.
   2. Hotkey reset — keyboard shortcut for "that thought is done, start fresh below." Manual, explicit.
-- **Two recording modes are user-selectable** via the settings panel shipped in v2.0.
+- **Recording mode toggle** added to the settings panel (introduced in v2.0) in this milestone. Push-to-talk vs continuous is now user-selectable.
 
 #### v2.3 — Voice Command Vocabulary
 
