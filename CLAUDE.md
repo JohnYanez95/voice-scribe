@@ -6,14 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech in a browser UI, a GPU-accelerated containerized backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and clipboard copy. No cloud services are involved.
 
-**Current milestone:** v1 Complete — v1.1 planning in progress.
+**Current milestone:** v1.1 Complete — v2 planning in progress.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5173) + FastAPI backend (Docker, port 8000) over localhost HTTP
-- Single-user, single-utterance, synchronous — no streaming, no queues, no WebSocket
-- Privacy-first: audio is transient (deleted after processing), transcripts are never logged, API binds to localhost only
+- v1/v1.1: single-user, single-utterance, synchronous. v2 introduces streaming (WebSocket), VAD, and continuous recording mode
+- Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- v1.1 priority: rule-based transcript cleanup function, then state machine diagram update, then settings UI, then retention controls
+- v1.1 delivered: minimal `clean_transcript` (whitespace + capitalization only — Whisper output needs minimal cleanup), VAD filtering enabled, `raw`+`cleaned` response fields with comparison view
+- v2 sequence: v2.0 (hotkeys + settings with model selection) → v2.1 (streaming + VAD) → v2.2 (continuous mode) → v2.3 (voice commands)
 
 **Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
 
@@ -91,8 +92,8 @@ These patterns are non-negotiable in this codebase:
 `docs/v1/presentation/main.tex` is a living onboarding document, not a snapshot. Two diagrams require active maintenance:
 
 - **Privacy data flow diagram** — must stay in sync with any change to how audio or transcript data moves through the system (new storage, new endpoints, retention changes). Principal's instruction: "it rots fast once people stop maintaining it."
-- **State machine diagram** — must be updated *before* writing component code whenever v1.1+ adds UI states (settings toggle, cleanup mode, etc.). Diagram first, then code.
+- **State machine diagram** — must be updated *before* writing component code whenever v2.0+ adds UI states (settings panel, recording modes, etc.). Diagram first, then code.
 
 ## Scope
 
-v1 is intentionally narrow: record one utterance, transcribe locally, display in editable textarea, copy to clipboard. Do not add streaming, continuous dictation, async queues, background workers, or reverse proxy. The roadmap (`roadmap.md`) is the source of truth for scope decisions.
+v1/v1.1 is intentionally narrow: record one utterance, transcribe locally, display in editable textarea, copy to clipboard. v2 adds streaming, continuous dictation, hotkeys, and voice commands — see the roadmap for sequencing. Do not add async queues, background workers, or reverse proxy. The roadmap (`roadmap.md`) is the source of truth for scope decisions.
