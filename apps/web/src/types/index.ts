@@ -1,4 +1,12 @@
-export type RecordingState = "idle" | "recording" | "processing" | "done" | "error";
+export type RecordingState =
+  | "idle"
+  | "recording"
+  | "listening"
+  | "processing"
+  | "done"
+  | "error";
+
+export type RecordingMode = "push-to-talk" | "continuous";
 
 export interface TranscribeResponse {
   raw: string;
