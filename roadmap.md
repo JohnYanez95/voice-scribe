@@ -59,7 +59,7 @@ Both use cases demand the same underlying capabilities: accurate multilingual tr
 [faster-whisper + ffmpeg runtime]
 ```
 
-The frontend runs on the host at `localhost:5173` (Vite). The API runs in a Docker container at `localhost:8000` (FastAPI). Communication is plain HTTP over localhost. No WebSockets, no reverse proxy, no queue.
+The frontend runs on the host at `localhost:5173` (Vite). The API runs in a Docker container at `localhost:8000` (FastAPI). v1/v1.1 architecture: plain HTTP over localhost. No WebSockets, no reverse proxy, no queue. v2.1 introduces WebSocket transport — see milestone section.
 
 **Key architectural note (from senior review):** The synchronous FastAPI design is correct for v1, but `faster-whisper` blocks the thread during inference. For a single-user local tool this is fine. If the team later needs cancel buttons or progress spinners, the rework path is `asyncio.to_thread()` wrapping the inference call, or a background task with a polling endpoint. Both change the API contract. This is not a v1 problem — just context the team should carry forward.
 
@@ -357,7 +357,7 @@ Model weights are not baked into the container image. They download on first run
 
 **Runtime defaults:** Bind to localhost only. Run containers as non-root. Do not log raw audio or transcript content. Cap request size and duration. Restrict CORS origins. Keep secrets out of repo and frontend bundle.
 
-**Audio/data handling:** Delete temp audio immediately after processing. Use dedicated temp directories only. Make retention behavior explicit in docs.
+**Audio/data handling:** Audio is transient by design — deleted in the `finally` block immediately after processing. No transcripts are stored server-side. This is the retention behavior. Use dedicated temp directories only.
 
 **Supply chain:** Pin dependencies. Scan in CI. Use minimal container images. No privileged containers. Do not mount the Docker socket.
 
@@ -411,7 +411,7 @@ Broken into sequenced sub-milestones. Each builds on the prior one.
 No API contract change. Immediately useful. Low risk.
 
 - **Hotkey system** — dedicated keyboard shortcuts for start/stop recording, copy transcript, reset/clear. Works when app is focused. Global hotkeys (system-wide) are a v3/Tauri feature.
-- **Settings panel** — first real content: recording mode selection (push-to-talk vs continuous) and model selection (swap between `large-v3`, `small`, etc. without editing `.env`). These two settings justify the panel. Additional settings (VAD sensitivity, voice command phrases) land in later sub-milestones as their features ship.
+- **Settings panel** — first real content: model selection (swap between `large-v3`, `small`, etc. without editing `.env`). Model selection alone justifies the panel — it's a genuine quality-of-life improvement for a single-user dev tool. Recording mode toggle (push-to-talk vs continuous) lands in v2.2 when continuous mode ships. Additional settings (VAD sensitivity, voice command phrases) land in later sub-milestones as their features are ready.
 - **State machine diagram** — update to cover settings panel states before writing component code. Principal's standing instruction: diagram first, then code.
 
 #### v2.1 — Streaming + VAD
