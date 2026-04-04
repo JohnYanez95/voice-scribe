@@ -1,15 +1,27 @@
-gantt
+timeline
     title Voice Scribe Milestones
-    dateFormat YYYY-MM-DD
-    axisFormat %b %d
-
     section Delivered
-    v1 — Record, transcribe, edit, copy         :done, v1, 2026-04-02, 2026-04-02
-    v1.1 — Cleanup evaluation + VAD             :done, v11, 2026-04-03, 2026-04-03
-    v2.0 — Hotkeys + settings + model swap      :done, v20, 2026-04-04, 2026-04-04
-
+        v1 — Apr 2, 2026
+            : Record, transcribe, edit, copy
+            : GPU and CPU execution modes
+            : Smoke test, CI pipeline
+        v1.1 — Apr 3, 2026
+            : Cleanup evaluation — Whisper output sufficient
+            : VAD filtering enabled
+            : raw + cleaned response fields
+        v2.0 — Apr 4, 2026
+            : Hotkeys (Ctrl+Shift bindings)
+            : Settings panel with model selection
+            : Thread-safe model swap + VRAM cleanup
     section Planned
-    v2.1 — Streaming + VAD                      :active, v21, after v20, 1d
-    v2.2 — Continuous mode + segmentation       :v22, after v21, 1d
-    v2.3 — Voice command vocabulary             :v23, after v22, 1d
-    v3 — Desktop app (Tauri) + injection        :v3, after v23, 1d
+        v2.1
+            : Streaming (WebSocket)
+            : Voice activity detection
+        v2.2
+            : Continuous recording mode
+            : Silence-based segmentation
+        v2.3
+            : Voice command vocabulary
+        v3
+            : Desktop app (Tauri)
+            : Direct injection
