@@ -58,8 +58,7 @@
         \item \textbf{Frontend} --- React component tree and state machine
         \item \textbf{Security} --- Threat model, privacy, operational telemetry
         \item \textbf{Development} --- Workflow, tooling, and testing
-        \item \textbf{Roadmap} --- Milestone timeline and what comes next
-        \item \textbf{Interaction Model} --- Hotkeys, settings, model selection
+        \item \textbf{Roadmap \& v2.0} --- Milestones, what's next, and what just shipped
     \end{itemize}
 \end{frame}
 
@@ -105,7 +104,7 @@
 
 
 \begin{frame}{Design Principles}
-    Four principles govern every v1 decision:
+    Four principles govern every decision:
 
     \vspace{0.6em}
     \begin{enumerate}
@@ -949,6 +948,8 @@
         \texttt{transcode complete}      & output format, duration \\
         \texttt{inference started}       & audio file path \\
         \texttt{inference complete}      & duration, detected language \\
+        \texttt{model swap started}      & previous model, new model \\
+        \texttt{model swap complete}     & duration \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -1042,7 +1043,7 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
 
 
 % =========================================================================
-\section{Roadmap}
+\section{Roadmap \& v2.0}
 % =========================================================================
 
 \begin{frame}{Milestone Timeline}
@@ -1057,9 +1058,46 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
 \end{frame}
 
 
-% =========================================================================
-\section{Interaction Model}
-% =========================================================================
+\begin{frame}{Roadmap Detail}
+    \small
+    \begin{columns}[T]
+        \begin{column}{0.48\textwidth}
+            \textbf{v2.0} (complete)
+            \begin{itemize}\setlength{\itemsep}{0pt}
+                \item Hotkey system
+                \item Settings panel (model selection)
+                \item State machine diagram update
+            \end{itemize}
+
+            \vspace{0.2em}
+            \textbf{v2.1}
+            \begin{itemize}\setlength{\itemsep}{0pt}
+                \item Streaming (WebSocket)
+                \item Voice activity detection (VAD)
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \textbf{v2.2}
+            \begin{itemize}\setlength{\itemsep}{0pt}
+                \item Continuous recording mode
+                \item Silence-based segmentation
+                \item Recording mode toggle in settings
+            \end{itemize}
+
+            \vspace{0.2em}
+            \textbf{v2.3}
+            \begin{itemize}\setlength{\itemsep}{0pt}
+                \item Voice command vocabulary
+                \item Stop, submit, redo, clear phrases
+            \end{itemize}
+        \end{column}
+    \end{columns}
+
+    \vspace{0.3em}
+    \textbf{v3} --- Desktop packaging (Tauri). Global hotkeys.
+    Direct injection into focused application. No Docker dependency.
+\end{frame}
+
 
 \begin{frame}{v2.0 --- Hotkeys + Settings}
     \small
@@ -1114,47 +1152,6 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         \texttt{WHISPER\_AVAILABLE\_MODELS}.
         No auto-discovery, no surprise downloads.
     \end{block}
-\end{frame}
-
-
-\begin{frame}{Roadmap Detail}
-    \small
-    \begin{columns}[T]
-        \begin{column}{0.48\textwidth}
-            \textbf{v2.0} (complete)
-            \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Hotkey system
-                \item Settings panel (model selection)
-                \item State machine diagram update
-            \end{itemize}
-
-            \vspace{0.2em}
-            \textbf{v2.1}
-            \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Streaming (WebSocket)
-                \item Voice activity detection (VAD)
-            \end{itemize}
-        \end{column}
-        \begin{column}{0.48\textwidth}
-            \textbf{v2.2}
-            \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Continuous recording mode
-                \item Silence-based segmentation
-                \item Recording mode toggle in settings
-            \end{itemize}
-
-            \vspace{0.2em}
-            \textbf{v2.3}
-            \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Voice command vocabulary
-                \item Stop, submit, redo, clear phrases
-            \end{itemize}
-        \end{column}
-    \end{columns}
-
-    \vspace{0.3em}
-    \textbf{v3} --- Desktop packaging (Tauri). Global hotkeys.
-    Direct injection into focused application. No Docker dependency.
 \end{frame}
 
 
