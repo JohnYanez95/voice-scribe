@@ -1,11 +1,27 @@
 stateDiagram-v2
     direction LR
 
+    classDef idleClass    fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef activeClass  fill:#ffdddd,stroke:#cc4444,color:#333
+    classDef inflightClass fill:#fffacc,stroke:#b8900a,color:#333
+    classDef successClass fill:#ddf5dd,stroke:#448844,color:#333
+    classDef failureClass fill:#ffe0e0,stroke:#aa3333,color:#555
+    classDef uiClass      fill:#ede8ff,stroke:#7755aa,color:#333
+
     [*] --> idle
 
     idle --> recording : record<br/>(hotkey / button)
     recording --> processing : stop<br/>(hotkey / button)
-    processing --> done : 200 OK
+
+    state processing {
+        direction TB
+        [*] --> connecting
+        connecting : connecting<br/>spinner · text empty
+        receiving : receiving<br/>partial transcript visible
+        connecting --> receiving
+    }
+
+    processing --> done : transcript complete
     processing --> error : error
 
     done --> idle : record
@@ -17,15 +33,13 @@ stateDiagram-v2
     settings --> idle : close settings
 
     note right of settings
-        Settings is an overlay panel,
-        not a pipeline state.
-        Recording controls are
-        inaccessible while open.
+        Overlay panel — not a pipeline state.
         settingsOpen: boolean
-        (orthogonal to RecordingState)
     end note
 
-    note right of recording
-        Settings not accessible
-        during recording or processing
-    end note
+    class idle idleClass
+    class recording activeClass
+    class processing inflightClass
+    class done successClass
+    class error failureClass
+    class settings uiClass
