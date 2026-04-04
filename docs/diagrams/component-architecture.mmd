@@ -1,0 +1,39 @@
+flowchart TB
+    subgraph Container ["Container (state owner)"]
+        App["App"]
+    end
+
+    subgraph Presentational ["Presentational (stateless)"]
+        Recorder["Recorder"]
+        Settings["Settings"]
+        Transcript["Transcript"]
+    end
+
+    subgraph Hooks ["Hooks (browser APIs)"]
+        useRecorder["useRecorder"]
+        useHotkeys["useHotkeys"]
+    end
+
+    subgraph Services ["Services (side effects)"]
+        api["api.ts"]
+    end
+
+    App -->|"props"| Recorder
+    App --> Settings
+    App -->|"text, onChange"| Transcript
+    App --> useRecorder
+    App --> useHotkeys
+    App -->|"fetch"| api
+
+    useRecorder -.->|"MediaRecorder API"| mic(["Browser"])
+    api -.->|"localhost:8000"| backend(["Backend"])
+
+    style App fill:#bbdefb,stroke:#1565c0
+    style Recorder fill:#c8e6c9,stroke:#2e7d32
+    style Settings fill:#c8e6c9,stroke:#2e7d32
+    style Transcript fill:#c8e6c9,stroke:#2e7d32
+    style useRecorder fill:#ffe0b2,stroke:#e65100
+    style useHotkeys fill:#ffe0b2,stroke:#e65100
+    style api fill:#ffe0b2,stroke:#e65100
+    style mic fill:#f5f5f5,stroke:#999
+    style backend fill:#f5f5f5,stroke:#999

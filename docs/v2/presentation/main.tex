@@ -707,65 +707,21 @@
               calls for transcription, model list, and model swap
     \end{itemize}
 
-    \vspace{0.4em}
-    \rmk The frontend has no routing, no global state library, and no
-    build-time environment variables. Complexity is earned, not assumed.
+    \vspace{0.3em}
+    \rmk No routing, no global state library, no build-time
+    environment variables. Complexity is earned.
 \end{frame}
 
 
 \begin{frame}{Component Architecture --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.9, every node/.style={transform shape},
-        node distance=0.5cm,
-        comp/.style={draw, rounded corners=3pt, minimum width=2.4cm,
-                     minimum height=0.55cm, font=\small, align=center},
-        container/.style={comp, fill=blue!12},
-        present/.style={comp, fill=green!12},
-        service/.style={comp, fill=orange!12},
-        arr/.style={-{Stealth[length=5pt]}, thick},
-        lbl/.style={font=\tiny, text=gray},
-    ]
-        % App
-        \node[container] (app) {App (container)};
-
-        % Components — three presentational
-        \node[present, below left=1cm and 1.8cm of app] (rec) {Recorder};
-        \node[present, below=1cm of app] (settings) {Settings};
-        \node[present, below right=1cm and 1.8cm of app] (trans) {Transcript};
-
-        % Hooks — consumed by App
-        \node[service, below left=2.2cm and 0.3cm of app] (useRec) {useRecorder};
-        \node[service, below right=2.2cm and 0.3cm of app] (useHot) {useHotkeys};
-
-        % Service layer
-        \node[service, below=3.2cm of app] (api) {api.ts (service)};
-
-        % External
-        \node[lbl, below=0.4cm of useRec] (mic) {MediaRecorder API};
-        \node[lbl, below=0.4cm of api] (backend) {localhost:8000};
-
-        % App → presentational components
-        \draw[arr] (app) -- node[left, lbl]{props} (rec);
-        \draw[arr] (app) -- (settings);
-        \draw[arr] (app) -- node[right, lbl]{text, onChange} (trans);
-
-        % App → hooks
-        \draw[arr] (app) -- (useRec);
-        \draw[arr] (app) -- (useHot);
-
-        % App → API
-        \draw[arr] (app) -- node[right, lbl, pos=0.7]{fetch} (api);
-
-        % External boundaries
-        \draw[arr, dashed] (useRec) -- (mic);
-        \draw[arr, dashed] (api) -- (backend);
-    \end{tikzpicture}
+    \includegraphics[width=0.85\textwidth]{images/component-architecture.png}
     \end{center}
 
     \vspace{0.2em}
     {\scriptsize \textcolor{blue!60}{Blue} = container (state owner),
     \textcolor{green!50!black}{Green} = presentational (stateless),
-    \textcolor{orange!70}{Orange} = services (side effects).
+    \textcolor{orange!70}{Orange} = services / hooks (side effects).
     Dashed arrows = external system boundaries.}
 \end{frame}
 
@@ -1007,38 +963,30 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \small
     \begin{columns}[T]
         \begin{column}{0.48\textwidth}
-            \textbf{Backend (pytest)}
+            \textbf{Backend (pytest, 36 tests)}
             \begin{itemize}\setlength{\itemsep}{0pt}
                 \item Health endpoint responses
-                \item MIME type validation
-                \item Codec parameter stripping
+                \item MIME validation + codec stripping
                 \item File size rejection
                 \item Happy-path transcription
                 \item Model list and swap endpoints
             \end{itemize}
-            \vspace{0.2em}
-            {\scriptsize Runs inside Docker container\\(requires faster-whisper imports)}
         \end{column}
         \begin{column}{0.48\textwidth}
-            \textbf{Frontend (vitest)}
+            \textbf{Frontend (vitest, 19 tests)}
             \begin{itemize}\setlength{\itemsep}{0pt}
                 \item Recorder presentational props
                 \item Transcript rendering and copy
                 \item Settings panel: model list, swap,
                       loading, error, retry
             \end{itemize}
-            \vspace{0.2em}
-            {\scriptsize Runs on host via Node.js\\(jsdom environment)}
         \end{column}
     \end{columns}
 
     \vspace{0.3em}
-    \begin{block}{Test Philosophy}
-        Test the happy path plus the obvious failure boundaries.
-        Do not overbuild the test matrix before the first usable
-        version exists. The smoke test script catches integration
-        failures that unit tests cannot.
-    \end{block}
+    {\footnotesize\textbf{Philosophy:} Happy path plus obvious failure boundaries.
+    Smoke test exercises the running system end-to-end (\texttt{/health},
+    \texttt{/transcribe}, \texttt{/models}).}
 \end{frame}
 
 
