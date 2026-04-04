@@ -31,3 +31,19 @@ export interface ModelSwapResponse {
   current_model: string;
   swap_duration: number;
 }
+
+export interface WsSegmentMessage {
+  type: "segment";
+  text: string;
+}
+
+export interface WsCompleteMessage extends TranscribeResponse {
+  type: "complete";
+}
+
+export interface WsErrorMessage {
+  type: "error";
+  detail: string;
+}
+
+export type WsMessage = WsSegmentMessage | WsCompleteMessage | WsErrorMessage;

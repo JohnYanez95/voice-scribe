@@ -6,11 +6,13 @@ interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
   onSwapStateChange: (swapping: boolean) => void;
+  showRawComparison: boolean;
+  onShowRawComparisonChange: (show: boolean) => void;
 }
 
 type PanelState = "loading" | "ready" | "swapping" | "error";
 
-export function Settings({ isOpen, onClose, onSwapStateChange }: SettingsProps) {
+export function Settings({ isOpen, onClose, onSwapStateChange, showRawComparison, onShowRawComparisonChange }: SettingsProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
   const [panelState, setPanelState] = useState<PanelState>("loading");
@@ -130,6 +132,21 @@ export function Settings({ isOpen, onClose, onSwapStateChange }: SettingsProps) 
 
           <p className="settings-note">
             First use of a model may require download.
+          </p>
+        </div>
+
+        <div className="settings-section">
+          <h3>Display</h3>
+          <label className="settings-model-option">
+            <input
+              type="checkbox"
+              checked={showRawComparison}
+              onChange={(e) => onShowRawComparisonChange(e.target.checked)}
+            />
+            <span>Show raw / cleaned comparison</span>
+          </label>
+          <p className="settings-note">
+            When enabled, shows the unprocessed transcript alongside the cleaned version.
           </p>
         </div>
       </div>

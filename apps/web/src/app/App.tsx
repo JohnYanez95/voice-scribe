@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Recorder } from "../features/recorder/Recorder";
 import { Settings } from "../features/settings/Settings";
 import { Transcript } from "../features/transcript/Transcript";
 import { useRecorder } from "../hooks/useRecorder";
 import { useHotkeys } from "../hooks/useHotkeys";
-import { transcribeAudio } from "../services/api";
+import { streamTranscribeAudio, transcribeAudio } from "../services/api";
 import type { RecordingState } from "../types";
 
 export function App() {
@@ -14,6 +14,16 @@ export function App() {
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelSwapping, setModelSwapping] = useState(false);
+  const [showRawComparison, setShowRawComparison] = useState<boolean>(
+    () => localStorage.getItem("voice-scribe-show-comparison") === "true"
+  );
+
+  const wsCleanupRef = useRef<(() => void) | null>(null);
+
+  const handleSetShowRawComparison = useCallback((show: boolean) => {
+    localStorage.setItem("voice-scribe-show-comparison", String(show));
+    setShowRawComparison(show);
+  }, []);
 
   const {
     startRecording,
@@ -31,25 +41,52 @@ export function App() {
     }
   }, [recorderError]);
 
-  // Handle completed recording — send to API
+  // Cleanup WebSocket on unmount
+  useEffect(() => () => { wsCleanupRef.current?.(); }, []);
+
+  // Handle completed recording — stream via WebSocket, fall back to HTTP POST on connection failure only
   useEffect(() => {
     if (!audioBlob) return;
 
+    // Cancel any in-flight connection from a previous recording
+    wsCleanupRef.current?.();
+
     setState("processing");
     setError("");
+    setTranscript("");
+    setRawTranscript("");
 
-    transcribeAudio(audioBlob)
-      .then((result) => {
+    wsCleanupRef.current = streamTranscribeAudio(
+      audioBlob,
+      (text) => setTranscript((prev) => (prev ? prev + " " + text : text)),
+      (result) => {
         setRawTranscript(result.raw);
         setTranscript(result.cleaned);
         setState("done");
-      })
-      .catch((err) => {
-        const message =
-          err instanceof Error ? err.message : "Transcription failed";
-        setError(message);
+      },
+      () => {
+        // Connection-level failure — WebSocket never established or dropped before
+        // any server response. Server may still be serving HTTP; fall back.
+        transcribeAudio(audioBlob)
+          .then((result) => {
+            setRawTranscript(result.raw);
+            setTranscript(result.cleaned);
+            setState("done");
+          })
+          .catch((err) => {
+            const message =
+              err instanceof Error ? err.message : "Transcription failed";
+            setError(message);
+            setState("error");
+          });
+      },
+      (detail) => {
+        // Application-level failure — connection was fine, server hit an error
+        // (inference, transcode). Same error will occur on HTTP POST. Surface immediately.
+        setError(detail);
         setState("error");
-      });
+      }
+    );
   }, [audioBlob]);
 
   const handleToggle = useCallback(async () => {
@@ -125,11 +162,14 @@ export function App() {
         rawText={rawTranscript}
         isLoading={state === "processing"}
         onTextChange={setTranscript}
+        showComparison={showRawComparison}
       />
       <Settings
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSwapStateChange={setModelSwapping}
+        showRawComparison={showRawComparison}
+        onShowRawComparisonChange={handleSetShowRawComparison}
       />
       <div className="hotkey-hints">
         Ctrl+Shift+Space: Record &nbsp;|&nbsp; Ctrl+Shift+Y: Copy &nbsp;|&nbsp;

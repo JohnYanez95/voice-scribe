@@ -17,6 +17,8 @@ const defaultProps = {
   isOpen: true,
   onClose: vi.fn(),
   onSwapStateChange: vi.fn(),
+  showRawComparison: false,
+  onShowRawComparisonChange: vi.fn(),
 };
 
 beforeEach(() => {
@@ -164,5 +166,48 @@ describe("Settings", () => {
       expect(screen.getByText("Failed to load models")).toBeTruthy();
       expect(screen.getByText("Retry")).toBeTruthy();
     });
+  });
+
+  it("comparison toggle renders unchecked by default", async () => {
+    await act(async () => {
+      render(<Settings {...defaultProps} showRawComparison={false} />);
+    });
+
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+  });
+
+  it("checking comparison toggle calls onShowRawComparisonChange(true)", async () => {
+    const onShowRawComparisonChange = vi.fn();
+    await act(async () => {
+      render(
+        <Settings
+          {...defaultProps}
+          showRawComparison={false}
+          onShowRawComparisonChange={onShowRawComparisonChange}
+        />
+      );
+    });
+
+    const checkbox = screen.getByRole("checkbox");
+    fireEvent.click(checkbox);
+    expect(onShowRawComparisonChange).toHaveBeenCalledWith(true);
+  });
+
+  it("unchecking comparison toggle calls onShowRawComparisonChange(false)", async () => {
+    const onShowRawComparisonChange = vi.fn();
+    await act(async () => {
+      render(
+        <Settings
+          {...defaultProps}
+          showRawComparison={true}
+          onShowRawComparisonChange={onShowRawComparisonChange}
+        />
+      );
+    });
+
+    const checkbox = screen.getByRole("checkbox");
+    fireEvent.click(checkbox);
+    expect(onShowRawComparisonChange).toHaveBeenCalledWith(false);
   });
 });

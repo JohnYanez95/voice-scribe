@@ -3,9 +3,12 @@ import type {
   ModelListResponse,
   ModelSwapResponse,
   TranscribeResponse,
+  WsCompleteMessage,
+  WsMessage,
 } from "../types";
 
 const BASE_URL = "http://localhost:8000";
+const WS_BASE_URL = "ws://localhost:8000";
 
 export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE_URL}/health`);
@@ -36,6 +39,46 @@ export async function transcribeAudio(
   }
 
   return res.json();
+}
+
+/**
+ * Open a WebSocket to /ws/transcribe and stream transcription segments.
+ *
+ * Two distinct failure classes:
+ *   onConnectionError  — ws.onerror: connection-level failure (server unreachable,
+ *                        network dropped). HTTP POST fallback is appropriate.
+ *   onApplicationError — {"type": "error"} message: server hit an inference or
+ *                        transcode error. The same error will occur on HTTP POST;
+ *                        surface immediately, do not fall back.
+ *
+ * Returns a cleanup function that closes the WebSocket when called.
+ */
+export function streamTranscribeAudio(
+  blob: Blob,
+  onSegment: (text: string) => void,
+  onComplete: (result: WsCompleteMessage) => void,
+  onConnectionError: () => void,
+  onApplicationError: (detail: string) => void,
+  language?: string
+): () => void {
+  const url = new URL(`${WS_BASE_URL}/ws/transcribe`);
+  if (language) url.searchParams.set("language", language);
+
+  const ws = new WebSocket(url.toString());
+  ws.binaryType = "blob";
+
+  ws.onopen = () => ws.send(blob);
+
+  ws.onmessage = (event) => {
+    const msg: WsMessage = JSON.parse(event.data as string);
+    if (msg.type === "segment") onSegment(msg.text);
+    else if (msg.type === "complete") onComplete(msg);
+    else if (msg.type === "error") onApplicationError(msg.detail);
+  };
+
+  ws.onerror = () => onConnectionError();
+
+  return () => ws.close();
 }
 
 export async function listModels(): Promise<ModelListResponse> {

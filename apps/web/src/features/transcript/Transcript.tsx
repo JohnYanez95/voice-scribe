@@ -5,9 +5,10 @@ interface TranscriptProps {
   rawText: string;
   isLoading: boolean;
   onTextChange: (text: string) => void;
+  showComparison: boolean;
 }
 
-export function Transcript({ text, rawText, isLoading, onTextChange }: TranscriptProps) {
+export function Transcript({ text, rawText, isLoading, onTextChange, showComparison }: TranscriptProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -28,7 +29,7 @@ export function Transcript({ text, rawText, isLoading, onTextChange }: Transcrip
     }
   }, [text]);
 
-  if (isLoading) {
+  if (isLoading && !text) {
     return (
       <div className="transcript">
         <div className="loading">Transcribing...</div>
@@ -40,11 +41,11 @@ export function Transcript({ text, rawText, isLoading, onTextChange }: Transcrip
     return null;
   }
 
-  const showComparison = rawText && rawText !== text;
+  const shouldShowComparison = showComparison && rawText && rawText !== text;
 
   return (
     <div className="transcript">
-      {showComparison && (
+      {shouldShowComparison && (
         <div className="comparison">
           <div className="comparison-pane">
             <label className="comparison-label">Raw</label>
