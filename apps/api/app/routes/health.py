@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.config import settings
 from app.schemas import HealthResponse
-from app.services.transcription import is_model_loaded
+from app.services.transcription import get_current_model_name, is_model_loaded
 
 router = APIRouter()
 
@@ -13,5 +13,5 @@ def health() -> HealthResponse:
         status="ok",
         model_loaded=is_model_loaded(),
         device=settings.DEVICE,
-        model_name=settings.WHISPER_MODEL,
+        model_name=get_current_model_name() or settings.WHISPER_MODEL,
     )

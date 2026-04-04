@@ -4,6 +4,10 @@ import os
 class Settings:
     DEVICE: str = os.getenv("DEVICE", "cuda")
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "large-v3")
+    WHISPER_AVAILABLE_MODELS: list[str] = [
+        m.strip()
+        for m in os.getenv("WHISPER_AVAILABLE_MODELS", os.getenv("WHISPER_MODEL", "large-v3")).split(",")
+    ]
     MAX_AUDIO_SECONDS: int = int(os.getenv("MAX_AUDIO_SECONDS", "60"))
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "10"))
     MODEL_CACHE_DIR: str = os.getenv("MODEL_CACHE_DIR", "/cache")

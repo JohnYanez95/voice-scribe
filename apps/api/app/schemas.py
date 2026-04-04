@@ -19,3 +19,23 @@ class TranscribeResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class ModelInfo(BaseModel):
+    name: str
+    is_current: bool
+
+
+class ModelListResponse(BaseModel):
+    models: list[ModelInfo]
+    current_model: str
+
+
+class ModelSwapRequest(BaseModel):
+    model_name: str
+
+
+class ModelSwapResponse(BaseModel):
+    previous_model: str
+    current_model: str
+    swap_duration: float
