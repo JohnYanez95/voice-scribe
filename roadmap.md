@@ -1,7 +1,7 @@
 # Voice Scribe — v1 Roadmap
 
-**Last Updated:** April 3, 2026 (updated with v1 review feedback)
-**Status:** v1 Complete — v1.1 planning in progress
+**Last Updated:** April 3, 2026 (v1.1 closed)
+**Status:** v1.1 Complete — v1.2 planning not yet started
 
 ---
 
@@ -385,19 +385,29 @@ Record audio, send to local API, transcode, transcribe, return transcript, displ
 **Outstanding v1 close-out item (complete before v1.1 work begins):**
 Run `smoke_test.sh` with `DEVICE=cpu` and `WHISPER_MODEL=small`. Confirm a transcript is returned. Record wall-clock latency in a comment at the top of `ops/scripts/smoke_test.sh`. ~30 minutes of work. This is a v1 item, not v1.1 backlog.
 
-### v1.1
+### v1.1 (complete)
 
-Work items in strict priority order:
+**Sole deliverable:** `clean_transcript(raw: str) -> str` — minimal cleanup function in `apps/api/services/cleanup.py`. The `/transcribe` response returns both `raw` and `cleaned` fields. A side-by-side comparison view in the frontend was built to support evaluation and retained post-evaluation (see note below).
 
-1. **`clean_transcript(raw: str) -> str`** (complete) — minimal cleanup function in `apps/api/services/cleanup.py`. The `/transcribe` response returns both `raw` and `cleaned` fields with a side-by-side comparison view in the frontend. **Evaluation finding (2026-04-03):** Whisper large-v3 already handles punctuation, capitalization, and filler suppression on short clean audio. The full rule set (punctuation spacing, duplicate removal, post-sentence capitalization) solved problems that don't exist for this use case. Function stripped to two rules: whitespace normalization and first-letter capitalization. VAD filtering (`vad_filter=True`) enabled for hallucination prevention. A second cleanup model (LLM or GEC) was evaluated and rejected — the risk of mangling technical content outweighs the marginal quality gain over Whisper's native output.
+**Evaluation outcome (2026-04-03):** Whisper large-v3 already handles punctuation, capitalization, and filler suppression on short clean audio. The full rule set evaluated (punctuation spacing, duplicate removal, post-sentence capitalization) solved problems that don't exist for this use case. Function stripped to two rules: whitespace normalization and first-letter capitalization. VAD filtering (`vad_filter=True`) enabled for hallucination prevention. A second cleanup model (LLM or GEC) was evaluated and rejected — the risk of mangling technical content outweighs the marginal quality gain over Whisper's native output.
 
-2. **Scoping decision: retention controls** (pending Principal) — define what "retention controls" means in a system with no server-side persistence. Audio is deleted in the `finally` block. Transcripts exist only in React state and vanish on page refresh. There is nothing to retain unless the team introduces persistence that doesn't exist yet. Two interpretations: (a) make the existing transient behavior visible to the user (informational label, half-day), or (b) add optional transcript persistence with user-controlled lifetime (multi-day feature with backend changes and new privacy surface). This distinction must resolve before any code is written.
+**Deferred items and rationale:**
 
-3. **State machine diagram** — gates on item 4. If the settings/retention implementation introduces new UI states, the diagram covers them first. If it doesn't, the diagram update is a no-op and drops from the milestone.
+- **Retention controls** — dropped from v1.1. The system has no server-side persistence. Audio is deleted in the `finally` block. Transcripts exist only in React state and vanish on page refresh. There is nothing to configure. Any UI surface for "retention" would be documentation of the current transient behavior, not a feature. That belongs in the privacy docs, which already cover it. Retention controls should not re-enter scope until the team has a concrete use case that requires persistence.
 
-4. **Settings panel with retention controls** — scope determined by item 2. The original settings UI motivation (cleanup toggles) was removed by item 1's evaluation. Options under consideration: (A) defer settings UI out of v1.1 entirely, (B) promote model selection from parking lot as settings content, (C) scope settings to retention controls only, (D) deliver retention as inline UI without a settings panel. Principal decision required.
+- **State machine diagram update** — dropped from v1.1. The diagram is updated when new UI states exist to diagram. v1.1 introduced no new states. Update is a no-op and does not warrant a commit.
 
-A second GPU-backed model for cleanup is deferred — evaluated and found unnecessary for this use case. Revisit only if Whisper output quality degrades on longer recordings or non-English dictation.
+- **Settings panel** — dropped from v1.1. The original motivation (cleanup toggles) was eliminated by the evaluation finding. Model selection (the candidate replacement) was parked deliberately; "the settings panel needs something in it" is not sufficient justification to pull it forward. Defer to v1.2 planning.
+
+**Evaluation tooling retained intentionally:** The comparison view in `Transcript.tsx` (lines 43–58) was built for the cleanup evaluation. It is gated on `rawText !== text`, which is true only when whitespace normalization or first-letter cap actually fires. Low render frequency, lightweight code. Retained because it will be useful if the cleanup function grows later. Not orphaned code.
+
+**A second GPU-backed model for cleanup** is deferred — evaluated and found unnecessary for this use case. Revisit only if Whisper output quality degrades on longer recordings or non-English dictation.
+
+### v1.2
+
+Planning not yet started. Do not carry forward the v1.1 item ordering as a pre-formed sequence — that sequence was designed around cleanup toggle assumptions that didn't survive evaluation. When v1.2 planning begins, start from: *what does the user actually need next based on real usage of v1 and v1.1?*
+
+Items eligible for consideration, in no assumed priority order: settings panel (if concrete content exists for it), model selection UI, state machine diagram update (only if new UI states are introduced), retention controls (only if a use case requiring persistence emerges).
 
 ### v2
 

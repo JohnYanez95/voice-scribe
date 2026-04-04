@@ -27,6 +27,9 @@ data/cache/
 # Private docs (aspirational, not committed)
 docs/private/
 
+# Claude Code agent memory (auto-generated)
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
