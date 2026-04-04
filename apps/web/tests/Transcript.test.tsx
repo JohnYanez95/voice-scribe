@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { Transcript } from "../src/features/transcript/Transcript";
 
 describe("Transcript", () => {
@@ -42,7 +42,9 @@ describe("Transcript", () => {
       <Transcript text="Copy me" isLoading={false} rawText="" onTextChange={() => {}} />
     );
     const btn = screen.getByText("Copy to Clipboard");
-    fireEvent.click(btn);
+    await act(async () => {
+      fireEvent.click(btn);
+    });
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Copy me");
   });
