@@ -391,11 +391,11 @@ Work items in strict priority order:
 
 1. **`clean_transcript(raw: str) -> str`** (complete) — minimal cleanup function in `apps/api/services/cleanup.py`. The `/transcribe` response returns both `raw` and `cleaned` fields with a side-by-side comparison view in the frontend. **Evaluation finding (2026-04-03):** Whisper large-v3 already handles punctuation, capitalization, and filler suppression on short clean audio. The full rule set (punctuation spacing, duplicate removal, post-sentence capitalization) solved problems that don't exist for this use case. Function stripped to two rules: whitespace normalization and first-letter capitalization. VAD filtering (`vad_filter=True`) enabled for hallucination prevention. A second cleanup model (LLM or GEC) was evaluated and rejected — the risk of mangling technical content outweighs the marginal quality gain over Whisper's native output.
 
-2. **Extend state machine diagram** — update `docs/v1/presentation/main.tex` state machine to cover any new states introduced by settings before writing component code. Principal's instruction: diagram first, then code.
+2. **Scoping decision: retention controls** (pending Principal) — define what "retention controls" means in a system with no server-side persistence. Audio is deleted in the `finally` block. Transcripts exist only in React state and vanish on page refresh. There is nothing to retain unless the team introduces persistence that doesn't exist yet. Two interpretations: (a) make the existing transient behavior visible to the user (informational label, half-day), or (b) add optional transcript persistence with user-controlled lifetime (multi-day feature with backend changes and new privacy surface). This distinction must resolve before any code is written.
 
-3. **Settings UI** — separate work item; comes after cleanup evaluation is complete.
+3. **State machine diagram** — gates on item 4. If the settings/retention implementation introduces new UI states, the diagram covers them first. If it doesn't, the diagram update is a no-op and drops from the milestone.
 
-4. **Retention controls** — separate work item; comes after settings UI. Do not bundle with earlier items.
+4. **Settings panel with retention controls** — scope determined by item 2. The original settings UI motivation (cleanup toggles) was removed by item 1's evaluation. Options under consideration: (A) defer settings UI out of v1.1 entirely, (B) promote model selection from parking lot as settings content, (C) scope settings to retention controls only, (D) deliver retention as inline UI without a settings panel. Principal decision required.
 
 A second GPU-backed model for cleanup is deferred — evaluated and found unnecessary for this use case. Revisit only if Whisper output quality degrades on longer recordings or non-English dictation.
 
