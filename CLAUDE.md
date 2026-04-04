@@ -90,7 +90,7 @@ These patterns are non-negotiable in this codebase:
 
 ## Presentation Maintenance
 
-`docs/v1/presentation/main.tex` is a living onboarding document, not a snapshot. Two diagrams require active maintenance:
+`docs/v2/presentation/main.tex` is the living onboarding document. The v1 deck (`docs/v1/presentation/main.tex`) is a frozen historical artifact. Two diagrams require active maintenance:
 
 - **Privacy data flow diagram** — must stay in sync with any change to how audio or transcript data moves through the system (new storage, new endpoints, retention changes). Principal's instruction: "it rots fast once people stop maintaining it."
 - **State machine diagram** — must be updated *before* writing component code whenever v2.0+ adds UI states (settings panel, recording modes, etc.). Diagram first, then code.

@@ -256,11 +256,18 @@ voice-scribe/
 │  └─ cache/                        # Model weights cache, gitignored
 │
 ├─ docs/
-│  ├─ v1/                               # All versioned artifacts for v1
-│  │  ├─ delivery-report.md             # v1 delivery report and PM feedback
-│  │  └─ presentation/                  # Beamer slide deck
+│  ├─ diagrams/                            # Living Mermaid .mmd sources
+│  │  └─ state-machine.mmd
+│  ├─ v1/                                  # Frozen v1 artifacts
+│  │  ├─ delivery-report.md
+│  │  └─ presentation/
 │  │     ├─ main.tex
 │  │     └─ main.pdf
+│  ├─ v2/                                  # Living v2 artifacts
+│  │  └─ presentation/
+│  │     ├─ main.tex                       # Living onboarding document
+│  │     ├─ main.pdf
+│  │     └─ images/                        # Rendered Mermaid PNGs
 │  ├─ architecture.md
 │  ├─ gpu-setup.md
 │  ├─ privacy.md
