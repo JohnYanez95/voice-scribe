@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -39,3 +41,26 @@ class ModelSwapResponse(BaseModel):
     previous_model: str
     current_model: str
     swap_duration: float
+
+
+# WebSocket message schemas
+# Wire format is plain dicts; these document the protocol contract.
+
+class WsSegmentMessage(BaseModel):
+    type: Literal["segment"]
+    text: str
+
+
+class WsCompleteMessage(BaseModel):
+    type: Literal["complete"]
+    raw: str
+    cleaned: str
+    language: str
+    duration: float
+    model_name: str
+    processing_mode: str
+
+
+class WsErrorMessage(BaseModel):
+    type: Literal["error"]
+    detail: str

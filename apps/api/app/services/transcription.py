@@ -74,7 +74,14 @@ def swap_model(model_name: str, config: Settings) -> dict:
         _model = new_model
         _current_model_name = model_name
 
-    # Free old model VRAM outside the lock
+    # Free old model VRAM outside the lock.
+    # Note: VRAM cleanup is deferred if a streaming inference is in flight.
+    # The streaming run_inference() thread holds a local reference to the old
+    # model via get_model(), which keeps its refcount above zero. del old_model
+    # removes this function's reference only; gc.collect() and
+    # torch.cuda.empty_cache() are benign against a live reference and will not
+    # free in-use tensors. The old model is freed by Python's refcount when the
+    # inference thread completes and releases its local reference.
     del old_model
     gc.collect()
     try:
