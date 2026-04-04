@@ -1,4 +1,9 @@
-import type { HealthResponse, TranscribeResponse } from "../types";
+import type {
+  HealthResponse,
+  ModelListResponse,
+  ModelSwapResponse,
+  TranscribeResponse,
+} from "../types";
 
 const BASE_URL = "http://localhost:8000";
 
@@ -30,5 +35,28 @@ export async function transcribeAudio(
     throw new Error(error.detail || `Transcription failed: ${res.status}`);
   }
 
+  return res.json();
+}
+
+export async function listModels(): Promise<ModelListResponse> {
+  const res = await fetch(`${BASE_URL}/models`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch models: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function swapModel(modelName: string): Promise<ModelSwapResponse> {
+  const res = await fetch(`${BASE_URL}/models/swap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model_name: modelName }),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: "Model swap failed" }));
+    throw new Error(error.detail || `Model swap failed: ${res.status}`);
+  }
   return res.json();
 }

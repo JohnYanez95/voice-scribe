@@ -15,3 +15,19 @@ export interface HealthResponse {
   device: string;
   model_name: string;
 }
+
+export interface ModelInfo {
+  name: string;
+  is_current: boolean;
+}
+
+export interface ModelListResponse {
+  models: ModelInfo[];
+  current_model: string;
+}
+
+export interface ModelSwapResponse {
+  previous_model: string;
+  current_model: string;
+  swap_duration: number;
+}

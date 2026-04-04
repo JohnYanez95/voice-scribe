@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Recorder } from "../features/recorder/Recorder";
+import { Settings } from "../features/settings/Settings";
 import { Transcript } from "../features/transcript/Transcript";
 import { useRecorder } from "../hooks/useRecorder";
 import { useHotkeys } from "../hooks/useHotkeys";
@@ -12,6 +13,7 @@ export function App() {
   const [rawTranscript, setRawTranscript] = useState("");
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelSwapping, setModelSwapping] = useState(false);
 
   const {
     startRecording,
@@ -95,7 +97,7 @@ export function App() {
 
   useHotkeys(hotkeyHandlers);
 
-  const isDisabled = state === "processing";
+  const isDisabled = state === "processing" || modelSwapping;
 
   return (
     <div className="app">
@@ -123,6 +125,11 @@ export function App() {
         rawText={rawTranscript}
         isLoading={state === "processing"}
         onTextChange={setTranscript}
+      />
+      <Settings
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSwapStateChange={setModelSwapping}
       />
       <div className="hotkey-hints">
         Ctrl+Shift+Space: Record &nbsp;|&nbsp; Ctrl+Shift+Y: Copy &nbsp;|&nbsp;
