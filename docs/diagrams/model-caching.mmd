@@ -4,8 +4,11 @@ flowchart TB
     end
 
     subgraph Container ["Docker Container"]
+        direction TB
+        spacer[" "]
         cache["/cache"]
         model["WhisperModel"]
+        spacer ~~~ cache
         cache --> model
     end
 
@@ -20,3 +23,4 @@ flowchart TB
     style cache fill:#ffe0b2,stroke:#e65100
     style model fill:#ffe0b2,stroke:#e65100
     style hostcache fill:#bbdefb,stroke:#1565c0
+    style spacer fill:none,stroke:none
