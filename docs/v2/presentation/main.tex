@@ -58,7 +58,8 @@
         \item \textbf{Frontend} --- React component tree and state machine
         \item \textbf{Security} --- Threat model, privacy, operational telemetry
         \item \textbf{Development} --- Workflow, tooling, and testing
-        \item \textbf{Roadmap} --- v1 scope and what comes next
+        \item \textbf{Roadmap} --- Milestone timeline and what comes next
+        \item \textbf{Interaction Model} --- Hotkeys, settings, model selection
     \end{itemize}
 \end{frame}
 
@@ -669,8 +670,8 @@
         \begin{column}{0.48\textwidth}
             \textbf{Runtime behavior}
             \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-                \item Model loaded once at startup
-                \item Held in GPU memory for lifetime
+                \item Loaded at startup, held in GPU memory
+                \item Swappable at runtime (v2.0)
                 \item Synchronous (blocks thread)
                 \item Single-user --- no concurrency
                 \item VAD filtering enabled
@@ -695,15 +696,16 @@
     between container logic, presentational components, and services.
 
     \vspace{0.6em}
-    \begin{itemize}
-        \item \textbf{App} is the sole container component --- it owns all state
-              and orchestrates the record-transcribe-display flow
-        \item \textbf{Recorder} and \textbf{Transcript} are presentational ---
-              they receive props and emit callbacks, no internal state management
-        \item \textbf{useRecorder} encapsulates the MediaRecorder lifecycle
-              in a custom hook, keeping browser API complexity out of components
+    \begin{itemize}\setlength{\itemsep}{1pt}
+        \item \textbf{App} is the sole container component --- it owns all state,
+              calls \texttt{useRecorder} and \texttt{useHotkeys} directly,
+              and orchestrates the full flow
+        \item \textbf{Recorder}, \textbf{Transcript}, and \textbf{Settings} are
+              presentational --- they receive props and emit callbacks
+        \item \textbf{useRecorder} and \textbf{useHotkeys} are custom hooks
+              consumed by App, keeping browser API complexity out of components
         \item \textbf{api.ts} is a thin service layer --- typed \texttt{fetch()}
-              calls with error handling
+              calls for transcription, model list, and model swap
     \end{itemize}
 
     \vspace{0.4em}
@@ -714,37 +716,49 @@
 
 \begin{frame}{Component Architecture --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[
-        node distance=0.6cm,
-        comp/.style={draw, rounded corners=3pt, minimum width=3cm,
-                     minimum height=0.65cm, font=\small, align=center},
+    \begin{tikzpicture}[scale=0.9, every node/.style={transform shape},
+        node distance=0.5cm,
+        comp/.style={draw, rounded corners=3pt, minimum width=2.4cm,
+                     minimum height=0.55cm, font=\small, align=center},
         container/.style={comp, fill=blue!12},
         present/.style={comp, fill=green!12},
         service/.style={comp, fill=orange!12},
         arr/.style={-{Stealth[length=5pt]}, thick},
         lbl/.style={font=\tiny, text=gray},
-        boundary/.style={draw, dashed, rounded corners=5pt, gray, inner sep=8pt},
     ]
         % App
         \node[container] (app) {App (container)};
 
-        % Components
-        \node[present, below left=1cm and 0.8cm of app] (rec) {Recorder};
-        \node[present, below right=1cm and 0.8cm of app] (trans) {Transcript};
+        % Components — three presentational
+        \node[present, below left=1cm and 1.8cm of app] (rec) {Recorder};
+        \node[present, below=1cm of app] (settings) {Settings};
+        \node[present, below right=1cm and 1.8cm of app] (trans) {Transcript};
 
-        % Services
-        \node[service, below=0.8cm of rec] (hook) {useRecorder (hook)};
-        \node[service, below=1.5cm of app] (api) {api.ts (service)};
+        % Hooks — consumed by App
+        \node[service, below left=2.2cm and 0.3cm of app] (useRec) {useRecorder};
+        \node[service, below right=2.2cm and 0.3cm of app] (useHot) {useHotkeys};
+
+        % Service layer
+        \node[service, below=3.2cm of app] (api) {api.ts (service)};
 
         % External
-        \node[lbl, below=0.5cm of hook] (mic) {MediaRecorder API};
-        \node[lbl, below=0.5cm of api] (backend) {localhost:8000};
+        \node[lbl, below=0.4cm of useRec] (mic) {MediaRecorder API};
+        \node[lbl, below=0.4cm of api] (backend) {localhost:8000};
 
-        \draw[arr] (app) -- node[left, lbl]{props, callbacks} (rec);
+        % App → presentational components
+        \draw[arr] (app) -- node[left, lbl]{props} (rec);
+        \draw[arr] (app) -- (settings);
         \draw[arr] (app) -- node[right, lbl]{text, onChange} (trans);
-        \draw[arr] (rec) -- node[left, lbl]{startRecording} (hook);
-        \draw[arr] (app) -- node[right, lbl]{transcribeAudio} (api);
-        \draw[arr, dashed] (hook) -- (mic);
+
+        % App → hooks
+        \draw[arr] (app) -- (useRec);
+        \draw[arr] (app) -- (useHot);
+
+        % App → API
+        \draw[arr] (app) -- node[right, lbl, pos=0.7]{fetch} (api);
+
+        % External boundaries
+        \draw[arr, dashed] (useRec) -- (mic);
         \draw[arr, dashed] (api) -- (backend);
     \end{tikzpicture}
     \end{center}
@@ -983,8 +997,8 @@
     \begin{lstlisting}[language=bash]
 bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \end{lstlisting}
-    Tests \texttt{GET /health} and \texttt{POST /transcribe} against the
-    running API with a real audio file.
+    Tests \texttt{GET /health}, \texttt{POST /transcribe}, and
+    \texttt{GET /models} against the running API.
 \end{frame}
 
 
@@ -998,7 +1012,8 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
                 \item MIME type validation
                 \item Codec parameter stripping
                 \item File size rejection
-                \item Missing file handling
+                \item Happy-path transcription
+                \item Model list and swap endpoints
             \end{itemize}
             \vspace{0.2em}
             {\scriptsize Runs inside Docker container\\(requires faster-whisper imports)}
@@ -1006,11 +1021,10 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         \begin{column}{0.48\textwidth}
             \textbf{Frontend (vitest)}
             \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Record button state transitions
-                \item Transcript textarea rendering
-                \item Copy-to-clipboard action
-                \item Loading state display
-                \item Text edit callback
+                \item Recorder presentational props
+                \item Transcript rendering and copy
+                \item Settings panel: model list, swap,
+                      loading, error, retry
             \end{itemize}
             \vspace{0.2em}
             {\scriptsize Runs on host via Node.js\\(jsdom environment)}
