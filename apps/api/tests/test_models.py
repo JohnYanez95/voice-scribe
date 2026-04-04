@@ -7,7 +7,7 @@ from app.main import app
 client = TestClient(app, raise_server_exceptions=False)
 
 
-@patch("app.routes.models.AVAILABLE_MODELS", ["small", "large-v3"])
+@patch("app.services.transcription.AVAILABLE_MODELS", ["small", "large-v3"])
 @patch("app.routes.models.get_current_model_name", return_value="large-v3")
 def test_list_models_returns_all_available(mock_current):
     response = client.get("/models")
@@ -19,7 +19,7 @@ def test_list_models_returns_all_available(mock_current):
     assert "large-v3" in names
 
 
-@patch("app.routes.models.AVAILABLE_MODELS", ["small", "large-v3"])
+@patch("app.services.transcription.AVAILABLE_MODELS", ["small", "large-v3"])
 @patch("app.routes.models.get_current_model_name", return_value="large-v3")
 def test_list_models_shows_current(mock_current):
     response = client.get("/models")
@@ -32,7 +32,7 @@ def test_list_models_shows_current(mock_current):
             assert m["is_current"] is False
 
 
-@patch("app.routes.models.AVAILABLE_MODELS", ["small", "large-v3"])
+@patch("app.services.transcription.AVAILABLE_MODELS", ["small", "large-v3"])
 @patch("app.routes.models.get_current_model_name", return_value="large-v3")
 @patch("app.routes.models.swap_model")
 def test_swap_model_success(mock_swap, mock_current):
@@ -49,14 +49,14 @@ def test_swap_model_success(mock_swap, mock_current):
     assert data["swap_duration"] == 2.5
 
 
-@patch("app.routes.models.AVAILABLE_MODELS", ["small", "large-v3"])
+@patch("app.services.transcription.AVAILABLE_MODELS", ["small", "large-v3"])
 def test_swap_model_invalid_name():
     response = client.post("/models/swap", json={"model_name": "nonexistent"})
     assert response.status_code == 400
     assert "not available" in response.json()["detail"]
 
 
-@patch("app.routes.models.AVAILABLE_MODELS", ["small", "large-v3"])
+@patch("app.services.transcription.AVAILABLE_MODELS", ["small", "large-v3"])
 @patch("app.routes.models.get_current_model_name", return_value="large-v3")
 def test_swap_model_same_model_noop(mock_current):
     response = client.post("/models/swap", json={"model_name": "large-v3"})
@@ -67,7 +67,7 @@ def test_swap_model_same_model_noop(mock_current):
     assert data["swap_duration"] == 0.0
 
 
-@patch("app.routes.models.AVAILABLE_MODELS", ["small", "large-v3"])
+@patch("app.services.transcription.AVAILABLE_MODELS", ["small", "large-v3"])
 @patch("app.routes.models.get_current_model_name", return_value="large-v3")
 @patch("app.routes.models.swap_model", side_effect=RuntimeError("Load failed"))
 def test_swap_model_failure(mock_swap, mock_current):

@@ -9,8 +9,8 @@ from app.schemas import (
     ModelSwapRequest,
     ModelSwapResponse,
 )
+from app.services import transcription
 from app.services.transcription import (
-    AVAILABLE_MODELS,
     get_current_model_name,
     swap_model,
 )
@@ -24,7 +24,7 @@ router = APIRouter()
 def list_models() -> ModelListResponse:
     current = get_current_model_name()
     return ModelListResponse(
-        models=[ModelInfo(name=m, is_current=(m == current)) for m in AVAILABLE_MODELS],
+        models=[ModelInfo(name=m, is_current=(m == current)) for m in transcription.AVAILABLE_MODELS],
         current_model=current or "",
     )
 
@@ -35,10 +35,10 @@ def list_models() -> ModelListResponse:
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
 def swap_model_route(request: ModelSwapRequest) -> ModelSwapResponse:
-    if request.model_name not in AVAILABLE_MODELS:
+    if request.model_name not in transcription.AVAILABLE_MODELS:
         raise HTTPException(
             status_code=400,
-            detail=f"Model '{request.model_name}' not available. Options: {', '.join(AVAILABLE_MODELS)}",
+            detail=f"Model '{request.model_name}' not available. Options: {', '.join(transcription.AVAILABLE_MODELS)}",
         )
 
     current = get_current_model_name()

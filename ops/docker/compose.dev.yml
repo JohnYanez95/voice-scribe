@@ -7,6 +7,7 @@ services:
       - "8000:8000"
     environment:
       - WHISPER_MODEL=large-v3
+      - WHISPER_AVAILABLE_MODELS=small,large-v3
       - DEVICE=cuda
       - MAX_AUDIO_SECONDS=60
       - MAX_UPLOAD_MB=10
