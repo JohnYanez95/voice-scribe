@@ -15,7 +15,7 @@ stateDiagram-v2
 
     listening : Mic open<br/>VAD active<br/>silence discarded
     listening --> processing : speech detected<br/>(VAD fires)
-    listening --> idle : stop continuous
+    listening --> done : stop continuous
     listening --> error : VAD failure
 
     state processing {
@@ -25,7 +25,7 @@ stateDiagram-v2
         connecting --> receiving
     }
 
-    processing --> done : complete<br/>(push-to-talk)
+    processing --> done : complete<br/>(push-to-talk /<br/>final segment)
     processing --> listening : complete<br/>(continuous)
     processing --> error : error
 
