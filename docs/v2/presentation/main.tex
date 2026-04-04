@@ -731,26 +731,21 @@
     \small
     The UI has six recording pipeline states plus a settings overlay.
 
-    \vspace{0.3em}
-    \begin{itemize}\setlength{\itemsep}{1pt}
+    \vspace{0.1em}
+    \begin{itemize}\setlength{\itemsep}{0pt}
         \item \textbf{idle} --- Ready. Record button enabled.
-        \item \textbf{recording} --- Push-to-talk: capturing audio. Button shows ``Stop''.
-        \item \textbf{listening} --- Continuous: mic open, VAD active.
-              Silence is discarded. Button shows ``Stop''.
-        \item \textbf{processing} --- Transcription in progress.
-              Two streaming sub-phases:
-              \textit{connecting} (WebSocket open, no segments yet --- spinner shown)
-              and \textit{receiving} (segments arriving --- partial transcript visible).
-              In continuous mode, Stop is still active (drain-then-done).
-        \item \textbf{done} --- Transcript in editable textarea. Copy button visible.
-              Reached on push-to-talk complete \textit{or} explicit stop in continuous mode.
+        \item \textbf{recording} --- Push-to-talk: mic active. Button shows ``Stop''.
+        \item \textbf{listening} --- Continuous: mic open, VAD active, silence discarded.
+        \item \textbf{processing} --- Transcription in progress. Sub-phases:
+              \textit{connecting} (spinner) and \textit{receiving} (partial transcript).
+              In continuous mode, Stop remains active for drain-then-done.
+        \item \textbf{done} --- Transcript ready for review and copy.
         \item \textbf{error} --- Error message displayed. User can retry.
     \end{itemize}
 
-    \vspace{0.15em}
-    \textbf{Settings overlay} is orthogonal to the pipeline ---
-    a separate \texttt{settingsOpen: boolean}, not a seventh state.
-    Accessible from idle, done, and error only.
+    \vspace{0.1em}
+    \textbf{Settings overlay} is orthogonal --- a separate \texttt{settingsOpen: boolean},
+    not a seventh state. Accessible from idle, done, and error only.
 \end{frame}
 
 
@@ -1160,32 +1155,23 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
 
 \begin{frame}{v2.2 --- Continuous Recording Mode}
     \small
-    Push-to-talk is unchanged. Continuous mode adds a second recording path
-    where the mic stays open and the browser decides when speech ends.
+    Mic stays open; browser VAD decides when speech ends. Push-to-talk is unchanged.
 
-    \vspace{0.25em}
-    \begin{itemize}\setlength{\itemsep}{1pt}
-        \item \textbf{Client-side VAD} --- \texttt{@ricky0123/vad-web}
-              (Silero VAD v4, ONNX/WASM). Runs entirely in the browser;
-              no audio leaves the device until speech is detected.
-        \item \textbf{Silence discarded} --- frames below the speech
-              threshold are dropped before any network round-trip.
-        \item \textbf{Independent segments} --- each detected utterance
-              becomes its own WebSocket transcription round-trip.
-              Concurrent connections are allowed; results accumulate in order.
-        \item \textbf{No backend changes} --- \texttt{/ws/transcribe}
-              already handles one blob per connection. Continuous mode
-              just calls it more often.
+    \vspace{0.1em}
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item \textbf{Client-side VAD} --- \texttt{@ricky0123/vad-web}, Silero VAD v4,
+              ONNX/WASM. Runs in-browser; no audio sent before speech is detected.
+        \item \textbf{Silence discarded} --- frames below the speech threshold dropped before
+              any network round-trip.
+        \item \textbf{Independent segments} --- each utterance becomes its own WebSocket
+              round-trip. Concurrent connections allowed; results accumulate in order.
+        \item \textbf{No backend changes} --- \texttt{/ws/transcribe} already accepts one blob
+              per connection. Continuous mode calls it once per detected utterance.
     \end{itemize}
 
-    \vspace{0.2em}
-    \begin{block}{Browser requirement}
-        \small
-        Silero VAD uses ONNX Runtime Web (WASM + SharedArrayBuffer).
-        Requires \texttt{Cross-Origin-Opener-Policy: same-origin} and
-        \texttt{Cross-Origin-Embedder-Policy: require-corp} headers ---
-        already set in \texttt{vite.config.ts}.
-    \end{block}
+    \vspace{0.1em}
+    {\footnotesize\textit{Browser requirement:} SharedArrayBuffer (WASM threads).
+    \texttt{COOP: same-origin} + \texttt{COEP: require-corp} set in \texttt{vite.config.ts}.}
 \end{frame}
 
 
@@ -1219,25 +1205,19 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \small
     \textbf{Continuous mode appends; push-to-talk replaces.}
 
-    \vspace{0.3em}
-    \begin{itemize}\setlength{\itemsep}{2pt}
-        \item Each \texttt{onSpeechEnd} triggers an independent
-              \texttt{streamTranscribeAudio} call with \texttt{append=true}.
-              The existing \texttt{useEffect} on \texttt{audioBlob} is
-              \textit{not modified} --- two paths, kept separate.
-        \item \textbf{Paragraph breaks} --- if the gap between the end of
-              one segment's response and the next exceeds
-              \texttt{PARAGRAPH\_BREAK\_MS} (3\,s), a \texttt{\textbackslash
-              n\textbackslash n} separator is inserted. Timing is measured at
-              transcription-complete, which includes GPU inference latency.
-        \item \textbf{Drain-then-done} --- explicit stop while a segment is
-              in-flight sets \texttt{stopRequestedRef.current = true}.
-              When \texttt{onComplete} fires, App transitions to
-              \texttt{done} instead of \texttt{listening}.
-              No segment is dropped.
-        \item \textbf{wsCleanupRef} cancellation is mode-conditional ---
-              push-to-talk cancels the previous connection; continuous
-              does not (concurrent segments must all land).
+    \vspace{0.1em}
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item Each \texttt{onSpeechEnd} calls \texttt{streamTranscribeAudio} directly
+              (imperative, not effect-driven). The push-to-talk \texttt{useEffect} on
+              \texttt{audioBlob} is not modified --- two paths, kept separate.
+        \item \textbf{Paragraph breaks} --- segment response gap $>$\,\texttt{PARAGRAPH\_BREAK\_MS}
+              (3\,s) inserts \texttt{\textbackslash n\textbackslash n}. Timing is at
+              transcription-complete (includes GPU inference latency).
+        \item \textbf{Drain-then-done} --- stop during processing sets
+              \texttt{stopRequestedRef.current}; next \texttt{onComplete} transitions to
+              \texttt{done} instead of \texttt{listening}. No segment is dropped.
+        \item \textbf{wsCleanupRef} cancellation is mode-conditional: push-to-talk cancels
+              the previous connection; continuous does not (concurrent segments must all land).
     \end{itemize}
 \end{frame}
 
