@@ -3,15 +3,15 @@ stateDiagram-v2
 
     [*] --> idle
 
-    idle --> recording : record\n(hotkey / button)
-    recording --> processing : stop\n(hotkey / button)
+    idle --> recording : record<br/>(hotkey / button)
+    recording --> processing : stop<br/>(hotkey / button)
     processing --> done : 200 OK
     processing --> error : error
 
     done --> idle : record
     error --> idle : record
 
-    idle --> settings : open settings\n(gear / hotkey)
+    idle --> settings : open settings<br/>(gear / hotkey)
     done --> settings : open settings
     error --> settings : open settings
     settings --> idle : close settings
