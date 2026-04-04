@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { listModels, swapModel } from "../../services/api";
-import type { ModelInfo } from "../../types";
+import type { ModelInfo, RecordingMode } from "../../types";
 
 interface SettingsProps {
   isOpen: boolean;
@@ -8,11 +8,24 @@ interface SettingsProps {
   onSwapStateChange: (swapping: boolean) => void;
   showRawComparison: boolean;
   onShowRawComparisonChange: (show: boolean) => void;
+  recordingMode: RecordingMode;
+  onRecordingModeChange: (mode: RecordingMode) => void;
+  /** True while recording, listening, or processing — disables mode toggle. */
+  isActive: boolean;
 }
 
 type PanelState = "loading" | "ready" | "swapping" | "error";
 
-export function Settings({ isOpen, onClose, onSwapStateChange, showRawComparison, onShowRawComparisonChange }: SettingsProps) {
+export function Settings({
+  isOpen,
+  onClose,
+  onSwapStateChange,
+  showRawComparison,
+  onShowRawComparisonChange,
+  recordingMode,
+  onRecordingModeChange,
+  isActive,
+}: SettingsProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
   const [panelState, setPanelState] = useState<PanelState>("loading");
@@ -147,6 +160,38 @@ export function Settings({ isOpen, onClose, onSwapStateChange, showRawComparison
           </label>
           <p className="settings-note">
             When enabled, shows the unprocessed transcript alongside the cleaned version.
+          </p>
+        </div>
+
+        <div className="settings-section">
+          <h3>Recording Mode</h3>
+          <div className="settings-model-list">
+            <label className="settings-model-option">
+              <input
+                type="radio"
+                name="recordingMode"
+                value="push-to-talk"
+                checked={recordingMode === "push-to-talk"}
+                onChange={() => onRecordingModeChange("push-to-talk")}
+                disabled={isActive}
+              />
+              <span>Push-to-talk</span>
+            </label>
+            <label className="settings-model-option">
+              <input
+                type="radio"
+                name="recordingMode"
+                value="continuous"
+                checked={recordingMode === "continuous"}
+                onChange={() => onRecordingModeChange("continuous")}
+                disabled={isActive}
+              />
+              <span>Continuous</span>
+            </label>
+          </div>
+          <p className="settings-note">
+            Push-to-talk: hold to record, release to transcribe. Continuous: mic stays
+            open, VAD detects speech automatically.
           </p>
         </div>
       </div>

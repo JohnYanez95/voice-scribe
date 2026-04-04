@@ -19,6 +19,9 @@ const defaultProps = {
   onSwapStateChange: vi.fn(),
   showRawComparison: false,
   onShowRawComparisonChange: vi.fn(),
+  recordingMode: "push-to-talk" as const,
+  onRecordingModeChange: vi.fn(),
+  isActive: false,
 };
 
 beforeEach(() => {
@@ -209,5 +212,44 @@ describe("Settings", () => {
     const checkbox = screen.getByRole("checkbox");
     fireEvent.click(checkbox);
     expect(onShowRawComparisonChange).toHaveBeenCalledWith(false);
+  });
+
+  it("recording mode section renders with push-to-talk selected by default", async () => {
+    await act(async () => {
+      render(<Settings {...defaultProps} recordingMode="push-to-talk" />);
+    });
+
+    const pttRadio = screen.getByRole("radio", { name: "Push-to-talk" }) as HTMLInputElement;
+    const contRadio = screen.getByRole("radio", { name: "Continuous" }) as HTMLInputElement;
+    expect(pttRadio.checked).toBe(true);
+    expect(contRadio.checked).toBe(false);
+  });
+
+  it("clicking continuous fires onRecordingModeChange('continuous')", async () => {
+    const onRecordingModeChange = vi.fn();
+    await act(async () => {
+      render(
+        <Settings
+          {...defaultProps}
+          recordingMode="push-to-talk"
+          onRecordingModeChange={onRecordingModeChange}
+        />
+      );
+    });
+
+    const contRadio = screen.getByRole("radio", { name: "Continuous" });
+    fireEvent.click(contRadio);
+    expect(onRecordingModeChange).toHaveBeenCalledWith("continuous");
+  });
+
+  it("mode radios are disabled when isActive is true", async () => {
+    await act(async () => {
+      render(<Settings {...defaultProps} isActive={true} />);
+    });
+
+    const pttRadio = screen.getByRole("radio", { name: "Push-to-talk" }) as HTMLInputElement;
+    const contRadio = screen.getByRole("radio", { name: "Continuous" }) as HTMLInputElement;
+    expect(pttRadio.disabled).toBe(true);
+    expect(contRadio.disabled).toBe(true);
   });
 });
