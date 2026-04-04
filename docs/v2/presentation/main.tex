@@ -459,49 +459,12 @@
 
 \begin{frame}{Model Caching --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[
-        node distance=0.5cm,
-        box/.style={draw, rounded corners=3pt, minimum width=3cm,
-                    minimum height=0.6cm, font=\small, align=center},
-        cbox/.style={box, fill=orange!15},
-        hbox/.style={box, fill=blue!10},
-        cloudnode/.style={draw, cloud, cloud puffs=8, cloud puff arc=120,
-                      minimum width=2.2cm, minimum height=1cm,
-                      font=\scriptsize, align=center, fill=gray!10},
-        arr/.style={-{Stealth[length=5pt]}, thick},
-        lbl/.style={font=\tiny, text=gray},
-        boundary/.style={draw, dashed, rounded corners=5pt, gray, inner sep=14pt},
-    ]
-        % HuggingFace — top center, clearly above both boundaries
-        \node[cloudnode] (hf) at (3.0, 2.2) {HuggingFace\\Hub};
-
-        % Container — /cache on top so HuggingFace arrow drops cleanly to it
-        \node[cbox] (cache) at (0, 0) {/cache};
-        \node[cbox, below=0.4cm of cache] (model) {WhisperModel};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(cache)(model),
-                  label={[font=\scriptsize, text=gray]above left:Container}] (cbound) {};
-        \end{scope}
-
-        % Host — pushed right so volume mount label has clear air
-        \node[hbox] (hostcache) at (7.0, 0) {data/cache/};
-        \node[lbl, below=0.15cm of hostcache] {gitignored, persistent};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(hostcache),
-                  label={[font=\scriptsize, text=gray]above right:Host}] (hbound) {};
-        \end{scope}
-
-        % Arrows
-        \draw[arr, dashed] (hf.west) -- node[above left, lbl]{first run only} (cache.north);
-        \draw[arr, <->] (cbound.east) -- node[above, font=\scriptsize]{volume mount} (hbound.west);
-        \draw[arr] (cache) -- (model);
-    \end{tikzpicture}
+    \includegraphics[width=0.75\textwidth]{images/model-caching.png}
     \end{center}
 
     \vspace{0.3em}
-    {\scriptsize Dashed arrow = one-time download. Bidirectional arrow = volume mount.
+    {\scriptsize Dashed arrow = one-time download (\textasciitilde3\,GB).
+    Bidirectional arrow = volume mount.
     The model loads from the host filesystem on every startup after the first run.}
 \end{frame}
 
@@ -862,59 +825,14 @@
 
 \begin{frame}{Privacy --- Data Flow Diagram}
     \begin{center}
-    \begin{tikzpicture}[
-        node distance=0.4cm,
-        box/.style={draw, rounded corners=2pt, minimum width=2.6cm,
-                    minimum height=0.5cm, font=\scriptsize, align=center},
-        data/.style={box, fill=red!10},
-        ephemeral/.style={box, fill=yellow!12},
-        output/.style={box, fill=green!12},
-        dead/.style={box, fill=gray!15, text=gray},
-        arr/.style={-{Stealth[length=4pt]}, thick},
-        delarr/.style={-{Stealth[length=4pt]}, thick, red!60, dashed},
-        lbl/.style={font=\tiny, text=gray},
-    ]
-        % Audio path
-        \node[data]      (mic)   at (0, 0) {Microphone audio};
-        \node[data]      (blob)  at (0, -0.8) {Audio blob (memory)};
-        \node[ephemeral] (http)  at (0, -1.6) {HTTP POST (localhost)};
-        \node[ephemeral] (tmp1)  at (0, -2.4) {Temp file (input)};
-        \node[ephemeral] (tmp2)  at (0, -3.2) {Temp file (WAV)};
-        \node[dead]      (del)   at (0, -4.0) {Deleted (finally)};
-
-        % Transcript path
-        \node[output]    (text)  at (5.5, -2.4) {Transcript text};
-        \node[output]    (resp)  at (5.5, -1.6) {JSON response};
-        \node[output]    (area)  at (5.5, -0.8) {Editable textarea};
-        \node[output]    (clip)  at (5.5, 0) {Clipboard};
-
-        % Audio flow
-        \draw[arr] (mic) -- (blob);
-        \draw[arr] (blob) -- (http);
-        \draw[arr] (http) -- (tmp1);
-        \draw[arr] (tmp1) -- (tmp2);
-        \draw[delarr] (tmp2) -- (del);
-
-        % Inference to transcript
-        \draw[arr] (tmp2.east) -- node[above, lbl]{inference} (text.west);
-
-        % Transcript flow
-        \draw[arr] (text) -- (resp);
-        \draw[arr] (resp) -- (area);
-        \draw[arr] (area) -- (clip);
-
-        % Labels
-        \node[lbl, left=0.2cm of mic] {transient};
-        \node[lbl, left=0.2cm of del] {guaranteed};
-        \node[lbl, right=0.2cm of clip] {user action};
-    \end{tikzpicture}
+    \includegraphics[height=0.72\textheight]{images/privacy-data-flow.png}
     \end{center}
 
     \vspace{0.1em}
     {\scriptsize \textcolor{red!60}{Red} = sensitive audio (transient).
     \textcolor{yellow!70!black}{Yellow} = ephemeral intermediate.
     \textcolor{green!50!black}{Green} = transcript output (user-controlled).
-    \textcolor{gray}{Gray} = deleted. Red dashed = deletion point.}
+    \textcolor{gray}{Gray} = deleted. Dashed arrow = deletion point.}
 \end{frame}
 
 

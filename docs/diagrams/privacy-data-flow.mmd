@@ -1,0 +1,36 @@
+flowchart TB
+    subgraph Audio Path ["Audio Path (transient)"]
+        direction TB
+        mic(["Microphone audio"])
+        blob["Audio blob (memory)"]
+        http["HTTP POST (localhost)"]
+        tmp1["Temp file (input)"]
+        tmp2["Temp file (WAV)"]
+        del{{"Deleted (finally block)"}}
+
+        mic --> blob --> http --> tmp1 --> tmp2
+        tmp2 -.->|"guaranteed cleanup"| del
+    end
+
+    subgraph Transcript Path ["Transcript Path (user-controlled)"]
+        direction TB
+        text["Transcript text"]
+        resp["JSON response"]
+        area["Editable textarea"]
+        clip(["Clipboard"])
+
+        text --> resp --> area --> clip
+    end
+
+    tmp2 -->|"inference"| text
+
+    style mic fill:#ffcdd2,stroke:#c62828
+    style blob fill:#ffcdd2,stroke:#c62828
+    style http fill:#fff9c4,stroke:#f9a825
+    style tmp1 fill:#fff9c4,stroke:#f9a825
+    style tmp2 fill:#fff9c4,stroke:#f9a825
+    style del fill:#e0e0e0,stroke:#757575,color:#757575
+    style text fill:#c8e6c9,stroke:#2e7d32
+    style resp fill:#c8e6c9,stroke:#2e7d32
+    style area fill:#c8e6c9,stroke:#2e7d32
+    style clip fill:#c8e6c9,stroke:#2e7d32
