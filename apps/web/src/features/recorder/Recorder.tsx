@@ -1,50 +1,36 @@
-import { useEffect } from "react";
-import { useRecorder } from "../../hooks/useRecorder";
 import type { RecordingState } from "../../types";
 
 interface RecorderProps {
   state: RecordingState;
-  onStateChange: (state: RecordingState) => void;
-  onRecordingComplete: (blob: Blob) => void;
+  isRecording: boolean;
+  onToggle: () => void;
+  recorderError: string | null;
+  disabled: boolean;
 }
 
-export function Recorder({ state, onStateChange, onRecordingComplete }: RecorderProps) {
-  const { startRecording, stopRecording, audioBlob, isRecording, error } = useRecorder();
-
-  // Sync hook state with parent
-  useEffect(() => {
-    if (error) {
-      onStateChange("error");
-    }
-  }, [error, onStateChange]);
-
-  useEffect(() => {
-    if (audioBlob) {
-      onRecordingComplete(audioBlob);
-    }
-  }, [audioBlob, onRecordingComplete]);
-
-  const handleClick = async () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      onStateChange("recording");
-      await startRecording();
-    }
-  };
-
-  const isDisabled = state === "processing";
+export function Recorder({
+  state,
+  isRecording,
+  onToggle,
+  recorderError,
+  disabled,
+}: RecorderProps) {
+  const buttonText = isRecording
+    ? "Stop"
+    : state === "processing"
+      ? "Processing..."
+      : "Record";
 
   return (
     <div className="recorder">
       <button
         className={`record-btn ${isRecording ? "recording" : ""}`}
-        onClick={handleClick}
-        disabled={isDisabled}
+        onClick={onToggle}
+        disabled={disabled}
       >
-        {isRecording ? "Stop" : state === "processing" ? "Processing..." : "Record"}
+        {buttonText}
       </button>
-      {error && <p className="error">{error}</p>}
+      {recorderError && <p className="error">{recorderError}</p>}
     </div>
   );
 }
