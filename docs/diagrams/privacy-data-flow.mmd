@@ -1,0 +1,32 @@
+flowchart TD
+    mic["Microphone audio"]
+    blob["Audio blob"]
+
+    mic --> blob
+    blob --> http["HTTP POST"]
+    blob --> wsIn["WebSocket binary"]
+
+    http --> tmp1["Temp file — input"]
+    wsIn --> tmp1
+
+    tmp1 --> tmp2["Temp file — WAV"]
+    tmp2 -- inference --> txt["Transcript text"]
+    tmp2 --> del["Deleted"]
+
+    txt --> resp["JSON response"]
+    txt --> wsOut["WS segments"]
+
+    resp --> area["Editable textarea"]
+    wsOut --> area
+
+    area --> clip["Clipboard"]
+
+    classDef sensitive fill:#ffdddd,stroke:#cc4444
+    classDef ephemeral fill:#fffacc,stroke:#b8900a
+    classDef output fill:#ddf5dd,stroke:#448844
+    classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
+
+    class mic,blob sensitive
+    class http,wsIn,tmp1,tmp2 ephemeral
+    class txt,resp,wsOut,area,clip output
+    class del deleted
