@@ -24,6 +24,9 @@ data/cache/
 *.swp
 *.swo
 
+# Private docs (aspirational, not committed)
+docs/private/
+
 # OS
 .DS_Store
 Thumbs.db
