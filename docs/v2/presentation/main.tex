@@ -459,10 +459,10 @@
 
 \begin{frame}{Model Caching --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[
-        node distance=0.5cm,
+    \begin{tikzpicture}[scale=0.85, every node/.style={transform shape},
+        node distance=0.4cm,
         box/.style={draw, rounded corners=3pt, minimum width=3cm,
-                    minimum height=0.6cm, font=\small, align=center},
+                    minimum height=0.55cm, font=\small, align=center},
         cbox/.style={box, fill=orange!15},
         hbox/.style={box, fill=blue!10},
         cloudnode/.style={draw, cloud, cloud puffs=8, cloud puff arc=120,
@@ -470,14 +470,14 @@
                       font=\scriptsize, align=center, fill=gray!10},
         arr/.style={-{Stealth[length=5pt]}, thick},
         lbl/.style={font=\tiny, text=gray},
-        boundary/.style={draw, dashed, rounded corners=5pt, gray, inner sep=14pt},
+        boundary/.style={draw, dashed, rounded corners=5pt, gray, inner sep=12pt},
     ]
         % HuggingFace — top center, clearly above both boundaries
-        \node[cloudnode] (hf) at (3.0, 2.2) {HuggingFace\\Hub};
+        \node[cloudnode] (hf) at (3.0, 2.0) {HuggingFace\\Hub};
 
         % Container — /cache on top so HuggingFace arrow drops cleanly to it
         \node[cbox] (cache) at (0, 0) {/cache};
-        \node[cbox, below=0.4cm of cache] (model) {WhisperModel};
+        \node[cbox, below=0.35cm of cache] (model) {WhisperModel};
 
         \begin{scope}[on background layer]
             \node[boundary, fit=(cache)(model),
@@ -486,7 +486,7 @@
 
         % Host — pushed right so volume mount label has clear air
         \node[hbox] (hostcache) at (7.0, 0) {data/cache/};
-        \node[lbl, below=0.15cm of hostcache] {gitignored, persistent};
+        \node[lbl, below=0.12cm of hostcache] {gitignored, persistent};
 
         \begin{scope}[on background layer]
             \node[boundary, fit=(hostcache),
@@ -500,9 +500,9 @@
     \end{tikzpicture}
     \end{center}
 
-    \vspace{0.3em}
+    \vspace{0.1em}
     {\scriptsize Dashed arrow = one-time download. Bidirectional arrow = volume mount.
-    The model loads from the host filesystem on every startup after the first run.}
+    Model loads from host filesystem on every startup after first run.}
 \end{frame}
 
 
@@ -653,37 +653,36 @@
     \texttt{faster-whisper} provides CTranslate2-optimized Whisper inference,
     running locally on the GPU with no external API calls.
 
-    \vspace{0.3em}
+    \vspace{0.2em}
     \begin{columns}[T]
         \begin{column}{0.48\textwidth}
             \textbf{Model configuration}
-            \begin{itemize}\setlength{\itemsep}{0pt}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Model: \texttt{large-v3} (default)
                 \item Device: CUDA (GPU)
                 \item Compute type: \texttt{float16}
                 \item Beam size: 5
                 \item Fallback: \texttt{small} on CPU, \texttt{int8}
-                      {\scriptsize\textit{(wired; end-to-end smoke test pending)}}
+                      {\scriptsize\textit{(verified)}}
             \end{itemize}
         \end{column}
         \begin{column}{0.48\textwidth}
             \textbf{Runtime behavior}
-            \begin{itemize}\setlength{\itemsep}{0pt}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Model loaded once at startup
-                \item Held in GPU memory for process lifetime
+                \item Held in GPU memory for lifetime
                 \item Synchronous (blocks thread)
                 \item Single-user --- no concurrency
+                \item VAD filtering enabled
             \end{itemize}
         \end{column}
     \end{columns}
 
-    \vspace{0.3em}
-    \begin{block}{Synchronous Design}
-        \texttt{faster-whisper} blocks the Python thread during inference.
-        For a single-user local tool, this is correct. Future rework path:
-        \texttt{asyncio.to\_thread()} or a background task with polling.
-        Both change the API contract --- this is not a v1 problem.
-    \end{block}
+    \vspace{0.2em}
+    {\footnotesize\textbf{Synchronous design:}
+    \texttt{faster-whisper} blocks the thread during inference.
+    Correct for single-user. Rework path: \texttt{asyncio.to\_thread()}
+    or background task with polling (both change the API contract).}\par
 \end{frame}
 
 
