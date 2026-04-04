@@ -37,11 +37,6 @@ stateDiagram-v2
     error --> settings : open settings
     settings --> idle : close settings
 
-    note right of settings
-        Overlay panel — not a pipeline state.
-        settingsOpen: boolean
-    end note
-
     class idle idleClass
     class recording activeClass
     class listening activeClass

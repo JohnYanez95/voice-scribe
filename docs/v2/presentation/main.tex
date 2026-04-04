@@ -752,9 +752,16 @@
     \includegraphics[height=0.72\textheight,keepaspectratio]{images/state-machine.png}
     \end{center}
 
-    {\scriptsize \texttt{RecordingState} enum is unchanged.
-    Sub-phases \textit{connecting} and \textit{receiving} are derived from
-    application state (\texttt{text} empty vs.\ non-empty), not new enum values.}
+    {\scriptsize
+    \textcolor{blue!50!black}{Blue} = idle \quad
+    \textcolor{red!60!black}{Red} = mic active (recording / listening) \quad
+    \textcolor{yellow!60!black}{Yellow} = in-flight (processing) \quad
+    \textcolor{green!50!black}{Green} = done \quad
+    \textcolor{red!40!black}{Pink} = error \quad
+    \textcolor{violet!60!black}{Lavender} = settings overlay (\texttt{settingsOpen: boolean},
+    orthogonal to pipeline).
+    Mode-conditional exit from \texttt{processing}: push-to-talk $\to$ \texttt{done};
+    continuous $\to$ \texttt{listening}.}
 \end{frame}
 
 
