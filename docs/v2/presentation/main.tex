@@ -124,8 +124,8 @@
 
         \vspace{0.3em}
         \item \textbf{Scope matches the milestone}\\
-              Repo structure and services reflect v1 reality,
-              not v3 aspirations. Architecture stays flat until
+              Repo structure and services reflect current reality,
+              not future aspirations. Architecture stays flat until
               complexity is earned.
     \end{enumerate}
 \end{frame}
@@ -405,10 +405,7 @@
         lbl/.style={font=\tiny, text=gray},
     ]
         \node[hw]   (gpu)    {NVIDIA GPU (hardware)};
-        % TODO: replace v591+ with the specific driver version validated by the team
-        %       and append the validation date, e.g. {Windows NVIDIA Driver (v591.43, validated 2026-MM-DD)}
-        %       Principal's note: "591+ will mean something different six months from now."
-        \node[os,   below=of gpu]   (driver) {Windows NVIDIA Driver (v591+)};
+        \node[os,   below=of gpu]   (driver) {Windows NVIDIA Driver (v591.86, validated 2026-04-04)};
         \node[os,   below=of driver](wsl)    {WSL2 Kernel (GPU bridge)};
         \node[dock, below=of wsl]   (docker) {Docker Desktop (WSL2 backend)};
         \node[dock, below=of docker](compose){Docker Compose (nvidia runtime)};
