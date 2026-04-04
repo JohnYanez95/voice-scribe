@@ -191,9 +191,9 @@ These are understood constraints, not defects:
 **v1.1** (priority order)
 
 1. `clean_transcript(raw: str) -> str` — single pure function in `apps/api/services/`. Rule-based only: whitespace normalization, punctuation, capitalization, repeated-word removal. No config, no toggles. API response returns both `raw` and `cleaned` fields for side-by-side quality evaluation. Run against real dictation for one week before deciding what needs to be configurable.
-2. **Extend state machine diagram** — update `docs/v1/presentation/main.tex` state machine to cover any new states introduced by the settings UI before writing component code. Diagram first, then code.
-3. **Settings UI** — separate work item; comes after the cleanup pass is validated.
-4. **Retention controls** — separate work item; comes after cleanup. Do not bundle with item 1.
+2. ~~**Extend state machine diagram**~~ — *superseded: no new UI states were introduced by item 1. Removed from v1.1 scope. Diagram updates gate on v2.0 settings panel instead.*
+3. ~~**Settings UI**~~ — *superseded: original motivation (cleanup toggles) eliminated by item 1 evaluation. Moved to v2.0 with concrete content (recording mode, model selection).*
+4. ~~**Retention controls**~~ — *superseded: the system has no server-side persistence and the security posture prohibits it. Removed from scope — not deferred, removed. See roadmap for rationale.*
 
 **v2**
 - Desktop packaging (Tauri)

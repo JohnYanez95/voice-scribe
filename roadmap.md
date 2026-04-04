@@ -1,31 +1,28 @@
-# Voice Scribe — v1 Roadmap
+# Voice Scribe — Roadmap
 
-**Last Updated:** April 3, 2026 (v1.1 closed)
-**Status:** v1.1 Complete — v1.2 planning not yet started
+**Last Updated:** April 4, 2026
+**Status:** v1.1 Complete — v2 planning in progress
 
 ---
 
 ## What This Document Is
 
-This is the single source of truth for building Voice Scribe v1. It consolidates the original design spec, the senior engineer's review, and the principal's execution directives into one reference. If something in this document contradicts an earlier draft, this document wins.
+This is the single source of truth for building Voice Scribe. It consolidates the original design spec, review feedback, and execution directives into one reference. If something in this document contradicts an earlier draft, this document wins.
 
 ---
 
 ## Product Summary
 
-Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech in a browser UI, a containerized backend transcribes it locally via `faster-whisper`, and the transcript appears in an editable text area for copying into tools like Claude Code.
+Voice Scribe is a local-first speech-to-text **primitive** — a building block for voice-driven workflows, not a finished product. The goal is a standalone application that users can configure, embed, and compose with other tools.
 
-**v1 scope is intentionally narrow:**
+Two convergent use cases drive the design:
 
-- Record one utterance
-- Send it to a local transcription API
-- Return transcript text
-- Show it in an editable text area
-- Copy the result to clipboard
+1. **Developer productivity** — hands-free coding workflow. Speak prompts and thoughts into Claude Code, terminals, IDEs, or any text input. No typing, no context switching.
+2. **Language learning** — pronunciation practice and conversational tutoring in foreign languages (Japanese is the primary target). Voice Scribe provides the STT foundation; separate TTS and language tutor projects compose on top (see Adjacent Projects).
 
-That is the entire v1 product.
+Both use cases demand the same underlying capabilities: accurate multilingual transcription, low-latency response, composable output, and eventually bidirectional voice interaction.
 
-**Explicit non-goals for v1:** continuous dictation, live streaming partial transcripts, multi-user deployment, async job queues, background workers, reverse proxies, desktop packaging, long-term audio storage, grammar LLM integration.
+**v1 scope was intentionally narrow:** record one utterance, send to a local transcription API, return transcript text, show in an editable text area, copy to clipboard. That scope has been delivered and validated.
 
 ---
 
@@ -391,33 +388,88 @@ Run `smoke_test.sh` with `DEVICE=cpu` and `WHISPER_MODEL=small`. Confirm a trans
 
 **Evaluation outcome (2026-04-03):** Whisper large-v3 already handles punctuation, capitalization, and filler suppression on short clean audio. The full rule set evaluated (punctuation spacing, duplicate removal, post-sentence capitalization) solved problems that don't exist for this use case. Function stripped to two rules: whitespace normalization and first-letter capitalization. VAD filtering (`vad_filter=True`) enabled for hallucination prevention. A second cleanup model (LLM or GEC) was evaluated and rejected — the risk of mangling technical content outweighs the marginal quality gain over Whisper's native output.
 
-**Deferred items and rationale:**
+**Removed items (not deferred — removed from scope):**
 
-- **Retention controls** — dropped from v1.1. The system has no server-side persistence. Audio is deleted in the `finally` block. Transcripts exist only in React state and vanish on page refresh. There is nothing to configure. Any UI surface for "retention" would be documentation of the current transient behavior, not a feature. That belongs in the privacy docs, which already cover it. Retention controls should not re-enter scope until the team has a concrete use case that requires persistence.
+- **Retention controls** — removed. The system has no server-side persistence. Audio is deleted in the `finally` block. Transcripts exist only in React state and vanish on page refresh. The security posture actively prohibits persistence. There is nothing to configure. This is not a deferral — there is no valid use case. Do not re-introduce unless a concrete requirement for persistence emerges.
 
-- **State machine diagram update** — dropped from v1.1. The diagram is updated when new UI states exist to diagram. v1.1 introduced no new states. Update is a no-op and does not warrant a commit.
+- **State machine diagram update** — removed. Exists to cover new UI states. v1.1 introduced no new states. No-op.
 
-- **Settings panel** — dropped from v1.1. The original motivation (cleanup toggles) was eliminated by the evaluation finding. Model selection (the candidate replacement) was parked deliberately; "the settings panel needs something in it" is not sufficient justification to pull it forward. Defer to v1.2 planning.
+- **Settings panel** — removed from v1.1. The original motivation (cleanup toggles) was eliminated by the evaluation finding. The settings panel has real content in v2 (recording mode, model selection) and belongs there.
 
 **Evaluation tooling retained intentionally:** The comparison view in `Transcript.tsx` (lines 43–58) was built for the cleanup evaluation. It is gated on `rawText !== text`, which is true only when whitespace normalization or first-letter cap actually fires. Low render frequency, lightweight code. Retained because it will be useful if the cleanup function grows later. Not orphaned code.
 
 **A second GPU-backed model for cleanup** is deferred — evaluated and found unnecessary for this use case. Revisit only if Whisper output quality degrades on longer recordings or non-English dictation.
 
-### v1.2
+### v2 — Interaction Model
 
-Planning not yet started. Do not carry forward the v1.1 item ordering as a pre-formed sequence — that sequence was designed around cleanup toggle assumptions that didn't survive evaluation. When v1.2 planning begins, start from: *what does the user actually need next based on real usage of v1 and v1.1?*
+Build on the web app first. Prove the interaction patterns in the browser before packaging as a desktop app. The web app is the fastest iteration loop, and the architecture transfers to Tauri.
 
-Items eligible for consideration, in no assumed priority order: settings panel (if concrete content exists for it), model selection UI, state machine diagram update (only if new UI states are introduced), retention controls (only if a use case requiring persistence emerges).
+Broken into sequenced sub-milestones. Each builds on the prior one.
 
-### v2
+#### v2.0 — Hotkeys + Settings Panel
 
-Optional desktop packaging (Tauri). Hotkeys. Session history. Smarter silence detection. Optional streaming mode.
+No API contract change. Immediately useful. Low risk.
+
+- **Hotkey system** — dedicated keyboard shortcuts for start/stop recording, copy transcript, reset/clear. Works when app is focused. Global hotkeys (system-wide) are a v3/Tauri feature.
+- **Settings panel** — first real content: recording mode selection (push-to-talk vs continuous) and model selection (swap between `large-v3`, `small`, etc. without editing `.env`). These two settings justify the panel. Additional settings (VAD sensitivity, voice command phrases) land in later sub-milestones as their features ship.
+- **State machine diagram** — update to cover settings panel states before writing component code. Principal's standing instruction: diagram first, then code.
+
+#### v2.1 — Streaming + VAD
+
+One milestone, one API contract change. The biggest architectural change in the project.
+
+- **Streaming transcription** — WebSocket transport replaces (or supplements) the HTTP POST endpoint. The user sees words appearing as they speak. faster-whisper supports segment-by-segment output; the backend streams segments as they complete.
+- **Voice activity detection (VAD)** — client-side or server-side (Silero VAD is the leading candidate, already integrated with faster-whisper). Detects speech onset and offset, filters background noise.
+
+#### v2.2 — Continuous Mode + Segmentation
+
+Builds on v2.1 streaming and VAD.
+
+- **Continuous recording mode** — mic stays open. VAD detects speech vs silence. Transcription streams as the user talks. Accumulates until explicit reset.
+- **Segmentation mechanisms** (all may coexist):
+  1. Silence-based paragraph breaks — extended silence inserts a visual break. Automatic, passive.
+  2. Hotkey reset — keyboard shortcut for "that thought is done, start fresh below." Manual, explicit.
+- **Two recording modes are user-selectable** via the settings panel shipped in v2.0.
+
+#### v2.3 — Voice Command Vocabulary
+
+Lightweight implementation. Needs continuous mode (v2.2) to be meaningful.
+
+- A small set of key phrases that form a control language within the voice stream:
+  - **Stop** — halt recording
+  - **Submit** — deliver current transcript to clipboard
+  - **Redo** — discard current transcript, start fresh
+  - **Clear** — reset the transcript buffer
+- All implemented as lightweight string matches on incoming segments, stripped from output before display.
+- **Ship with fixed phrases first.** Evaluate for false positives in real dictation before adding configurability. Phrase customization is a future settings addition, not a v2.3 requirement.
+- Phrases must be phonetically distinctive, semantically absurd in a developer context, and resistant to false positives.
+
+### v3 — Desktop Application (Tauri)
+
+Start Tauri work after voice commands are working and the settings panel is stable in the browser. Direct injection (transcript delivered to the focused application without manual paste) is the Tauri-only value proposition — it requires native OS access the browser cannot provide. Until that feature is needed, Tauri adds no value over the web app.
+
+- **No Docker dependency** — Whisper runs natively on the host GPU. The user should not need Docker Desktop running to dictate. Backend options: Python running natively on the host, or Rust-side inference via whisper.cpp / candle. Architecture decision requires Principal review.
+- **Same UI** — recording modes, streaming, VAD, voice commands, settings panel.
+- **System tray** — app runs in background, accessible via global hotkey from any application.
+- **Global hotkeys** — trigger recording from any application, not just when Voice Scribe is focused.
+- **Direct injection** — transcript injected into the focused text field (terminal, IDE, Claude Code prompt) without manual paste. Voice command ("submit") triggers injection. Clipboard fallback always available.
+- **Model management** — model download, selection, and caching without editing config files.
+
+---
+
+## Adjacent Projects (Separate Silos)
+
+These compose with Voice Scribe but are **not part of its roadmap**. They are separate projects with separate repositories. This boundary is stated explicitly to prevent scope erosion.
+
+**Text-to-Speech (TTS)** — the output half of the voice conversation loop. Voice Scribe handles input (speech → text); TTS handles output (text → speech). Together they enable a hands-free conversational interface. Same local-first constraint — no cloud APIs. Models to evaluate when the time comes: Coqui TTS, Bark, VITS, Piper.
+
+**Language Tutor Agent** — a conversational agent for foreign language pronunciation and speaking practice. Primary target: Japanese. Listens to the user speak (via Voice Scribe STT), compares against expected pronunciation, provides corrective feedback, converses in the target language. Integrates with existing Anki flashcard resources. Dependencies: Voice Scribe, TTS project, and a language-aware evaluation model.
 
 ---
 
 ## Deferred Decisions
 
-These are deferred by design, not by oversight: OpenAPI-generated frontend contracts, domain/infra folder split, queue/background workers, reverse proxy, grammar refinement LLM, WebSocket transport.
+These are deferred by design, not by oversight: OpenAPI-generated frontend contracts, domain/infra folder split, queue/background workers, reverse proxy.
 
 ---
 
@@ -451,34 +503,31 @@ Do not publish with: permissive network exposure, transcript or audio logging en
 
 ## Summary
 
-Ship v1 small. Earn the right to make it bigger.
+Ship small. Earn the right to make it bigger. Build the primitive, then build on top of it.
 
 ---
 
-## Ideas (Post-v2 Parking Lot)
+## Ideas (Parking Lot)
 
-Not planned. Not scoped. These surfaced naturally while building and are worth remembering when the time is right.
+Not planned. Not scoped. These surfaced naturally while building and are worth remembering when the time is right. Items promoted into the roadmap are marked as such.
 
 **Docker image size reduction**
-The `nvidia/cuda:12.6` base accounts for ~2.1GB of the image on its own. Several CUDA packages installed in that layer — `libnccl` (multi-GPU communication), `libnpp` (signal/image processing) — are not used by faster-whisper for single-GPU inference. Auditing and trimming these could meaningfully reduce image size. Requires rebuilding and running the smoke test to confirm nothing breaks.
+The `nvidia/cuda:12.6` base accounts for ~2.1GB of the image on its own. Several CUDA packages — `libnccl`, `libnpp` — are not used by faster-whisper for single-GPU inference. Auditing and trimming could meaningfully reduce image size.
 
 **MIME magic-byte validation**
-Currently MIME type is checked from the `Content-Type` header, which is self-reported. Adding magic-byte checking (reading the first few bytes of the file and confirming they match the declared format) would be a one-line addition to the existing `validate_mime_type` function. Natural pre-condition before any networking work — not needed for a localhost single-user tool.
+Adding magic-byte checking to `validate_mime_type` would be a one-line addition. Natural pre-condition before any networking work — not needed for a localhost single-user tool.
 
-**Security hardening as a v2 pre-condition**
-Before anything leaves localhost — any network exposure, multi-user path, or public API — the threat model should be revisited. MIME hardening, rate limiting, and bind address controls are the obvious starting points.
+**Security hardening as a pre-condition for network exposure**
+Before anything leaves localhost, the threat model should be revisited. MIME hardening, rate limiting, and bind address controls are the obvious starting points.
 
-**Model selection UI**
-`WHISPER_MODEL` is currently set via `.env`. A simple settings panel letting the user toggle between `large-v3` and `small` without editing files would be a natural quality-of-life addition once v1.1's settings UI exists.
+~~**Model selection UI**~~ — promoted to v2.0.
 
-**Voice activity detection (VAD) for automatic utterance boundaries**
-Rather than manual record/stop, a lightweight VAD layer upstream of the recorder could detect when speech begins and ends automatically — removing the button interaction entirely. A simple dB threshold gate handles the easy cases (silence vs. speech). A lightweight learned VAD like Silero VAD handles harder cases (keyboard noise, background audio). Pairs naturally with streaming partials and smarter silence detection already noted in v2. Simpler version of the idle filtering pattern used in the work project — single speaker, controlled environment, no device disambiguation required.
+~~**Voice activity detection (VAD)**~~ — promoted to v2.1.
 
-**Streaming partials**
-Faster-whisper supports segment-by-segment output. Surfacing partial transcripts as they arrive rather than waiting for the full result would make long recordings feel more responsive. Requires WebSocket transport and changes the API contract — firmly a post-v2 consideration.
+~~**Streaming partials**~~ — promoted to v2.1.
 
 **Single `docker compose up` for full stack**
-Currently `docker compose up` only starts the API container — the frontend requires a separate `make web` invocation. Adding the frontend as a second service in `compose.dev.yml` with a Node container running Vite (`--host` flag required so it binds to `0.0.0.0`) would mean one command starts and stops everything together. Small change, meaningful quality of life improvement once the core product is finalized.
+Adding the frontend as a second service in `compose.dev.yml` so one command starts everything. Small change, meaningful quality of life.
 
 **CPU-only deployment path**
-The CPU fallback is already wired (`DEVICE=cpu`, `int8` compute type auto-selected) but has not been exercised end-to-end. For use on machines without a GPU — such as a work laptop — the Docker container dependency becomes friction since CUDA is the primary reason the container exists. Worth exploring whether CPU inference could run outside Docker entirely, potentially accelerating the v2 Tauri packaging work. `large-v3` on CPU will be slow; `small` is the practical model choice for this path.
+The CPU fallback is wired and verified (v1 close-out, ~1.87s latency on i9-12900K with `small` model). Worth exploring whether CPU inference could run outside Docker entirely, accelerating the v3 Tauri packaging work.
