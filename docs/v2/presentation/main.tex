@@ -992,10 +992,11 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
                 \item Client-side VAD (\texttt{@ricky0123/vad-web})
                 \item Paragraph break accumulation
             \end{itemize}
-            \textbf{v2.3}
+            \textbf{v2.3} (complete)
             \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Voice command vocabulary
                 \item Stop, submit, redo, clear phrases
+                \item Hotkey reset (Ctrl+Shift+R)
             \end{itemize}
         \end{column}
     \end{columns}
@@ -1023,6 +1024,7 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         \texttt{Ctrl+Shift+Y}     & Copy transcript \\
         \texttt{Ctrl+Shift+X}     & Clear transcript \\
         \texttt{Ctrl+Shift+S}     & Toggle settings panel \\
+        \texttt{Ctrl+Shift+R}     & Insert paragraph break \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -1218,6 +1220,68 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
               \texttt{done} instead of \texttt{listening}. No segment is dropped.
         \item \textbf{wsCleanupRef} cancellation is mode-conditional: push-to-talk cancels
               the previous connection; continuous does not (concurrent segments must all land).
+    \end{itemize}
+\end{frame}
+
+
+% v2.3 slides
+\section{v2.3 --- Voice Commands}
+
+\begin{frame}{v2.3 --- Voice Command Vocabulary}
+    \small
+    A small control language embedded in the voice stream. Commands are
+    exact-segment matches: the \emph{entire} transcribed segment must be the
+    command phrase. Mid-sentence occurrences (``I should scribe clear that'')
+    do not fire.
+
+    \vspace{0.3em}
+    \begin{table}
+    \centering\small
+    \begin{tabular}{@{} l l l @{}}
+        \toprule
+        \textbf{Phrase} & \textbf{Action} & \textbf{Mode} \\
+        \midrule
+        \texttt{scribe stop}   & Halt recording                    & Continuous only \\
+        \texttt{scribe submit} & Copy transcript to clipboard      & Both \\
+        \texttt{scribe redo}   & Clear transcript buffer           & Both \\
+        \texttt{scribe clear}  & Clear transcript buffer           & Both \\
+        \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \vspace{0.3em}
+    \textbf{Prefix design} --- shared ``scribe'' prefix collapses the
+    false-positive surface to one distinctive word. Standalone action verbs
+    (``stop,'' ``clear'') false-positive in developer dictation; ``scribe stop''
+    does not. Gate~1 confirmed 38/40 at normal speaking pace on \texttt{large-v3}.
+\end{frame}
+
+
+\begin{frame}{v2.3 --- Detection Architecture}
+    \small
+    \textbf{Detection surface: \texttt{onComplete} only} --- both modes.
+    Single detection point; no streaming partial check required.
+
+    \vspace{0.3em}
+    \begin{itemize}\setlength{\itemsep}{2pt}
+        \item \textbf{Normalization} --- trim, lowercase, strip trailing
+              \texttt{.!?,}. Handles Whisper's capitalized first letter and
+              near-universal trailing period (Gate~1 observation).
+        \item \textbf{Exact-segment match} --- \texttt{COMMAND\_MAP} lookup in
+              \texttt{src/utils/voiceCommands.ts}. Adding a fifth command is
+              one table entry.
+        \item \textbf{Command segments are consumed} --- nothing is appended to
+              the transcript. No strip function needed.
+        \item \textbf{redo/clear} set transcript state directly; they do not
+              call \texttt{handleClearTranscript} (which sets \texttt{idle}).
+              The transition block is the sole owner of \texttt{RecordingState}
+              per callback invocation.
+        \item \textbf{transcriptRef} --- stable ref updated each render gives
+              ``scribe submit'' a consistent view of the transcript inside the
+              \texttt{triggerTranscription} closure.
+        \item \textbf{Ctrl+Shift+R} --- manual paragraph break; resets
+              \texttt{lastSegmentTimestampRef} to 0 to prevent the automatic
+              break from double-firing on the next segment.
     \end{itemize}
 \end{frame}
 
