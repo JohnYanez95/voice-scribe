@@ -922,33 +922,30 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         \begin{column}{0.48\textwidth}
             \textbf{Backend (pytest, 41 tests)}
             \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Health endpoint responses
-                \item MIME validation + codec stripping
-                \item File size rejection
-                \item Happy-path transcription
+                \item Health, MIME validation, size limits,
+                      happy-path transcription
+                \item Transcript cleanup: normalization,
+                      idempotency (parametrized)
                 \item Model list and swap endpoints
-                \item WebSocket endpoint: origin enforcement,
-                      size validation, happy path, inference
-                      failure, swap concurrency contract
+                \item WebSocket: origin enforcement, payload
+                      validation, happy path, inference failure,
+                      swap concurrency contract
             \end{itemize}
         \end{column}
         \begin{column}{0.48\textwidth}
-            \textbf{Frontend (vitest, 22 tests)}
+            \textbf{Frontend (vitest, 65 tests)}
             \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Recorder presentational props
-                \item Transcript rendering and copy
-                \item Settings panel: model list, swap,
-                      loading, error, retry
-                \item Settings display: comparison toggle
-                      renders, fires correct callback
+                \item Recorder and Transcript (v1 suite)
+                \item Settings panel: swap states,
+                      comparison toggle, recording mode
+                \item VAD hook and WAV encoder: lifecycle,
+                      callbacks; header, magic bytes, clamp
+                \item App and voice command: continuous
+                      cycle, drain-then-done; normalization,
+                      exact-segment guard, false positives
             \end{itemize}
         \end{column}
     \end{columns}
-
-    \vspace{0.3em}
-    {\footnotesize\textbf{Philosophy:} Happy path plus obvious failure boundaries.
-    Smoke test exercises the running system end-to-end (\texttt{/health},
-    \texttt{/transcribe}, \texttt{/models}).}
 \end{frame}
 
 
@@ -958,10 +955,9 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
 
 \begin{frame}{Milestone Timeline}
     \begin{center}
-    \includegraphics[width=\textwidth]{images/milestone-timeline.png}
+    \includegraphics[width=0.95\textwidth]{images/milestone-timeline.png}
     \end{center}
 
-    \vspace{0.3em}
     {\scriptsize Delivered milestones show actual dates and duration.
     Planned milestones show sequence only --- no hard deadlines.
     The project iterates as it continues; scope is earned, not scheduled.}
@@ -992,17 +988,17 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
                 \item Client-side VAD (\texttt{@ricky0123/vad-web})
                 \item Paragraph break accumulation
             \end{itemize}
-            \textbf{v2.3} (complete)
+            \textbf{v2.3.x} (complete)
             \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-                \item Voice command vocabulary
-                \item Stop, submit, redo, clear phrases
-                \item Hotkey reset (Ctrl+Shift+R)
+                \item Voice commands: copy, clear (single-word, no prefix)
+                \item Hotkey system trimmed to 4 bindings
+                \item Paragraph break timing fixed (v2.3.3)
             \end{itemize}
         \end{column}
     \end{columns}
 
-    \textbf{v3} --- Desktop packaging (Tauri). Global hotkeys.
-    Direct injection into focused application. No Docker dependency.
+    \textbf{v3} --- 3.0: Tauri shell + sidecar; 3.1: native clipboard;
+    3.2: \texttt{submit} direct injection; 3.3: tray + global hotkeys.
 \end{frame}
 
 
@@ -1024,43 +1020,24 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         \texttt{Ctrl+Shift+Y}     & Copy transcript \\
         \texttt{Ctrl+Shift+X}     & Clear transcript \\
         \texttt{Ctrl+Shift+S}     & Toggle settings panel \\
-        \texttt{Ctrl+Shift+R}     & Insert paragraph break \\
         \bottomrule
     \end{tabular}
     \end{table}
 
-    \vspace{0.3em}
-    \textbf{Settings panel} --- model selection (swap between
-    \texttt{large-v3} and \texttt{small} at runtime without editing
-    \texttt{.env}). Model swap is full-stack: backend endpoint with
-    threading lock, VRAM cleanup, and graceful fallback.
-\end{frame}
-
-
-\begin{frame}{v2.0 --- Model Swap Architecture}
-    \small
-    Runtime model selection requires a backend endpoint and safe reload logic.
-
-    \vspace{0.3em}
-    \begin{itemize}\setlength{\itemsep}{2pt}
-        \item \texttt{GET /models} --- returns available models
-              (configured via \texttt{WHISPER\_AVAILABLE\_MODELS} env var)
-        \item \texttt{POST /models/swap} --- accepts model name,
-              acquires threading lock, loads new model, frees old VRAM
-        \item Swap blocks inference during reload (seconds).
-              Frontend shows loading state; record button disabled
-        \item If swap fails, old model remains loaded --- no degradation
-        \item Regular \texttt{def} endpoint (not \texttt{async def}) ---
-              runs in thread pool, keeps event loop alive for health checks
-    \end{itemize}
-
     \vspace{0.2em}
-    \begin{block}{Available Models}
-        Intentionally limited to models declared in
-        \texttt{WHISPER\_AVAILABLE\_MODELS}.
-        No auto-discovery, no surprise downloads.
-    \end{block}
+    \textbf{Settings panel} --- runtime model selection via
+    \texttt{GET /models} and \texttt{POST /models/swap}.
+    \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+        \item Threading lock + VRAM cleanup on swap;
+              old model stays loaded if swap fails
+        \item Regular \texttt{def} endpoint --- thread pool,
+              event loop alive during reload
+        \item Models limited to \texttt{WHISPER\_AVAILABLE\_MODELS};
+              no auto-discovery
+    \end{itemize}
 \end{frame}
+
+
 
 
 
@@ -1068,87 +1045,32 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \small
     Recording flow unchanged --- start, speak, stop. What changes is delivery.
 
-    \vspace{0.25em}
-    \begin{itemize}\setlength{\itemsep}{1pt}
-        \item Client connects to \texttt{ws://localhost:8000/ws/transcribe}
-        \item Full audio blob sent as binary after recording stops
+    \vspace{0.2em}
+    \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+        \item Client connects to \texttt{ws://localhost:8000/ws/transcribe};
+              full audio blob sent as binary after stop
         \item Server streams \texttt{\{"type":"segment"\}} messages as
-              faster-whisper yields each segment
-        \item Final \texttt{\{"type":"complete"\}} mirrors
-              \texttt{TranscribeResponse} --- raw, cleaned, language,
-              duration, model, device
+              faster-whisper yields each segment;
+              \texttt{\{"type":"complete"\}} closes with full metadata
         \item Partial text accumulates in the textarea during inference
+        \item \texttt{ws.onerror} falls back to \texttt{POST /transcribe};
+              \texttt{type:"error"} surfaces immediately --- no fallback
+        \item Swap-safe: inference captures a strong model reference at
+              thread start; VRAM cleanup defers until completion
     \end{itemize}
 
-    \vspace{0.2em}
+    \vspace{0.1em}
     \begin{block}{Note on GPU hardware}
-        \small
-        An RTX 3090 running \texttt{large-v3} finishes 30s of audio in
-        $\approx$2.5s --- segments arrive in a burst, indistinguishable from
-        batch. Streaming is perceptible on CPU or in v2.2 continuous mode.
+        \scriptsize
+        RTX 3090 + \texttt{large-v3}: 30\,s audio finishes in $\approx$2.5\,s
+        --- segments arrive in a burst. Streaming is perceptible on CPU or
+        in v2.2 continuous mode.
     \end{block}
 \end{frame}
 
 
-\begin{frame}{v2.1 --- Transport Architecture}
-    \small
-    \begin{table}
-    \centering\scriptsize
-    \begin{tabular}{@{} p{0.26\textwidth} p{0.32\textwidth} p{0.28\textwidth} @{}}
-        \toprule
-        \textbf{Event} & \textbf{Cause} & \textbf{Response} \\
-        \midrule
-        \texttt{ws.onerror} &
-            Server unreachable, network dropped &
-            Fall back to \texttt{POST /transcribe} \\
-        \addlinespace
-        \texttt{\{type: "error"\}} &
-            Inference or transcode failed &
-            Surface immediately --- no fallback \\
-        \bottomrule
-    \end{tabular}
-    \end{table}
-
-    \vspace{0.2em}
-    \textbf{Enforced constraints}
-    \begin{itemize}\setlength{\itemsep}{0pt}
-        \item Origin checked against \texttt{CORS\_ORIGINS} before
-              \texttt{accept()} --- CORS middleware does not cover WebSocket
-        \item Size validated after \texttt{receive\_bytes()} ---
-              same \texttt{MAX\_UPLOAD\_MB} limit as HTTP route
-        \item ffmpeg runs via \texttt{asyncio.to\_thread()} ---
-              non-blocking, 30s timeout
-        \item Temp files cleaned in \texttt{try/finally} on all exit paths
-    \end{itemize}
-\end{frame}
 
 
-\begin{frame}{v2.1 --- Concurrency Contract}
-    \small
-    \texttt{swap\_model()} can fire mid-segment-iteration. No new locks needed.
-
-    \vspace{0.2em}
-    \textbf{Why it is safe}
-    \begin{itemize}\setlength{\itemsep}{1pt}
-        \item \texttt{run\_inference()} captures \texttt{model = get\_model()}
-              at thread start --- a strong Python reference
-        \item \texttt{swap\_model()} replaces \texttt{\_model} and calls
-              \texttt{del old\_model} --- removes swap's local reference only
-        \item Python's refcount cannot reach zero while the inference
-              thread's \texttt{model} variable is alive
-        \item \texttt{gc.collect()} and \texttt{torch.cuda.empty\_cache()}
-              are benign against a live reference --- no in-use tensors freed
-        \item VRAM cleanup deferred until inference thread completes naturally
-    \end{itemize}
-
-    \vspace{0.15em}
-    \begin{block}{Model name}
-        \small
-        Captured alongside \texttt{get\_model()} at thread start.
-        Reflects the model that ran inference, not the model loaded at
-        message-send time.
-    \end{block}
-\end{frame}
 
 
 % =========================================================================
@@ -1159,130 +1081,109 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \small
     Mic stays open; browser VAD decides when speech ends. Push-to-talk is unchanged.
 
-    \vspace{0.1em}
-    \begin{itemize}\setlength{\itemsep}{0pt}
-        \item \textbf{Client-side VAD} --- \texttt{@ricky0123/vad-web}, Silero VAD v4,
-              ONNX/WASM. Runs in-browser; no audio sent before speech is detected.
-        \item \textbf{Silence discarded} --- frames below the speech threshold dropped before
-              any network round-trip.
-        \item \textbf{Independent segments} --- each utterance becomes its own WebSocket
-              round-trip. Concurrent connections allowed; results accumulate in order.
-        \item \textbf{No backend changes} --- \texttt{/ws/transcribe} already accepts one blob
-              per connection. Continuous mode calls it once per detected utterance.
-    \end{itemize}
-
-    \vspace{0.1em}
-    {\footnotesize\textit{Browser requirement:} SharedArrayBuffer (WASM threads).
-    \texttt{COOP: same-origin} + \texttt{COEP: require-corp} set in \texttt{vite.config.ts}.}
+    \begin{columns}[T]
+        \begin{column}{0.52\textwidth}
+            \footnotesize\textbf{VAD \& recording}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item \texttt{@ricky0123/vad-web}, Silero VAD v4,
+                      ONNX/WASM --- runs in-browser
+                \item Silence discarded before any network round-trip
+                \item Each utterance is an independent WebSocket
+                      round-trip; results accumulate in order
+                \item No backend changes required
+                \item AudioWorklet off-main-thread;
+                      \texttt{onSpeechEnd} delivers 16\,kHz mono PCM
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.44\textwidth}
+            \footnotesize\textbf{Transcript behavior}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item \textbf{Paragraph breaks} --- silence gap
+                      $>$\,3\,s between utterances inserts \texttt{\textbackslash n\textbackslash n}
+                \item \textbf{Drain-then-done} --- stop during
+                      processing completes the in-flight segment
+                      before transitioning to \textit{done}
+            \end{itemize}
+        \end{column}
+    \end{columns}
 \end{frame}
 
 
-\begin{frame}{v2.2 --- VAD Pipeline}
-    \small
-    \textbf{Data path: mic $\to$ segment $\to$ transcript}
-
-    \vspace{0.3em}
-    \begin{enumerate}\setlength{\itemsep}{2pt}
-        \item \texttt{MicVAD.new()} lazy-initialised on \texttt{startListening()} ---
-              no ONNX resources allocated in push-to-talk mode.
-        \item VAD worklet runs in an \texttt{AudioWorklet} --- off the main thread.
-              Frames classified as speech or silence in real time.
-        \item \texttt{onSpeechEnd(Float32Array)} delivers 16\,kHz mono PCM.
-              Library resamples internally; no resampling in app code.
-        \item \texttt{encodeWav(samples, 16000)} wraps the Float32Array in a
-              RIFF/PCM-16 WAV \texttt{Blob} (pure function, 44-byte header).
-        \item \texttt{streamTranscribeAudio(blob, \ldots)} opens a WebSocket,
-              sends the blob, receives segments, fires \texttt{onComplete}.
-    \end{enumerate}
-
-    \vspace{0.2em}
-    \textbf{Hook contract} (\texttt{useVAD}) --- event-driven, not imperative.
-    Opposite direction from \texttt{useRecorder}:
-    hook calls App (\texttt{onSpeechEnd}); App responds.
-    Stable callback refs via \texttt{useRef} prevent stale closures.
-\end{frame}
 
 
-\begin{frame}{v2.2 --- Transcript Accumulation}
-    \small
-    \textbf{Continuous mode appends; push-to-talk replaces.}
-
-    \vspace{0.1em}
-    \begin{itemize}\setlength{\itemsep}{0pt}
-        \item Each \texttt{onSpeechEnd} calls \texttt{streamTranscribeAudio} directly
-              (imperative, not effect-driven). The push-to-talk \texttt{useEffect} on
-              \texttt{audioBlob} is not modified --- two paths, kept separate.
-        \item \textbf{Paragraph breaks} --- segment response gap $>$\,\texttt{PARAGRAPH\_BREAK\_MS}
-              (3\,s) inserts \texttt{\textbackslash n\textbackslash n}. Timing is at
-              transcription-complete (includes GPU inference latency).
-        \item \textbf{Drain-then-done} --- stop during processing sets
-              \texttt{stopRequestedRef.current}; next \texttt{onComplete} transitions to
-              \texttt{done} instead of \texttt{listening}. No segment is dropped.
-        \item \textbf{wsCleanupRef} cancellation is mode-conditional: push-to-talk cancels
-              the previous connection; continuous does not (concurrent segments must all land).
-    \end{itemize}
-\end{frame}
 
 
-% v2.3 slides
-\section{v2.3 --- Voice Commands}
-
-\begin{frame}{v2.3 --- Voice Command Vocabulary}
+\begin{frame}{v2.3.x --- Voice Command Vocabulary}
     \small
     A small control language embedded in the voice stream. Commands are
     exact-segment matches: the \emph{entire} transcribed segment must be the
-    command phrase. Mid-sentence occurrences (``I should scribe clear that'')
+    command phrase. Mid-sentence occurrences (``let me clear this up'')
     do not fire.
 
     \vspace{0.3em}
     \begin{table}
     \centering\small
-    \begin{tabular}{@{} l l l @{}}
+    \begin{tabular}{@{} l l @{}}
         \toprule
-        \textbf{Phrase} & \textbf{Action} & \textbf{Mode} \\
+        \textbf{Word} & \textbf{Action} \\
         \midrule
-        \texttt{scribe stop}   & Halt recording                    & Continuous only \\
-        \texttt{scribe submit} & Copy transcript to clipboard      & Both \\
-        \texttt{scribe redo}   & Clear transcript buffer           & Both \\
-        \texttt{scribe clear}  & Clear transcript buffer           & Both \\
+        \texttt{copy}  & Copy transcript to clipboard \\
+        \texttt{clear} & Clear transcript buffer      \\
         \bottomrule
     \end{tabular}
     \end{table}
 
     \vspace{0.3em}
-    \textbf{Prefix design} --- shared ``scribe'' prefix collapses the
-    false-positive surface to one distinctive word. Standalone action verbs
-    (``stop,'' ``clear'') false-positive in developer dictation; ``scribe stop''
-    does not. Gate~1 confirmed 38/40 at normal speaking pace on \texttt{large-v3}.
+    \textbf{Single-word design} --- no prefix. VAD-split is structurally
+    impossible with one word; two-word phrases split at the natural inter-word
+    pause and neither fragment matches. Gate~1 confirmed 10/10 copy,
+    9/10 clear on \texttt{large-v3}.
 \end{frame}
 
 
-\begin{frame}{v2.3 --- Detection Architecture}
+\begin{frame}{v2.3.x --- Detection Architecture}
     \small
     \textbf{Detection surface: \texttt{onComplete} only} --- both modes.
-    Single detection point; no streaming partial check required.
 
-    \vspace{0.3em}
-    \begin{itemize}\setlength{\itemsep}{2pt}
+    \begin{itemize}\setlength{\itemsep}{1pt}
         \item \textbf{Normalization} --- trim, lowercase, strip trailing
               \texttt{.!?,}. Handles Whisper's capitalized first letter and
-              near-universal trailing period (Gate~1 observation).
+              trailing period.
         \item \textbf{Exact-segment match} --- \texttt{COMMAND\_MAP} lookup in
-              \texttt{src/utils/voiceCommands.ts}. Adding a fifth command is
-              one table entry.
-        \item \textbf{Command segments are consumed} --- nothing is appended to
+              \texttt{voiceCommands.ts}. Adding or removing a command is one table entry.
+        \item \textbf{Command segments are consumed} --- nothing appended to
               the transcript. No strip function needed.
-        \item \textbf{redo/clear} set transcript state directly; they do not
-              call \texttt{handleClearTranscript} (which sets \texttt{idle}).
-              The transition block is the sole owner of \texttt{RecordingState}
-              per callback invocation.
-        \item \textbf{transcriptRef} --- stable ref updated each render gives
-              ``scribe submit'' a consistent view of the transcript inside the
-              \texttt{triggerTranscription} closure.
-        \item \textbf{Ctrl+Shift+R} --- manual paragraph break; resets
-              \texttt{lastSegmentTimestampRef} to 0 to prevent the automatic
-              break from double-firing on the next segment.
+        \item \textbf{clear} sets transcript state directly; does not call
+              \texttt{handleClearTranscript}. Transition block owns
+              \texttt{RecordingState}.
+        \item \textbf{transcriptRef} --- stable ref gives ``copy'' a consistent
+              view of the transcript inside the callback closure.
     \end{itemize}
+\end{frame}
+
+
+\begin{frame}{v2.3.x --- Known Limitations}
+    \small
+    \textbf{Browser sandbox constrains delivery.}
+
+    \vspace{0.3em}
+    \begin{itemize}\setlength{\itemsep}{3pt}
+        \item \textbf{Recording is cross-window} --- VAD holds mic access at the OS
+              level. Voice Scribe listens in the background without focus.
+        \item \textbf{Clipboard write requires focus} ---
+              \texttt{navigator.clipboard.writeText()} is blocked in background tabs.
+              ``copy'' fires correctly; the write fails silently if focus is elsewhere.
+        \item \textbf{No injection into other applications} --- text cannot be
+              delivered directly to a focused editor or terminal.
+    \end{itemize}
+
+    \vspace{0.3em}
+    \textbf{The gap:} the tool listens hands-free; it cannot deliver hands-free.
+    The complete loop requires native OS access.
+
+    \vspace{0.2em}
+    {\footnotesize\textbf{v3 / Tauri} closes this: native clipboard write and direct
+    text injection, independent of window focus.}
 \end{frame}
 
 

@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
 **Last Updated:** April 4, 2026
-**Status:** v2.2 Complete — v2.3 next
+**Status:** v2.3.3 Complete — v3 scoped
 
 ---
 
@@ -483,13 +483,18 @@ Out of scope (not deferred — out): prefix model, stop command, submit command,
 Detection pipeline, `COMMAND_MAP`, and `onComplete` integration point unchanged. Only the keys move.
 Option B deferred to v3/Tauri. Option C rejected.
 
-**Vocabulary — locked (2026-04-04):**
+**Vocabulary — locked (2026-04-04), revised (2026-04-04):**
 
 | Word | Action | Replaces |
 |---|---|---|
 | copy | Write transcript to clipboard | "scribe submit" |
 | clear | Clear transcript buffer | "scribe clear" / "scribe redo" |
-| break | Insert paragraph break (\n\n) | Ctrl+Shift+R only — new as voice command |
+
+**"break" dropped before implementation (Gate 1 finding, 2026-04-04):** "break" was in the original
+locked vocabulary but removed after Gate 1 Test 1. Reason: (1) highest false-positive risk of the three
+words — "break" is core programming vocabulary that appears constantly in developer dictation; (2) the
+use case is already covered — automatic paragraph gaps via `lastSegmentTimestampRef` handle paragraph
+separation in continuous mode. No gap left by the removal.
 
 **Principal — VAD-split risk reversal (2026-04-04):**
 The failure direction reverses with single-word commands. In v2.3, VAD splitting caused false negatives —
@@ -531,16 +536,292 @@ Same file, same session. Do not let it slip.
 
 **Process:** Gate 1 → one table update + test update + presentation update → ship.
 
+### Gate 1 — v2.3.1 Phrase Validation
+Date: 2026-04-04  |  Model: large-v3  |  Ambient: standard
+
+Test 1 — Fidelity
+| Word  | Confirmed | Variance |
+|-------|-----------|----------|
+| copy  | 10/10     | none     |
+| clear | 9/10      | none     |
+| break | dropped   | High false-positive risk; automatic paragraph breaks cover the use case — removed before completion |
+
+Test 2 — False positive field test
+Relocated to post-implementation manual verification. Requires new vocabulary active to be meaningful —
+confirming "clear the cache" doesn't fire a "clear" command is only valid once "clear" is a registered
+command. The gate protected transcription fidelity; false-positive validation follows implementation.
+
+Verdict: confirmed — two-word vocabulary (copy, clear) viable. Proceed with implementation.
+
+#### v2.3.2 — Remove Ctrl+Shift+R Hotkey
+
+**Scope:** Remove the manual paragraph break hotkey. The automatic paragraph gap (3s silence →
+`\n\n`) covers the use case. A dedicated hotkey for paragraph insertion is not worth the surface
+area.
+
+**Changes (2026-04-04):**
+- `useHotkeys.ts` — removed `onParagraphBreak` from interface, removed `"R"` key binding
+- `App.tsx` — removed `handleParagraphBreak` callback and from `hotkeyHandlers`; removed hint from UI bar
+- `App.test.tsx` — removed paragraph break describe block (2 tests)
+- `docs/v2/presentation/main.tex` — removed Ctrl+Shift+R row from hotkey table; updated roadmap detail and Detection Architecture slide
+
+Hotkey system is now 4 bindings: Space (record), Y (copy), X (clear), S (settings).
+
+#### v2.3.3 — Paragraph Break Timing Fix
+
+**Problem:** `PARAGRAPH_BREAK_MS` threshold was measured between `onComplete` callbacks, which
+include GPU inference latency. On slow hardware or CPU inference, every consecutive utterance exceeds
+3 seconds between completions — every segment becomes a paragraph break regardless of actual pause
+length. Principal decision: fix before v3, which broadens the hardware profile.
+
+**Fix:** Capture `Date.now()` at `onSpeechEnd` (before inference starts) and thread it through
+`triggerTranscription` as `speechEndTime`. The paragraph break comparison and `lastSegmentTimestampRef`
+update both use `speechEndTime` instead of `Date.now()`. Elapsed now measures time between when the
+user spoke, not between when the GPU finished.
+
+**Changes (2026-04-04):**
+- `App.tsx` — `triggerTranscription` gains optional `speechEndTime?: number` parameter; paragraph
+  break elapsed uses `speechEndTime`; `lastSegmentTimestampRef` stores speech-end time; `onSpeechEnd`
+  captures and passes `Date.now()` before encoding
+
+Push-to-talk path unaffected (`speechEndTime` is undefined for PTT; `append=false` gates all paragraph
+break logic). 66/66 tests green.
+
 ### v3 — Desktop Application (Tauri)
 
-Start Tauri work after voice commands are working and the settings panel is stable in the browser. Direct injection (transcript delivered to the focused application without manual paste) is the Tauri-only value proposition — it requires native OS access the browser cannot provide. Until that feature is needed, Tauri adds no value over the web app.
+v3 closes the delivery gap the browser cannot close. The clipboard-focus limitation
+(`navigator.clipboard.writeText` requires document focus) is a platform ceiling, not a missing
+feature. Mic access is OS-level — VAD and recording work cross-window. Clipboard write is gated on
+window focus. The full loop (speak → transcribe → deliver to where you're working) is broken at the
+last step in browser mode. v3 is a platform change that completes the loop.
 
-- **No Docker dependency** — Whisper runs natively on the host GPU. The user should not need Docker Desktop running to dictate. Backend options: Python running natively on the host, or Rust-side inference via whisper.cpp / candle. Architecture decision requires Principal review.
+Direct injection (transcript delivered to the focused application without manual paste) is the
+Tauri-only power feature — it requires native OS access the browser cannot provide.
+
+**Locked architectural decisions (Principal, 2026-04-04):**
+
+- **Tauri v2** — locked. Plugins: `@tauri-apps/plugin-clipboard-manager`,
+  `@tauri-apps/plugin-global-shortcut`, `@tauri-apps/plugin-shell` (sidecar), tray via
+  `tauri::tray`. Rust side uses Tauri v2 API (`tauri::Builder`, `tauri::AppHandle`). v1 plugins are
+  not forward-compatible; this is not revisitable.
+
+- **Repo structure** — monorepo. `apps/desktop/` alongside `apps/web/` and `apps/api/`. The API
+  backend is shared. Tauri points its dev server at Vite (`apps/web/`) and its build at Vite's output.
+  `apps/desktop/` contains Tauri configuration (`tauri.conf.json`, `src-tauri/`) and Rust-side code
+  only — not a copy of the frontend. No component forks. Capability differences (native clipboard,
+  direct injection) live in the service layer via a single `platform.ts` module — not in components,
+  not in a parallel `desktop-api.ts`. The moment you have two copies of a component or two parallel
+  service files, you have two maintenance surfaces that will diverge silently.
+
+- **Backend** — Python sidecar. Tauri spawns the existing `apps/api/` Python backend as a managed
+  child process. No Docker, no container overhead. faster-whisper is proven; rewriting inference in
+  Rust simultaneously with building the Tauri shell is scope explosion. Rust-native inference is a
+  named future milestone ("v4 or v3.x — single-binary distribution") with a stated trigger: *revisit
+  when distribution to non-developer users becomes a requirement.* whisper.cpp is the candidate when
+  that time comes, not candle.
+
+- **wsCleanupRef** — hard requirement before Tauri ships. In the browser, the SPA never navigates so
+  orphaned connections don't materialize. In Tauri, the webview persists and "close the panel" is real
+  component unmount. The current single-ref pattern must be replaced with a `Set<() => void>` (register
+  on open, deregister on close, iterate on unmount). Ships as a standalone PR on main before any Tauri
+  code exists — web-side refactor with full test coverage, not mixed into the Tauri scaffolding.
+
+- **Voice command surface** — three commands: `copy` (clipboard write, native API removes focus
+  requirement), `clear` (buffer wipe, carried from v2), `submit` (direct injection into focused
+  application, Tauri-only). `copy` and `submit` are separate commands with separate risk profiles —
+  clipboard write is safe and predictable; injection requires focus to be correct and must be opted
+  into deliberately. Collapsing them removes the user's safe fallback. `submit` is registered in
+  `COMMAND_MAP` unconditionally; execution is platform-conditional. In browser context, `submit`
+  executes the same path as `copy` (clipboard write — the safe fallback). Specific words subject to
+  gate evaluation; the command separation is non-negotiable.
+
+- **Port management** — fixed port, fail loudly. The sidecar binds to port 8000. If 8000 is occupied,
+  the sidecar fails to start and Tauri surfaces a user-visible error. `api.ts` hardcodes
+  `http://localhost:8000` and `ws://localhost:8000` — no dynamic port discovery, no IPC port
+  communication. Correct for a single-user tool where the user controls their own machine.
+
+- **Single build artifact** — runtime platform detection (`window.__TAURI__`), not build-time flags.
+  One Vite build serves both the browser and the Tauri webview. `@tauri-apps/` packages imported via
+  dynamic `import()` so the browser build produces zero import errors. `vite.config.ts` excludes
+  Tauri packages from dependency pre-bundling via `optimizeDeps.exclude`.
+
 - **Same UI** — recording modes, streaming, VAD, voice commands, settings panel.
 - **System tray** — app runs in background, accessible via global hotkey from any application.
 - **Global hotkeys** — trigger recording from any application, not just when Voice Scribe is focused.
-- **Direct injection** — transcript injected into the focused text field (terminal, IDE, Claude Code prompt) without manual paste. Voice command ("submit") triggers injection. Clipboard fallback always available.
-- **Model management** — model download, selection, and caching without editing config files.
+- **Model management** — model download, selection, and caching without editing config files. Deferred
+  to v3.x — the existing settings panel handles runtime model swap; download progress and cache
+  management are not load-bearing for v3.0–v3.3.
+
+#### Prerequisites (before v3.0 implementation begins)
+
+**Prereq 1 — wsCleanupRef refactor.** Ships as a standalone PR on main. Refactors
+`wsCleanupRef` from `useRef<(() => void) | null>` to a `Set<() => void>` pattern (register on open,
+deregister on close, iterate on unmount). Tested in browser, merged to main before `apps/desktop/`
+exists. Mixing it into the Tauri scaffolding PR makes it impossible to isolate whether a WebSocket
+bug is the refactor or the Tauri webview.
+
+**Prereq 2 — Host environment validation.** The API currently runs in Docker. In v3, Tauri spawns it
+bare on the host. Before any Tauri scaffolding work:
+- Python 3.10+ with `faster-whisper`, `ffmpeg` on `PATH`, CUDA toolkit on host
+- On bare WSL (no Docker running): `cd apps/api && uvicorn app.main:app --host 127.0.0.1 --port 8000`
+  starts, `/health` returns `"device": "gpu"`, model loads from host-appropriate cache path
+- Close condition: documented host setup that gets the API running without Docker
+
+#### v3.0 — Tauri Shell + Sidecar Lifecycle
+
+**Deliverable:** Tauri app launches, spawns the Python API as a sidecar, webview loads the existing
+Vite frontend, all existing functionality works identically to the browser version (push-to-talk,
+continuous mode, voice commands, settings).
+
+**Scope:**
+
+1. **`apps/desktop/` scaffolding.** `tauri.conf.json`, `src-tauri/` with Cargo project, Tauri v2 CLI
+   integration. Dev server points at `http://localhost:5173`. Build points at `apps/web/dist/`.
+
+2. **Sidecar management in Rust.** Tauri's `shell` plugin spawns
+   `uvicorn app.main:app --host 127.0.0.1 --port 8000` from `apps/api/`. Must handle:
+   - Startup wait (health poll until `/health` returns 200)
+   - Graceful shutdown (SIGTERM on app close, SIGKILL after timeout)
+   - Crash detection and error surface to the user
+   - Port conflict: port 8000 occupied → user-visible error dialog, no silent fallback
+
+3. **API configuration for Tauri context.** `config.py` defaults updated for host operation:
+   - `MODEL_CACHE_DIR` default: `~/.cache/voice-scribe` (not `/cache`)
+   - `TEMP_DIR` default: `tempfile.gettempdir() + "/voice-scribe"` (not `/tmp/voice-scribe`)
+   - `CORS_ORIGINS` includes the Tauri webview origin (determined during scaffolding —
+     `tauri://localhost` or `https://tauri.localhost` depending on Tauri v2 config)
+   - The Docker path (`compose.dev.yml`) continues to override these via environment variables — no
+     regression for `make dev`
+
+4. **WebSocket origin enforcement.** `transcribe_ws.py` line 40 and `main.py` line 44 both read from
+   `settings.cors_origins`. A single `CORS_ORIGINS` config update covers both surfaces. The gate must
+   explicitly verify WebSocket streaming from the Tauri webview — not just HTTP health checks. Without
+   this, the gate can pass on the HTTP fallback path while the primary transport is silently rejected
+   with a 4003 close.
+
+5. **Makefile update.** `make desktop` target starts the sidecar + Tauri dev mode. Existing
+   `make dev` (Docker + Vite) stays untouched.
+
+**Not in v3.0:** Native clipboard, `submit` command, global hotkeys, system tray. The app is a Tauri
+wrapper around the existing web app with a managed backend. No new capabilities.
+
+**Gate:** App launches. Record → transcribe → display works via WebSocket streaming through the Tauri
+webview. HTTP fallback also verified. Settings panel works. Close app → sidecar process is gone (no
+orphan `uvicorn` process). Relaunch works clean. Both transport paths exercise the Tauri origin.
+
+#### v3.1 — Service Layer Split + Native Clipboard
+
+**Deliverable:** `copy` voice command and Ctrl+Shift+Y hotkey use native OS clipboard (no focus
+requirement). Web version unchanged.
+
+**Scope:**
+
+1. **Platform abstraction layer.** `platform.ts` module with three exports:
+   - `isDesktop(): boolean` — checks `window.__TAURI__`
+   - `writeClipboard(text: string): Promise<void>` — Tauri: dynamic
+     `import("@tauri-apps/plugin-clipboard-manager")` → `writeText()`; browser:
+     `navigator.clipboard.writeText()`
+   - `submitText(text: string): Promise<void>` — stub in v3.1, calls `writeClipboard()` in both
+     environments. Filled in v3.2 for Tauri.
+
+   Dynamic `import()` is the mechanism. Vite does not resolve dynamic imports at static analysis time.
+   `vite.config.ts` adds `optimizeDeps.exclude` for `@tauri-apps/` packages. If dynamic import fails
+   despite exclusion, fallback is a Vite `resolve.alias` mapping `@tauri-apps/*` to no-op stubs in
+   browser builds — documented as contingency, not plan.
+
+2. **Tauri clipboard plugin.** `@tauri-apps/plugin-clipboard-manager` declared in Tauri `capabilities`
+   config. Tested on Windows.
+
+3. **Clipboard call site routing.** Two call sites in App.tsx route through `platform.writeClipboard()`:
+   - `case "copy"` voice command: `navigator.clipboard.writeText(transcriptRef.current)`
+     → `platform.writeClipboard(transcriptRef.current)`
+   - `handleCopyTranscript`: `navigator.clipboard.writeText(transcript)`
+     → `platform.writeClipboard(transcript)`
+   - Both keep the existing `.catch(() => {})` fire-and-forget contract.
+
+4. **`voiceCommands.ts` unchanged.** Still two commands (`copy`, `clear`). The `submit` entry lands
+   in v3.2.
+
+**Gate:** Start a second application (e.g., VS Code). Dictate into Voice Scribe (Tauri). Say "copy."
+Switch to VS Code. Ctrl+V. Transcript is there. Same test with Ctrl+Shift+Y hotkey. Verify browser
+build: `npm run build` produces zero import errors, `npx vitest run` passes, clipboard works in
+Chrome.
+
+#### v3.2 — `submit` Voice Command (Direct Injection, Windows-Only)
+
+**Deliverable:** Saying "submit" types the transcript directly into the focused application. No
+clipboard involved. Windows-only for this milestone.
+
+**Scope:**
+
+1. **OS-level keystroke simulation.** Rust side uses `SendInput` via the Windows API (crate: `enigo`
+   or equivalent). Exposed as a Tauri command. Receives transcript text from the webview via IPC,
+   simulates keyboard input into the focused window.
+
+2. **Focus management.** The injection target is whatever was focused before Voice Scribe. With
+   system tray (v3.3), focus is already elsewhere. Without tray, the user must have tabbed away.
+   Hard requirement: restore focus to the previous window before injecting. Focus management on
+   Windows has edge cases across window managers and accessibility settings. A one-week soak period
+   of daily use is required before marking v3.2 complete — included as a gate condition.
+
+3. **Voice command registration.** `voiceCommands.ts`: `VoiceCommandKey` becomes
+   `"copy" | "clear" | "submit"`, `COMMAND_MAP` gains `"submit": "submit"`. Detection layer stays
+   platform-unaware. App.tsx gains `case "submit"` → `platform.submitText(transcriptRef.current)`.
+
+4. **Platform layer fill-in.** `platform.ts` `submitText()`:
+   - Browser: calls `writeClipboard()` (safe fallback, identical to `copy`)
+   - Tauri: calls Tauri IPC command → Rust `SendInput` injection
+
+5. **False-positive testing.** Severity asymmetry: accidental `submit` types arbitrary text into
+   whatever application has focus — worse than accidental `copy`. Gate must include false-positive
+   testing with sentences containing "submit" as a non-command word.
+
+**Dependency:** v3.1's `platform.ts` must be in place. The platform layer is the routing surface for
+all platform-conditional behavior — it's not just a clipboard concern.
+
+**Deferred:** Linux/macOS injection. Named deferral — different APIs (`xdotool`, `CGEvent`), different
+failure modes. Windows-only is pragmatic scope discipline.
+
+**Gate:** Dictate into Voice Scribe. Focus VS Code editor. Say "submit." Transcript appears at cursor
+in VS Code. No clipboard involvement. False-positive test: 10 sentences containing "submit" as a
+non-command word, zero fires. Soak period: one week of daily use before marking complete.
+
+#### v3.3 — System Tray + Global Hotkeys
+
+**Deliverable:** Voice Scribe runs in the background. Global hotkey triggers recording from any
+application. System tray provides status and quick access.
+
+**Scope:**
+
+1. **System tray.** Tauri v2 `tray` plugin. Icon, menu (Record, Settings, Quit). Status indicator
+   (idle, listening, processing).
+
+2. **Global hotkeys.** `@tauri-apps/plugin-global-shortcut`. Replaces the browser `Ctrl+Shift+*`
+   bindings when running as desktop app. Browser bindings (`useHotkeys.ts`) remain for web mode.
+   Key conflict risk: global hotkeys can collide with other applications. Must fail gracefully with a
+   user-visible error if registration fails. The error message and UX for registration failure must
+   be implemented (not just handled silently) and verified in the gate. Configurability deferred.
+
+3. **Window management.** Recording triggered via global hotkey while the window is hidden. React
+   state updates work regardless of window visibility — needs explicit verification, not assumption.
+
+4. **Full loop verification.** With tray + global hotkeys + `submit` in place, verify the end-to-end
+   path: global hotkey → recording starts → user speaks → transcription → "submit" → text appears in
+   focused app. Voice Scribe window never appears. This is the scenario the gate must exercise.
+
+**Gate:** Hide Voice Scribe to tray. Focus VS Code. Press global hotkey. Dictate. Say "copy" (or
+"submit"). Transcript is in clipboard (or typed into VS Code). Voice Scribe window never appeared.
+Failure path: with a conflicting hotkey registered in another application, confirm Voice Scribe
+surfaces a user-visible error dialog and does not crash. Tray "Quit": confirm sidecar is gone.
+
+#### Deferred from v3 (named, not forgotten)
+
+- **Model management UI enhancements** — download progress, cache management without config files.
+  Deferred to v3.x. The settings panel already handles runtime model swap.
+- **Linux/macOS `submit` injection** — different OS APIs, different failure modes. Deferred to v3.x.
+- **Auto-update** — Tauri has built-in update support. Not in scope for v3.0–v3.3.
+- **Rust-native inference** — single-binary distribution via whisper.cpp. Trigger: "when distribution
+  to non-developer users becomes a requirement." Not v3.
 
 ---
 
