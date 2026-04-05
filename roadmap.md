@@ -654,18 +654,23 @@ Tauri-only power feature — it requires native OS access the browser cannot pro
 
 #### Prerequisites (before v3.0 implementation begins)
 
-**Prereq 1 — wsCleanupRef refactor.** Ships as a standalone PR on main. Refactors
-`wsCleanupRef` from `useRef<(() => void) | null>` to a `Set<() => void>` pattern (register on open,
-deregister on close, iterate on unmount). Tested in browser, merged to main before `apps/desktop/`
-exists. Mixing it into the Tauri scaffolding PR makes it impossible to isolate whether a WebSocket
-bug is the refactor or the Tauri webview.
+**Prereq 1 — wsCleanupRef refactor (complete, 2026-04-05, `8cbc933`).** `wsCleanupRef` replaced with
+`wsCleanupSetRef` (`useRef<Set<() => void>>`). Completed connections deregister via `deregister?.()` in
+`onComplete`, `onConnectionError`, and `onApplicationError` callbacks — Set does not grow unboundedly
+during long continuous sessions. Unmount iterates the Set and calls every in-flight cleanup. Two new
+tests: multi-segment cleanup on unmount, and stale-entry deregistration after natural completion. 68
+frontend tests. Shipped on main before any Tauri code exists — isolation requirement held.
 
-**Prereq 2 — Host environment validation.** The API currently runs in Docker. In v3, Tauri spawns it
-bare on the host. Before any Tauri scaffolding work:
-- Python 3.10+ with `faster-whisper`, `ffmpeg` on `PATH`, CUDA toolkit on host
-- On bare WSL (no Docker running): `cd apps/api && uvicorn app.main:app --host 127.0.0.1 --port 8000`
-  starts, `/health` returns `"device": "gpu"`, model loads from host-appropriate cache path
-- Close condition: documented host setup that gets the API running without Docker
+**Prereq 2 — Host environment validation (in progress).**
+- ~~Config defaults~~ **(complete, 2026-04-05, `8cbc933`):** `config.py` defaults updated for host
+  operation — `MODEL_CACHE_DIR` defaults to `~/.cache/voice-scribe`, `TEMP_DIR` defaults to
+  `tempfile.gettempdir() + "/voice-scribe"`. Docker Compose overrides via env vars; `make dev`
+  unchanged.
+- **Bare-host startup validation** — pending. Gate: `cd apps/api && source .venv/bin/activate &&
+  uvicorn app.main:app --host 127.0.0.1 --port 8000` starts, `/health` returns `"device": "gpu"`,
+  model loads from `~/.cache/voice-scribe`.
+- **Host setup documentation** — pending. Close condition: `docs/v3/host-setup.md` that gets a fresh
+  WSL instance to a running API without Docker.
 
 #### v3.0 — Tauri Shell + Sidecar Lifecycle
 
@@ -685,13 +690,12 @@ continuous mode, voice commands, settings).
    - Crash detection and error surface to the user
    - Port conflict: port 8000 occupied → user-visible error dialog, no silent fallback
 
-3. **API configuration for Tauri context.** `config.py` defaults updated for host operation:
-   - `MODEL_CACHE_DIR` default: `~/.cache/voice-scribe` (not `/cache`)
-   - `TEMP_DIR` default: `tempfile.gettempdir() + "/voice-scribe"` (not `/tmp/voice-scribe`)
-   - `CORS_ORIGINS` includes the Tauri webview origin (determined during scaffolding —
-     `tauri://localhost` or `https://tauri.localhost` depending on Tauri v2 config)
-   - The Docker path (`compose.dev.yml`) continues to override these via environment variables — no
-     regression for `make dev`
+3. **API configuration for Tauri context.** ~~`config.py` defaults updated for host operation~~
+   **(complete, Prereq 2):** `MODEL_CACHE_DIR` → `~/.cache/voice-scribe`, `TEMP_DIR` →
+   `tempfile.gettempdir() + "/voice-scribe"`. Docker Compose overrides unchanged.
+   - Remaining: `CORS_ORIGINS` must include the Tauri webview origin (determined during scaffolding —
+     `tauri://localhost` or `https://tauri.localhost` depending on Tauri v2 config). On Windows/WSL2,
+     Tauri v2 defaults to `https://tauri.localhost`; Linux uses `tauri://localhost`.
 
 4. **WebSocket origin enforcement.** `transcribe_ws.py` line 40 and `main.py` line 44 both read from
    `settings.cors_origins`. A single `CORS_ORIGINS` config update covers both surfaces. The gate must

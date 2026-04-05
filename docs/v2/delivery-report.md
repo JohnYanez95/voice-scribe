@@ -270,13 +270,13 @@ All v1 posture carried forward unchanged. v2 additions:
 
 ~~**`useVAD` resource leak on repeated start/stop.**~~ **Closed.** `vadRef.current?.destroy()` added before `MicVAD.new()` in `startListening()`. Confirmed by Principal; test added covering repeated start/stop cycle.
 
-**`wsCleanupRef` covers only the last in-flight segment in continuous mode.** `wsCleanupRef.current = cleanup` is overwritten on every `triggerTranscription` call regardless of mode (`App.tsx` line 154). In continuous mode with multiple segments in-flight concurrently, only the most recent WebSocket's cleanup function survives in the ref. On component unmount, earlier connections don't receive an explicit cleanup call. In practice this is low-risk — WebSocket connections close naturally when the server sends the `complete` message and the event loop drains; the cleanup ref is a belt-and-suspenders for abnormal shutdown. But the contract says cleanup is guaranteed, and currently it's guaranteed only for the last in-flight segment. Carry as context for v2.3. If continuous mode supports longer sessions or more concurrent segments, the right pattern is a cleanup array — or a deliberate decision to rely on natural close and remove the belt-and-suspenders claim.
+~~**`wsCleanupRef` covers only the last in-flight segment in continuous mode.**~~ **Closed (v3 prereq 1, `8cbc933`).** `wsCleanupRef` replaced with `wsCleanupSetRef` (`useRef<Set<() => void>>`). Completed connections deregister via `deregister?.()` calls in `onComplete`, `onConnectionError`, and `onApplicationError` callbacks — the Set does not grow unboundedly during long sessions. On unmount, all in-flight connections are cleaned up. Two new tests verify multi-segment cleanup and stale-entry deregistration. 68 frontend tests total.
 
-**`PARAGRAPH_BREAK_MS` timing includes GPU inference latency.** The 3-second threshold is measured between `onComplete` callbacks, not between speech-end events. On RTX 3090 + `large-v3`, short utterances complete in under one second and the threshold behaves as intended. On slower hardware or under GPU load, all consecutive utterances will exceed 3 seconds between completions, making every segment a paragraph break regardless of actual pause length. The constant should be documented with this caveat and evaluated for configurability in v2.3.
+~~**`PARAGRAPH_BREAK_MS` timing includes GPU inference latency.**~~ **Closed (v2.3.3, `8cbc933`).** `speechEndTime` captured at `onSpeechEnd` (before inference starts) and threaded through `triggerTranscription`. Paragraph break elapsed and `lastSegmentTimestampRef` update both use `speechEndTime`. Measures time between when the user spoke, not between when the GPU finished. Push-to-talk path unaffected (`speechEndTime` is undefined; `append=false` gates all paragraph break logic).
 
 **WebSocket path not covered by smoke test.** The smoke test exercises HTTP and the model swap endpoint. The WebSocket streaming path is covered by unit tests but has no end-to-end verification script. Natural candidate for v2.3 smoke test expansion.
 
-~~**Hotkey reset not delivered.**~~ **Scoped into v2.3.** See Reviewer Feedback section.
+~~**Hotkey reset not delivered.**~~ **Closed (v2.3.2, `8cbc933`).** Ctrl+Shift+R removed. Automatic paragraph gaps via `lastSegmentTimestampRef` cover the use case. Hotkey system is now 4 bindings (Space, Y, X, S).
 
 ~~**Stale `milestone-timeline.mmd`.**~~ **Closed.** v2.2 moved to `section Delivered`.
 
@@ -299,7 +299,7 @@ Voice command vocabulary. Continuous mode (v2.2) is the required prerequisite an
 2. ~~Update `milestone-timeline.mmd`~~ — **closed.**
 3. ~~Hotkey reset scope decision~~ — **closed.** Scoped into v2.3 by PM.
 4. WebSocket smoke test — optional, not blocking v2.3.
-5. `wsCleanupRef` continuous mode gap — carry as context for v2.3; not a blocker.
+5. ~~`wsCleanupRef` continuous mode gap~~ — **closed.** Set pattern shipped as v3 prereq 1.
 
 ---
 
