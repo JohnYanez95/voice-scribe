@@ -1,18 +1,26 @@
 flowchart TD
-    mic["Microphone audio"]
-    blob["Audio blob"]
+    subgraph ui ["UI Context (browser or Tauri webview)"]
+        mic["Microphone audio"]
+        vad["VAD<br/>silence discarded"]
+        blob["Audio blob"]
+        mic --> vad --> blob
+    end
 
-    mic --> vad["VAD (browser)<br/>silence discarded"]
-    vad --> blob
     blob --> http["HTTP POST"]
     blob --> wsIn["WebSocket binary"]
 
-    http --> tmp1["Temp file — input"]
-    wsIn --> tmp1
+    subgraph backend ["Backend (Docker container or bare-host sidecar)"]
+        tmp1["Temp file — input"]
+        tmp2["Temp file — WAV"]
+        txt["Transcript text"]
+        del["Deleted"]
+        tmp1 --> tmp2
+        tmp2 -- inference --> txt
+        tmp2 --> del
+    end
 
-    tmp1 --> tmp2["Temp file — WAV"]
-    tmp2 -- inference --> txt["Transcript text"]
-    tmp2 --> del["Deleted"]
+    http --> tmp1
+    wsIn --> tmp1
 
     txt --> resp["JSON response"]
     txt --> wsOut["WS segments"]

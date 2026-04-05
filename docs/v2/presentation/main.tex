@@ -34,7 +34,7 @@
     backgroundcolor=\color{gray!5},
 }
 
-\title[Voice Scribe v2]{Voice Scribe v2\\Local-First Speech-to-Text for Development Workflows}
+\title[Voice Scribe]{Voice Scribe v2--v3\\Local-First Speech-to-Text for Development Workflows}
 \author[J. Yanez]{Johnraymond Yanez}
 \institute[Voice Scribe]{Voice Scribe}
 \date{\today}
@@ -59,6 +59,7 @@
         \item \textbf{Security} --- Threat model, privacy, operational telemetry
         \item \textbf{Development} --- Workflow, tooling, and testing
         \item \textbf{Roadmap, v2.0+} --- Milestones and what just shipped
+        \item \textbf{v3.0} --- Desktop application, sidecar lifecycle, triage
     \end{itemize}
 \end{frame}
 
@@ -106,23 +107,23 @@
 \begin{frame}{Design Principles}
     Four principles govern every decision:
 
-    \vspace{0.6em}
+    \vspace{0.4em}
     \begin{enumerate}
         \item \textbf{Local-first}\\
               Audio and transcripts stay on the user's machine.
               No cloud services required at any point.
 
-        \vspace{0.3em}
-        \item \textbf{Host for interaction, container for inference}\\
-              The browser owns mic access, clipboard, and editing.
-              The container owns model loading and GPU inference.
+        \vspace{0.2em}
+        \item \textbf{Separation of UI and inference}\\
+              The UI layer owns mic access, clipboard, and editing.
+              The inference layer owns model loading and GPU inference.
 
-        \vspace{0.3em}
+        \vspace{0.2em}
         \item \textbf{Audio is transient, text is durable}\\
               Raw audio is short-lived input --- deleted after processing.
               The transcript is the user-facing artifact.
 
-        \vspace{0.3em}
+        \vspace{0.2em}
         \item \textbf{Scope matches the milestone}\\
               Repo structure and services reflect current reality,
               not future aspirations. Architecture stays flat until
@@ -137,16 +138,17 @@
 
 \begin{frame}{System Architecture}
     \small
-    Voice Scribe is a two-service system communicating over localhost HTTP.
+    Voice Scribe is a two-service system communicating over localhost.
 
     \vspace{0.3em}
     \begin{itemize}\setlength{\itemsep}{2pt}
         \item The \textbf{frontend} runs on the host --- it owns browser APIs
               (microphone, clipboard, DOM) that cannot exist inside a container
-        \item The \textbf{backend} runs in a Docker container --- it owns
-              GPU-accelerated inference via CUDA, which cannot run in a browser
-        \item Communication is plain HTTP. No WebSocket, no reverse proxy,
-              no message queue
+        \item The \textbf{backend} runs GPU-accelerated inference via CUDA.
+              Two runtime contexts: Docker container (browser mode) or
+              bare-host Python sidecar (desktop/Tauri mode)
+        \item Communication uses WebSocket (default, v2.1+) and HTTP
+              (fallback). No reverse proxy, no message queue
         \item Both services bind to \texttt{localhost} only --- never
               network-accessible
     \end{itemize}
@@ -161,73 +163,78 @@
 
 \begin{frame}{System Architecture --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.78, every node/.style={transform shape},
-        node distance=0.3cm,
-        box/.style={draw, rounded corners=3pt, minimum width=4.8cm,
-                    minimum height=0.45cm, font=\small, align=center},
+    \begin{tikzpicture}[scale=0.62, every node/.style={transform shape},
+        node distance=0.25cm,
+        box/.style={draw, rounded corners=3pt, minimum width=3.2cm,
+                    minimum height=0.4cm, font=\scriptsize, align=center},
         host/.style={box, fill=blue!12},
         container/.style={box, fill=orange!15},
-        runtime/.style={box, fill=green!12},
-        httpbox/.style={draw, rounded corners=3pt, minimum width=3.8cm,
-                    minimum height=0.45cm, font=\scriptsize, align=center,
+        sidecar/.style={box, fill=green!12},
+        transport/.style={draw, rounded corners=3pt, minimum width=2.6cm,
+                    minimum height=0.4cm, font=\tiny, align=center,
                     fill=gray!8, dashed},
-        arr/.style={-{Stealth[length=5pt]}, thick},
-        lbl/.style={font=\scriptsize, text=gray},
+        arr/.style={-{Stealth[length=4pt]}, thick},
+        lbl/.style={font=\tiny, text=gray},
         boundary/.style={draw, dashed, rounded corners=5pt, gray,
-                         inner sep=8pt},
+                         inner sep=5pt},
     ]
-        % Host boundary
+        % Host boundary — shared UI
         \node[host] (mic) {Microphone (getUserMedia)};
-        \node[host, below=0.35cm of mic] (ui) {React UI (localhost:5173)};
-        \node[host, below=0.35cm of ui] (clip) {Clipboard (navigator.clipboard)};
+        \node[host, below=0.25cm of mic] (ui) {React UI (localhost:5173)};
+        \node[host, below=0.25cm of ui] (clip) {Clipboard};
 
         \begin{scope}[on background layer]
             \node[boundary, fit=(mic)(ui)(clip),
-                  label={[font=\scriptsize, text=gray]above left:Host}] {};
+                  label={[font=\scriptsize, text=gray]above left:Host / Webview}] {};
         \end{scope}
 
-        % Connection — distinct visual layer between boundaries
-        \node[httpbox] (http) [below=0.5cm of clip]
-              {HTTP POST / GET over localhost};
-
-        % Container boundary
-        \node[container, below=0.5cm of http] (api) {FastAPI (localhost:8000)};
-        \node[container, below=0.3cm of api] (ffmpeg) {ffmpeg transcode};
-        \node[runtime, below=0.3cm of ffmpeg] (whisper) {faster-whisper (CUDA)};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(api)(ffmpeg)(whisper),
-                  label={[font=\scriptsize, text=gray]left:Docker Container}] {};
-        \end{scope}
+        % Transport layer
+        \node[transport] (trans) [below=0.4cm of clip]
+              {HTTP / WebSocket over localhost};
 
         % Arrows — host internal flow
         \draw[arr] (mic) -- (ui);
         \draw[arr] (ui) -- (clip);
+        \draw[arr] (clip) -- (trans);
 
-        % Arrow from clip down to HTTP, then HTTP down to API
-        \draw[arr] (clip) -- (http);
-        \draw[arr] (http) -- (api);
+        % Left: Docker path
+        \node[container, below left=0.5cm and 0.6cm of trans] (api1) {FastAPI};
+        \node[container, below=0.2cm of api1] (ff1) {ffmpeg};
+        \node[container, below=0.2cm of ff1] (w1) {faster-whisper};
 
-        % Container internal flow
-        \draw[arr] (api) -- (ffmpeg);
-        \draw[arr] (ffmpeg) -- (whisper);
+        \begin{scope}[on background layer]
+            \node[boundary, fit=(api1)(ff1)(w1),
+                  label={[font=\scriptsize, text=gray]left:Docker Container}] {};
+        \end{scope}
 
-        % JSON response path — loop back with clearance
-        \draw[arr, dashed] (whisper.east) -- ++(1.8,0)
-              |- node[near start, right, font=\tiny]{JSON response} (api.east);
+        % Right: Sidecar path
+        \node[sidecar, below right=0.5cm and 0.6cm of trans] (api2) {FastAPI};
+        \node[sidecar, below=0.2cm of api2] (ff2) {ffmpeg};
+        \node[sidecar, below=0.2cm of ff2] (w2) {faster-whisper};
 
-        % Key — top-right corner where there is open space
-        \node[anchor=north west, font=\tiny\bfseries]
-              (keytitle) at ([xshift=1.8cm, yshift=0.1cm]mic.north east)
-              {\underline{Key}};
-        \node[anchor=north west, text width=4.0cm, font=\tiny,
-              align=left, below=0.02cm of keytitle.south west, anchor=north west] {%
-            \textbullet\ Dashed boundary = isolation layer\\[1pt]
-            \textbullet\ Solid arrows = data flow direction\\[1pt]
-            \textbullet\ Audio enters at the top\\[1pt]
-            \textbullet\ Transcript exits via JSON response};
+        \begin{scope}[on background layer]
+            \node[boundary, fit=(api2)(ff2)(w2),
+                  label={[font=\scriptsize, text=gray]right:Bare-host Sidecar}] {};
+        \end{scope}
+
+        % Arrows to backends
+        \draw[arr] (trans.south) -- (api1.north);
+        \draw[arr] (trans.south) -- (api2.north);
+        \draw[arr] (api1) -- (ff1);
+        \draw[arr] (ff1) -- (w1);
+        \draw[arr] (api2) -- (ff2);
+        \draw[arr] (ff2) -- (w2);
+
+        % Mode labels
+        \node[lbl, below left=0.05cm and 0.0cm of api1.north west] {Browser mode};
+        \node[lbl, below right=0.05cm and 0.0cm of api2.north east] {Desktop mode};
     \end{tikzpicture}
     \end{center}
+
+    \vspace{0.1em}
+    {\scriptsize Same backend, different isolation boundary. Browser mode
+    uses Docker; desktop mode uses a Tauri-managed sidecar.
+    Both bind to \texttt{localhost:8000}.}
 \end{frame}
 
 
@@ -243,6 +250,7 @@
         STT Engine & faster-whisper (large-v3) & Accuracy/speed on local GPU \\
         Transcode  & ffmpeg (in container)     & Normalizes browser audio to WAV \\
         Container  & Docker, CUDA 12.6         & GPU isolation, reproducibility \\
+        Desktop    & Tauri v2, Rust            & Native OS access, sidecar management \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -327,41 +335,46 @@
 \section{Container Strategy}
 % =========================================================================
 
-\begin{frame}{Host vs.\ Container Responsibilities}
+\begin{frame}{Host vs.\ Container vs.\ Sidecar}
     \small
-    The boundary between host and container is drawn by hardware capability.
+    Two runtime modes share the same UI/inference boundary.
 
-    \vspace{0.3em}
+    \vspace{0.2em}
     \begin{columns}[T]
-        \begin{column}{0.48\textwidth}
-            \textbf{Host (Browser)}
-            \begin{itemize}\setlength{\itemsep}{0pt}
+        \begin{column}{0.30\textwidth}
+            \textbf{UI Layer}\\{\scriptsize (browser or webview)}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Microphone access
                 \item Audio recording
-                \item User interface rendering
+                \item UI rendering
                 \item Text editing
                 \item Clipboard access
-                \item Codec negotiation
             \end{itemize}
         \end{column}
-        \begin{column}{0.48\textwidth}
-            \textbf{Container (Docker)}
-            \begin{itemize}\setlength{\itemsep}{0pt}
-                \item Model weight management
-                \item Audio transcoding (ffmpeg)
-                \item GPU inference (faster-whisper)
+        \begin{column}{0.30\textwidth}
+            \textbf{Docker Container}\\{\scriptsize (browser mode)}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item Model weights
+                \item ffmpeg transcode
+                \item GPU inference
                 \item MIME validation
                 \item Temp file lifecycle
-                \item Structured logging
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.33\textwidth}
+            \textbf{Bare-host Sidecar}\\{\scriptsize (desktop mode)}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item Same five responsibilities
+                \item Tauri manages lifecycle
+                \item CUDA library discovery
+                \item WebKitGTK permissions
             \end{itemize}
         \end{column}
     \end{columns}
 
-    \vspace{0.3em}
-    Browser APIs (mic, clipboard) cannot run in a container.
-    GPU inference cannot run efficiently in a browser.
-    The container is disposable --- only the model cache
-    and the transcript text survive beyond a single session.
+    \vspace{0.2em}
+    {\footnotesize Backend code is identical --- only the process boundary changes.
+    Desktop mode adds: sidecar spawn, health poll, CUDA runtime injection.}
 \end{frame}
 
 
@@ -751,7 +764,7 @@
 
 \begin{frame}{State Machine --- Diagram}
     \begin{center}
-    \includegraphics[height=0.58\textheight,keepaspectratio]{images/state-machine.png}
+    \includegraphics[height=0.52\textheight,keepaspectratio]{images/state-machine.png}
     \end{center}
 
     {\scriptsize
@@ -902,6 +915,7 @@
         \texttt{make build}     & Build the API Docker image \\
         \texttt{make test}      & Run all tests (pytest + vitest) \\
         \texttt{make gpu-check} & Verify GPU/Docker readiness \\
+        \texttt{make desktop}  & Start Tauri desktop app + sidecar \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -933,7 +947,7 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
             \end{itemize}
         \end{column}
         \begin{column}{0.48\textwidth}
-            \textbf{Frontend (vitest, 65 tests)}
+            \textbf{Frontend (vitest, 70 tests)}
             \begin{itemize}\setlength{\itemsep}{0pt}
                 \item Recorder and Transcript (v1 suite)
                 \item Settings panel: swap states,
@@ -997,8 +1011,8 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         \end{column}
     \end{columns}
 
-    \textbf{v3} --- 3.0: Tauri shell + sidecar; 3.1: native clipboard;
-    3.2: \texttt{submit} direct injection; 3.3: tray + global hotkeys.
+    \textbf{v3.0} (complete) --- Tauri shell + sidecar. v3.1: native
+    clipboard; v3.2: \texttt{submit} injection; v3.3: tray + global hotkeys.
 \end{frame}
 
 
@@ -1182,8 +1196,138 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     The complete loop requires native OS access.
 
     \vspace{0.2em}
-    {\footnotesize\textbf{v3 / Tauri} closes this: native clipboard write and direct
-    text injection, independent of window focus.}
+    {\footnotesize\textbf{v3.0} establishes the platform (Tauri shell + sidecar).
+    \textbf{v3.1} delivers the native clipboard that closes the focus gap.
+    \textbf{v3.2} adds direct text injection.}
+\end{frame}
+
+
+
+% =========================================================================
+\section{v3.0 --- Desktop Application}
+% =========================================================================
+
+\begin{frame}{v3.0 --- Desktop Application}
+    \small
+    v3.0 is a platform change, not a feature addition. All v2 functionality
+    is preserved --- recording modes, streaming, VAD, voice commands, settings.
+
+    \vspace{0.3em}
+    \begin{columns}[T]
+        \begin{column}{0.48\textwidth}
+            \textbf{What changed}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item Tauri v2 desktop shell
+                \item Python sidecar (replaces Docker)
+                \item Bare-host GPU inference
+                \item WebKitGTK media permissions
+                \item CUDA runtime discovery
+                \item Backend-readiness gate
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \textbf{What stayed the same}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item Same React frontend build
+                \item Same FastAPI backend code
+                \item Same WebSocket/HTTP transports
+                \item Same localhost-only binding
+                \item Browser mode unchanged
+                \item 111 tests (70 frontend, 41 backend)
+            \end{itemize}
+        \end{column}
+    \end{columns}
+
+    \vspace{0.3em}
+    \begin{block}{Runtime split}
+        \scriptsize
+        \texttt{window.\_\_TAURI\_\_} at module scope. One Vite build
+        serves both browser and Tauri webview. No build-time flags.
+    \end{block}
+\end{frame}
+
+
+\begin{frame}{v3.0 --- Sidecar Lifecycle}
+    \small
+    Tauri spawns the Python API as a managed child process. No Docker, no
+    container overhead.
+
+    \vspace{0.3em}
+    \begin{description}\setlength{\itemsep}{2pt}
+        \item[Spawn] \texttt{find\_uvicorn()} resolves the Python executable.
+              \texttt{cuda\_ld\_library\_path()} discovers pip-installed NVIDIA
+              libraries under \texttt{site-packages/nvidia/*/lib/} and injects
+              via \texttt{LD\_LIBRARY\_PATH}.
+        \item[Health poll] Background thread polls
+              \texttt{GET http://127.0.0.1:8000/health} every 500\,ms.
+              120\,s timeout. Crash detection via \texttt{try\_wait()} each cycle
+              --- port conflicts surface immediately, not after full timeout.
+        \item[Ready] On health success, emits \texttt{backend-ready} Tauri event.
+              UI transitions from ``Starting backend\ldots'' to active.
+        \item[Shutdown] \texttt{on\_window\_event} sends SIGTERM on
+              \texttt{CloseRequested}. 5\,s grace period, then SIGKILL.
+              \texttt{Child} handle in \texttt{Mutex<Option<Child>{}>} as Tauri
+              managed state.
+    \end{description}
+\end{frame}
+
+
+\begin{frame}{v3.0 --- Triage Highlights}
+    \small
+    Two architecturally significant findings during desktop bring-up.
+
+    \vspace{0.4em}
+    \textbf{WebKitGTK media permissions.}
+    Two-layer model for \texttt{getUserMedia}: (1)~feature gate
+    (\texttt{enable-media-stream}) and (2)~runtime permission grant via the
+    \texttt{permission-request} signal. Without both layers, recording is
+    \textit{silently denied} --- no prompt, no error dialog. Chromium
+    auto-prompts; WebKitGTK delegates to the application.
+    Fix: \texttt{connect\_permission\_request} auto-grants all requests.
+
+    \vspace{0.4em}
+    \textbf{CUDA runtime discovery on bare host.}
+    \texttt{ctranslate2} dlopens \texttt{libcublas.so.12} at inference time.
+    Docker's NVIDIA runtime provides it automatically. On bare host, it
+    requires \texttt{pip install nvidia-cublas-cu12}. \texttt{cuda\_ld\_library\_path()}
+    discovers the library under \texttt{site-packages/nvidia/*/lib/} and
+    injects it via \texttt{LD\_LIBRARY\_PATH} on the sidecar child process.
+\end{frame}
+
+
+\begin{frame}{v3.0 --- Backend-Readiness Gate}
+    \small
+    \textbf{Problem:} The sidecar takes 2--5\,s to start (model loading).
+    The UI must not allow recording until the backend is ready.
+
+    \vspace{0.4em}
+    \begin{columns}[T]
+        \begin{column}{0.48\textwidth}
+            \textbf{Tauri context}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item \texttt{backendReady} starts \texttt{false}
+                \item \texttt{useEffect} listens for
+                      \texttt{backend-ready} Tauri event
+                \item Record button shows
+                      ``Starting backend\ldots''
+                \item Event fires $\to$ button enables
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \textbf{Browser context}
+            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+                \item \texttt{backendReady} starts \texttt{true}
+                \item No gate, no behavior change
+                \item Record button enabled on mount
+                \item No Tauri dependency loaded
+            \end{itemize}
+        \end{column}
+    \end{columns}
+
+    \vspace{0.4em}
+    {\footnotesize Detection: \texttt{typeof window.\_\_TAURI\_\_ !== "undefined"}
+    at module scope. Two tests verify both paths (dynamic import with
+    \texttt{vi.resetModules()} for the Tauri context).}
 \end{frame}
 
 

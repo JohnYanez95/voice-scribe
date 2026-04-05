@@ -7,6 +7,10 @@ stateDiagram-v2
     classDef successClass fill:#ddf5dd,stroke:#448844,color:#333
     classDef failureClass fill:#ffe0e0,stroke:#aa3333,color:#555
     classDef uiClass      fill:#ede8ff,stroke:#7755aa,color:#333
+    classDef tauriClass   fill:#ffecd2,stroke:#cc8844,color:#333
+
+    backendStarting --> idle : backend-ready event
+    note right of backendStarting : Tauri only.<br/>Browser starts at idle.
 
     idle --> recording : record<br/>(push-to-talk)
     idle --> listening : start continuous
@@ -43,4 +47,5 @@ stateDiagram-v2
     class processing inflightClass
     class done successClass
     class error failureClass
+    class backendStarting tauriClass
     class settings uiClass
