@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
-**Last Updated:** April 4, 2026
-**Status:** v2.3.3 Complete — v3 scoped
+**Last Updated:** April 5, 2026
+**Status:** v3.0 Phase B Complete — v3.1 next
 
 ---
 
@@ -625,6 +625,8 @@ Tauri-only power feature — it requires native OS access the browser cannot pro
   component unmount. The current single-ref pattern must be replaced with a `Set<() => void>` (register
   on open, deregister on close, iterate on unmount). Ships as a standalone PR on main before any Tauri
   code exists — web-side refactor with full test coverage, not mixed into the Tauri scaffolding.
+  **Complete (2026-04-05, `8cbc933`).** Set pattern shipped with deregister-on-completion. 68
+  frontend tests.
 
 - **Voice command surface** — three commands: `copy` (clipboard write, native API removes focus
   requirement), `clear` (buffer wipe, carried from v2), `submit` (direct injection into focused
@@ -666,9 +668,10 @@ frontend tests. Shipped on main before any Tauri code exists — isolation requi
   operation — `MODEL_CACHE_DIR` defaults to `~/.cache/voice-scribe`, `TEMP_DIR` defaults to
   `tempfile.gettempdir() + "/voice-scribe"`. Docker Compose overrides via env vars; `make dev`
   unchanged.
-- **Bare-host startup validation** — pending. Gate: `cd apps/api && source .venv/bin/activate &&
-  uvicorn app.main:app --host 127.0.0.1 --port 8000` starts, `/health` returns `"device": "gpu"`,
-  model loads from `~/.cache/voice-scribe`.
+- ~~Bare-host startup validation~~ **(complete, exercised during Phase B triage):** GPU inference
+  confirmed on bare host via Tauri sidecar. `/health` returns `"device": "gpu"`, model loads from
+  `~/.cache/voice-scribe`. `nvidia-cublas-cu12` pip package required for `libcublas.so.12`;
+  `cuda_ld_library_path()` in `main.rs` injects the library path at sidecar spawn time.
 - **Host setup documentation** — pending. Close condition: `docs/v3/host-setup.md` that gets a fresh
   WSL instance to a running API without Docker.
 
@@ -693,9 +696,11 @@ continuous mode, voice commands, settings).
 3. **API configuration for Tauri context.** ~~`config.py` defaults updated for host operation~~
    **(complete, Prereq 2):** `MODEL_CACHE_DIR` → `~/.cache/voice-scribe`, `TEMP_DIR` →
    `tempfile.gettempdir() + "/voice-scribe"`. Docker Compose overrides unchanged.
-   - Remaining: `CORS_ORIGINS` must include the Tauri webview origin (determined during scaffolding —
-     `tauri://localhost` or `https://tauri.localhost` depending on Tauri v2 config). On Windows/WSL2,
-     Tauri v2 defaults to `https://tauri.localhost`; Linux uses `tauri://localhost`.
+   - ~~`CORS_ORIGINS` must include the Tauri webview origin~~ **(complete, Phase B):**
+     `config.py` default `CORS_ORIGINS` now includes all four origins: `http://localhost:5173`,
+     `http://127.0.0.1:5173`, `https://tauri.localhost` (Windows/WSL2), `tauri://localhost` (Linux).
+     Both `main.py` CORS middleware and `transcribe_ws.py` WebSocket origin check read from
+     `settings.cors_origins` — one default update covers both surfaces.
 
 4. **WebSocket origin enforcement.** `transcribe_ws.py` line 40 and `main.py` line 44 both read from
    `settings.cors_origins`. A single `CORS_ORIGINS` config update covers both surfaces. The gate must
@@ -705,6 +710,21 @@ continuous mode, voice commands, settings).
 
 5. **Makefile update.** `make desktop` target starts the sidecar + Tauri dev mode. Existing
    `make dev` (Docker + Vite) stays untouched.
+
+6. **WebKitGTK media permissions (triage addition).** WebKitGTK has a two-layer permission model
+   for `getUserMedia`: a feature gate (`enable-media-stream`) and a runtime permission grant via the
+   `permission-request` signal. Without both layers, recording is silently denied — `getUserMedia`
+   rejects with `NotAllowedError`, no prompt, no WebKitGTK-level error. `main.rs` connects
+   `connect_permission_request` and auto-grants all permission requests. Safe for a local-first tool
+   with no untrusted content. Dependency: `webkit2gtk = "2.0"` in `Cargo.toml`.
+
+7. **CUDA runtime discovery for bare-host GPU inference (triage addition).** `ctranslate2` dlopens
+   `libcublas.so.12` at inference time. In Docker, the NVIDIA container runtime provides it. On bare
+   host, it is missing unless explicitly installed. `pip install nvidia-cublas-cu12` provides the
+   library under `site-packages/nvidia/cublas/lib/`. `main.rs` includes `cuda_ld_library_path()` which
+   discovers pip-installed NVIDIA libraries under `site-packages/nvidia/*/lib/` and injects them via
+   `LD_LIBRARY_PATH` on the sidecar child process. The function queries
+   `site.getusersitepackages()` — user-scope pip installations only.
 
 **Not in v3.0:** Native clipboard, `submit` command, global hotkeys, system tray. The app is a Tauri
 wrapper around the existing web app with a managed backend. No new capabilities.
@@ -904,8 +924,8 @@ In multi-speaker environments (office, meeting, language tutoring session), the 
 **Voice command prefix redesign — post-v2.3 finding**
 Manual testing revealed two reliability problems with the "scribe" prefix: (1) Whisper conflates "scribe" with "subscribe" under rushed or adverse speech conditions, producing false negatives; (2) VAD cuts the two-word phrase at the natural pause between prefix and action verb, splitting "scribe stop" into "Scribe." + "Stop." — neither matches. The "scribe" prefix was chosen for phonetic distinctiveness in developer dictation, but two syllables ending in a fricative before a vowel-initial verb creates an inherent pause point. The pipeline is correct; the vocabulary needs redesign. Candidate approaches: (a) a single strong-consonant wake syllable ("hey", "yo", short and hard to mishear); (b) fused two-syllable command words with no internal pause point (e.g. "stopscribe", "pushit"); (c) configurable prefix so users can pick what works for their voice. Design review required before any prefix change — the detection logic is a one-line table update, but Gate 1 must re-run for any new vocabulary.
 
-**Single `docker compose up` for full stack**
-Adding the frontend as a second service in `compose.dev.yml` so one command starts everything. Small change, meaningful quality of life.
+**Client-side keyword detection for voice command latency**
+Voice commands pay the full transcription round-trip (~1.2–1.5s from speech end to action). The latency is architectural — `detectVoiceCommand` runs after backend inference returns. Candidate approach: lightweight client-side model (small vocabulary, ONNX/WASM, same hosting pattern as Silero VAD) that detects command words locally and fires immediately, bypassing the backend. Regular dictation continues through the full pipeline. Becomes more pressing in v3.2 when `submit` injects text into a focused application. Design review required before scoping.
 
 **CPU-only deployment path**
-The CPU fallback is wired and verified (v1 close-out, ~1.87s latency on i9-12900K with `small` model). Worth exploring whether CPU inference could run outside Docker entirely, accelerating the v3 Tauri packaging work.
+The CPU fallback is wired and verified (v1 close-out, ~1.87s latency on i9-12900K with `small` model). Open question: is this a distribution target (machines without NVIDIA GPUs) or a development convenience? Current state: `DEVICE=cpu` wiring exists and was verified in v1. Untested: CPU inference through the Tauri sidecar path — `cuda_ld_library_path()` would no-op, but `config.py` defaults `DEVICE` to `cuda`, so a CPU-only host needs `DEVICE=cpu` in the sidecar spawn environment. The entry should be scoped as a distribution target or dropped.

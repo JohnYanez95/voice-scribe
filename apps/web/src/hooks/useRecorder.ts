@@ -34,7 +34,7 @@ export function useRecorder(): UseRecorderResult {
 
     if (!MediaRecorder.isTypeSupported(MIME_TYPE)) {
       setError(
-        "Your browser does not support audio/webm;codecs=opus recording. Please use Chrome."
+        "Your environment does not support audio/webm;codecs=opus recording."
       );
       return;
     }

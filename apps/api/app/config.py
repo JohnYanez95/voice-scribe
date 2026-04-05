@@ -26,7 +26,12 @@ class Settings:
 
     @property
     def cors_origins(self) -> list[str]:
-        raw = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+        # Tauri v2 origin: https://tauri.localhost (Windows) or tauri://localhost (Linux).
+        # Both included so WebSocket origin checks don't silently reject with 4003.
+        raw = os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173,https://tauri.localhost,tauri://localhost",
+        )
         return [origin.strip() for origin in raw.split(",")]
 
     @property

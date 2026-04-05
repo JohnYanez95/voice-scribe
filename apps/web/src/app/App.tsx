@@ -12,8 +12,16 @@ import type { RecordingMode, RecordingState } from "../types";
 
 const PARAGRAPH_BREAK_MS = 3000;
 
+// Runtime platform detection — no @tauri-apps/api import needed (deferred to v3.1).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const isDesktop = typeof (window as any).__TAURI__ !== "undefined";
+
 export function App() {
   const [state, setState] = useState<RecordingState>("idle");
+  // In Tauri, the sidecar needs time to start. Gate recording until the Rust
+  // side emits "backend-ready". In the browser, the backend is already running
+  // (or will surface errors at transcription time) — no gate.
+  const [backendReady, setBackendReady] = useState(!isDesktop);
   const [transcript, setTranscript] = useState("");
   const [rawTranscript, setRawTranscript] = useState("");
   const [error, setError] = useState("");
@@ -62,6 +70,21 @@ export function App() {
       setState("error");
     }
   }, [recorderError]);
+
+  // Listen for sidecar readiness in Tauri context
+  useEffect(() => {
+    if (!isDesktop) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tauriEvent = (window as any).__TAURI__?.event;
+    if (!tauriEvent) return;
+    const unlisten = tauriEvent.listen(
+      "backend-ready",
+      () => setBackendReady(true)
+    );
+    return () => {
+      unlisten.then((fn: () => void) => fn());
+    };
+  }, []);
 
   // Cleanup WebSocket on unmount
   useEffect(() => () => {
@@ -324,7 +347,8 @@ export function App() {
   // In continuous mode, the user can click Stop while processing (drain-then-done).
   // isListening=true means the VAD is running — Stop is a valid action.
   // Push-to-talk processing blocks all recording actions.
-  const isDisabled = (state === "processing" && !isListening) || modelSwapping;
+  const isDisabled =
+    (state === "processing" && !isListening) || modelSwapping || !backendReady;
   const isActiveSession =
     state === "recording" || state === "listening" || state === "processing";
 
@@ -347,6 +371,7 @@ export function App() {
         onToggle={handleToggle}
         recorderError={recorderError}
         disabled={isDisabled}
+        backendReady={backendReady}
       />
       {error && <p className="error">{error}</p>}
       <Transcript

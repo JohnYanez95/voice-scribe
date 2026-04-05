@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicerdicer/tauri-v2-schema/main/tauri.conf.json",
+  "productName": "Voice Scribe",
+  "version": "0.1.0",
+  "identifier": "com.voice-scribe.app",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../web/dist/"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Voice Scribe",
+        "width": 800,
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8000 ws://localhost:8000; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:"
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": false
+    }
+  }
+}

@@ -8,6 +8,7 @@ const defaultProps = {
   onToggle: () => {},
   recorderError: null,
   disabled: false,
+  backendReady: true,
 };
 
 describe("Recorder", () => {

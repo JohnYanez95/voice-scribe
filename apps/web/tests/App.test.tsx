@@ -384,3 +384,66 @@ describe("App — wsCleanupSet lifecycle", () => {
     expect(streamCalls[2].cleanup).toHaveBeenCalledOnce();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Backend readiness gate
+// ---------------------------------------------------------------------------
+
+describe("App — backend readiness gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    streamCalls.length = 0;
+    localStorage.clear();
+    mockIsListening = false;
+
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  afterEach(() => {
+    delete (window as any).__TAURI__;
+  });
+
+  it("browser context: Record button enabled on mount — no readiness gate", () => {
+    render(<App />);
+    const btn = screen.getByText("Record");
+    expect(btn).toBeTruthy();
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("Tauri context: disabled with 'Starting backend...' until backend-ready event", async () => {
+    // Set up __TAURI__ before re-importing App so isDesktop evaluates to true
+    let listenCallback: (() => void) | undefined;
+    (window as any).__TAURI__ = {
+      event: {
+        listen: vi.fn((_event: string, cb: () => void) => {
+          listenCallback = cb;
+          return Promise.resolve(() => {});
+        }),
+      },
+    };
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+
+    render(<TauriApp />);
+
+    // Button shows "Starting backend..." and is disabled
+    const btn = screen.getByText("Starting backend...");
+    expect(btn).toBeTruthy();
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+
+    // Fire backend-ready event from Rust sidecar
+    act(() => {
+      listenCallback!();
+    });
+
+    // Button transitions to "Record" and is enabled
+    await waitFor(() => {
+      const recordBtn = screen.getByText("Record");
+      expect(recordBtn).toBeTruthy();
+      expect((recordBtn as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+});

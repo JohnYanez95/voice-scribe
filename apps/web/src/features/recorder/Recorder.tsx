@@ -6,6 +6,7 @@ interface RecorderProps {
   onToggle: () => void;
   recorderError: string | null;
   disabled: boolean;
+  backendReady: boolean;
 }
 
 export function Recorder({
@@ -14,12 +15,15 @@ export function Recorder({
   onToggle,
   recorderError,
   disabled,
+  backendReady,
 }: RecorderProps) {
-  const buttonText = isRecording
-    ? "Stop"
-    : state === "processing"
-      ? "Processing..."
-      : "Record";
+  const buttonText = !backendReady
+    ? "Starting backend..."
+    : isRecording
+      ? "Stop"
+      : state === "processing"
+        ? "Processing..."
+        : "Record";
 
   return (
     <div className="recorder">
