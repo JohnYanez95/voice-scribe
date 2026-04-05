@@ -534,6 +534,9 @@ Before anything leaves localhost, the threat model should be revisited. MIME har
 
 ~~**Streaming partials**~~ — promoted to v2.1.
 
+**Speaker diarization — single-voice isolation gate**
+In multi-speaker environments (office, meeting, language tutoring session), the VAD fires on any voice. The target use case is turn-based conversation with clear pauses between speakers — not overlapping voices. The missing piece is a speaker gate: enroll the target voice, then reject audio chunks that don't match before they reach `encodeWav` and the WebSocket pipeline. If the gate stays client-side (ONNX/WASM, same pattern as the existing VAD), no backend changes are required — the API continues to receive clean single-speaker blobs. The one bounded addition to the current model is voice embedding storage: a serialized Float32Array in `localStorage` is sufficient, no server persistence required. The agent TTS sub-case (AI response playing through device speakers) is already handled by `echoCancellation: true` on the `MediaStream` — no new work needed there. **Design review required before scoping:** enrollment UX, embedding model selection (ECAPA-TDNN and similar have ONNX exports suitable for browser), and gate threshold calibration. Getting the threshold wrong means the user's own voice is filtered under noisy conditions — worse than the current behavior.
+
 **Single `docker compose up` for full stack**
 Adding the frontend as a second service in `compose.dev.yml` so one command starts everything. Small change, meaningful quality of life.
 

@@ -37,6 +37,10 @@ export function useVAD(options: UseVADOptions): UseVADResult {
   }, []);
 
   const startListening = async (): Promise<void> => {
+    // Destroy any previous paused instance before creating a new one.
+    // Without this, repeated start/stop cycles orphan MicVAD instances
+    // (ONNX runtime + AudioWorklet + MediaStream) until component unmount.
+    vadRef.current?.destroy();
     try {
       const vad = await MicVAD.new({
         baseAssetPath: "/",

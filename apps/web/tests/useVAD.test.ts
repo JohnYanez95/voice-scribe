@@ -107,6 +107,29 @@ describe("useVAD", () => {
     expect(mockVad.destroy).toHaveBeenCalledOnce();
   });
 
+  it("startListening destroys previous instance before creating a new one", async () => {
+    const onSpeechEnd = vi.fn();
+    const { result } = renderHook(() => useVAD({ onSpeechEnd }));
+
+    // First start/stop cycle
+    await act(async () => {
+      await result.current.startListening();
+    });
+    act(() => {
+      result.current.stopListening();
+    });
+
+    // destroy() should not have been called yet — only pause()
+    expect(mockVad.destroy).not.toHaveBeenCalled();
+
+    // Second startListening — must destroy the paused instance first
+    await act(async () => {
+      await result.current.startListening();
+    });
+
+    expect(mockVad.destroy).toHaveBeenCalledOnce();
+  });
+
   it("init failure sets error, does not throw", async () => {
     (MicVAD.new as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("mic permission denied")
