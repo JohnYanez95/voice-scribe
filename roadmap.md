@@ -452,6 +452,21 @@ Lightweight implementation. Needs continuous mode (v2.2) to be meaningful.
 - **Ship with fixed phrases first.** Evaluate for false positives in real dictation before adding configurability. Phrase customization is a future settings addition, not a v2.3 requirement.
 - Phrases must be phonetically distinctive, semantically absurd in a developer context, and resistant to false positives.
 
+### Gate 1 — Phrase Validation
+Date: 2026-04-04  |  Model: large-v3  |  Ambient: quiet (user throat condition noted)
+
+| Phrase         | Confirmed | Variance observed                                                    |
+|----------------|-----------|----------------------------------------------------------------------|
+| scribe stop    | 8/8       | none                                                                 |
+| scribe submit  | 5/5       | none                                                                 |
+| scribe redo    | 1/1       | light coverage                                                       |
+| scribe clear   | 6/8       | "Subscribe clear.", "It's quite clear." under rushed/scratchy speech |
+
+Verdict: confirmed — "scribe" prefix viable. False negatives only under adverse speech conditions (no
+misfires observed). Rushing + throat condition degrades "scribe clear" recognition; clean speech is
+consistent. Pausing mid-phrase causes VAD to split utterance into separate segments — neither matches a
+command (expected; user must speak the full phrase in one breath). Proceed with implementation.
+
 ### v3 — Desktop Application (Tauri)
 
 Start Tauri work after voice commands are working and the settings panel is stable in the browser. Direct injection (transcript delivered to the focused application without manual paste) is the Tauri-only value proposition — it requires native OS access the browser cannot provide. Until that feature is needed, Tauri adds no value over the web app.
