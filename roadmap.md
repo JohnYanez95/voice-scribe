@@ -465,7 +465,43 @@ Date: 2026-04-04  |  Model: large-v3  |  Ambient: quiet (user throat condition n
 Verdict: confirmed — "scribe" prefix viable. False negatives only under adverse speech conditions (no
 misfires observed). Rushing + throat condition degrades "scribe clear" recognition; clean speech is
 consistent. Pausing mid-phrase causes VAD to split utterance into separate segments — neither matches a
-command (expected; user must speak the full phrase in one breath). Proceed with implementation.
+command (accepted; user must speak the full phrase in one breath). Proceed with implementation.
+
+**Post-delivery finding (2026-04-04):** The "speak in one breath" constraint proved too demanding in
+field use. VAD-split was observed and accepted in Gate 1 — the gap was in the acceptance criterion, not
+the detection. Field use invalidated the criterion. This distinction is the basis for the v2.3.1 gate
+expansion (see below).
+
+#### v2.3.1 — Voice Command Vocabulary Redesign
+
+**Principal decision (2026-04-04): Option A — single-word vocabulary, same architecture.**
+
+Eliminate multi-word phrases. A single word cannot be split by VAD. A well-chosen single word also
+narrows the acoustic confusion space — "subscribe" is close to "scribe," but the new candidate won't
+share that overlap. The detection pipeline, `COMMAND_MAP`, and `onComplete` integration point are
+unchanged. Only the keys in the map move.
+
+Option B (dedicated wake word model) deferred to v3/Tauri, where voice commands become the primary
+control surface and the additional pipeline complexity earns its place. Option C (defer to v3) rejected —
+the detection infrastructure is working and the failure is fixable.
+
+**Scope:** New vocabulary → Gate 1 re-run → one table update in `voiceCommands.ts` → updated tests.
+No architectural changes. No new dependencies.
+
+**Gate 1 criteria (expanded per PM, 2026-04-04):**
+
+The original Gate 1 bar was transcription fidelity only. v2.3.1 gate adds a second criterion: the
+command must survive a natural speaking cadence — including natural pauses between syllables — without
+VAD splitting it into non-matching segments. A word that only works when the user consciously compresses
+their speech fails the gate regardless of Whisper accuracy.
+
+1. ≥9/10 correct transcription per command under **adverse conditions** (not normal conditions — adverse
+   is the bar). Test adverse first; reject candidates early.
+2. ≥9/10 detection in continuous mode with **natural speaking cadence** — no deliberate compression.
+   VAD-split failures count as failures.
+
+**Process:** Senior brings candidate words to the gate. Gate passes. Implementation starts. Same
+discipline as v2.3.
 
 ### v3 — Desktop Application (Tauri)
 
