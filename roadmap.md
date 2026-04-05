@@ -474,56 +474,62 @@ expansion (see below).
 
 #### v2.3.1 — Voice Command Vocabulary Redesign
 
+**Scope (PM, 2026-04-04):**
+In scope: three single-word commands, one-table update in `voiceCommands.ts`, test update, presentation
+update. No architectural changes, no new dependencies, no backend changes.
+Out of scope (not deferred — out): prefix model, stop command, submit command, configurability.
+
 **Principal decision (2026-04-04): Option A — single-word vocabulary, same architecture.**
+Detection pipeline, `COMMAND_MAP`, and `onComplete` integration point unchanged. Only the keys move.
+Option B deferred to v3/Tauri. Option C rejected.
 
-Eliminate multi-word phrases. A single word cannot be split by VAD. A well-chosen single word also
-narrows the acoustic confusion space — "subscribe" is close to "scribe," but the new candidate won't
-share that overlap. The detection pipeline, `COMMAND_MAP`, and `onComplete` integration point are
-unchanged. Only the keys in the map move.
+**Vocabulary — locked (2026-04-04):**
 
-Option B (dedicated wake word model) deferred to v3/Tauri, where voice commands become the primary
-control surface and the additional pipeline complexity earns its place. Option C (defer to v3) rejected —
-the detection infrastructure is working and the failure is fixable.
-
-**Scope:** New vocabulary → Gate 1 re-run → one table update in `voiceCommands.ts` → updated tests.
-No architectural changes. No new dependencies.
-
-**Gate 1 criteria (expanded per PM, 2026-04-04):**
-
-The original Gate 1 bar was transcription fidelity only. v2.3.1 gate adds a second criterion: the
-command must survive a natural speaking cadence — including natural pauses between syllables — without
-VAD splitting it into non-matching segments. A word that only works when the user consciously compresses
-their speech fails the gate regardless of Whisper accuracy.
-
-1. ≥9/10 correct transcription per command under **adverse conditions** (not normal conditions — adverse
-   is the bar). Test adverse first; reject candidates early.
-2. ≥9/10 detection in continuous mode with **natural speaking cadence** — no deliberate compression.
-   VAD-split failures count as failures.
-
-**Vocabulary — locked (2026-04-04):** Three single-word in-session commands, no prefix.
-
-| Word | Action | Notes |
+| Word | Action | Replaces |
 |---|---|---|
-| copy | Write transcript to clipboard | Replaces "scribe submit" — more natural, self-describing |
-| clear | Clear transcript buffer | Replaces "scribe clear" + "scribe redo" |
-| break | Insert paragraph break (\n\n) | New as voice command — hotkey (Ctrl+Shift+R) remains |
+| copy | Write transcript to clipboard | "scribe submit" |
+| clear | Clear transcript buffer | "scribe clear" / "scribe redo" |
+| break | Insert paragraph break (\n\n) | Ctrl+Shift+R only — new as voice command |
 
-"Stop" excluded — chicken-and-egg: the session must already be running to hear the command, and
-the hotkey (Ctrl+Shift+Space) is always available. "Start from silence" is Option B / v3 territory.
-"Submit" excluded — awkward word for a clipboard copy action; "copy" is self-describing.
-"Redo" excluded — redundant with "clear" for v2.3.1 scope.
+**Principal — VAD-split risk reversal (2026-04-04):**
+The failure direction reverses with single-word commands. In v2.3, VAD splitting caused false negatives —
+"scribe stop" split into two segments, neither matched, command didn't fire. With single-word commands,
+VAD splitting becomes a false positive vector: a compound phrase pauses mid-utterance, the first word
+becomes an isolated segment, and it matches. "Break out of the loop" splits after "break" — fires.
+"Clear the cache" splits after "clear" — fires.
 
-Scope deliberately narrow: three commands covering the highest-value in-session actions. False positive
-risk is bounded by exact-segment matching — "Make a copy", "copy the value", "copy that" are all
-multi-segment and never match. The use case does the disambiguation work the prefix was doing.
+This mechanism is what Gate 1 Test 2 is stress-testing (live continuous-mode sentences, not text
+analysis). The Principal named it to ensure the gate knows what it's looking for.
 
-Gate 1 character changes for single-word commands. Transcription fidelity is not the concern — Whisper
-knows these words perfectly. The test that matters is the **false-positive field test**: dictate naturally
-across a range of topics and confirm these words do not appear as isolated full segments unintentionally.
-False positive field testing is now the primary gate criterion, not transcription accuracy.
+**Principal — severity asymmetry:**
+Not all false positive failures are equal. Gate tolerance for "clear" must be stricter than for the
+others. "Break" fires accidentally → inserts `\n\n` → recoverable (backspace). "Copy" fires accidentally
+→ overwrites clipboard → benign (transcript still present). "Clear" fires accidentally → destroys the
+buffer → work is lost, unrecoverable. If "clear" shows any false positives under gate conditions, change
+the word. "Break" and "copy" have more tolerance.
 
-**Process:** Senior brings candidate words to the gate. Gate passes. Implementation starts. Same
-discipline as v2.3.
+**Gate 1 — two tests, one session (PM, 2026-04-04):**
+
+*Test 1 — Fidelity (false negative check):* Speak each word 10× in continuous mode under normal and
+adverse conditions (natural cadence, tired voice). Target ≥9/10 per word. Adverse conditions are the
+bar.
+
+*Test 2 — Exact-segment guard (false positive check):* Speak 5–10 sentences in continuous mode where
+"copy," "clear," and "break" appear as non-standalone uses — "copy that function," "let me clear this
+up," "we need a break in the logic." Live VAD test, not text analysis. Confirm zero commands fire.
+"Clear" requires zero tolerance. Any false positive on "clear" fails the vocabulary, not just the gate
+run.
+
+Record in roadmap.md as "Gate 1 — v2.3.1 Phrase Validation": date, model, ambient, per-word fidelity
+counts, false-positive sentence count, verdict. Same format as v2.3 gate.
+
+If both tests pass — ship. No additional review required (PM).
+
+**Verification checklist addition (PM):** The v2.3 presentation slide command table (four rows: scribe
+stop / submit / redo / clear) must be updated to the new vocabulary (three rows: copy / clear / break).
+Same file, same session. Do not let it slip.
+
+**Process:** Gate 1 → one table update + test update + presentation update → ship.
 
 ### v3 — Desktop Application (Tauri)
 
