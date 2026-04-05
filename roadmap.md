@@ -500,6 +500,27 @@ their speech fails the gate regardless of Whisper accuracy.
 2. ≥9/10 detection in continuous mode with **natural speaking cadence** — no deliberate compression.
    VAD-split failures count as failures.
 
+**Vocabulary direction (2026-04-04):** Single natural-action words — no prefix. The exact-segment
+requirement provides inherent false-positive protection: "Copy." as an entire VAD segment in a developer
+dictation session almost exclusively signals intent. Multi-word usage ("make a copy", "copy the value")
+is always multi-segment and never matches. The use case does the disambiguation work that the "scribe"
+prefix was doing artificially.
+
+Candidate words and risk profile:
+
+| Word | Action | Risk |
+|---|---|---|
+| copy | Clipboard | Low — rarely spoken as a standalone segment outside intent |
+| clear | Clear transcript | Low — same |
+| stop | Halt recording | High — common standalone exclamation in many contexts |
+| shift | Paragraph break | Very low — unusual as a standalone utterance in developer speech |
+| record | Toggle recording | Medium — appears in developer dictation as a noun/verb concept |
+
+Gate 1 character changes for single-word commands. Transcription fidelity is not the concern — Whisper
+knows common English words. The test that matters is the **false-positive field test**: say each word
+naturally in mid-dictation contexts and confirm it does not appear as an isolated full segment. False
+positive testing is now the primary gate criterion, not transcription accuracy.
+
 **Process:** Senior brings candidate words to the gate. Gate passes. Implementation starts. Same
 discipline as v2.3.
 
