@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 
 class Settings:
@@ -10,8 +11,16 @@ class Settings:
     ]
     MAX_AUDIO_SECONDS: int = int(os.getenv("MAX_AUDIO_SECONDS", "60"))
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "10"))
-    MODEL_CACHE_DIR: str = os.getenv("MODEL_CACHE_DIR", "/cache")
-    TEMP_DIR: str = os.getenv("TEMP_DIR", "/tmp/voice-scribe")
+    # Host-friendly defaults for v3 sidecar operation. Docker Compose overrides
+    # these via environment variables — no regression for `make dev`.
+    MODEL_CACHE_DIR: str = os.getenv(
+        "MODEL_CACHE_DIR",
+        os.path.join(os.path.expanduser("~"), ".cache", "voice-scribe"),
+    )
+    TEMP_DIR: str = os.getenv(
+        "TEMP_DIR",
+        os.path.join(tempfile.gettempdir(), "voice-scribe"),
+    )
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
     API_PORT: int = int(os.getenv("API_PORT", "8000"))
 

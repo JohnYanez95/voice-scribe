@@ -44,18 +44,30 @@ vi.mock("../src/hooks/useVAD", () => ({
 
 let capturedOnSegment: ((text: string) => void) | undefined;
 let capturedOnComplete: ((result: WsCompleteMessage) => void) | undefined;
-const mockStreamCleanup = vi.fn().mockReturnValue(undefined);
+
+// Tracks per-call data for concurrent segment tests.
+// Each streamTranscribeAudio call pushes an entry with its own callbacks and cleanup fn.
+const streamCalls: Array<{
+  onComplete: (result: WsCompleteMessage) => void;
+  onConnectionError: () => void;
+  onApplicationError: (detail: string) => void;
+  cleanup: ReturnType<typeof vi.fn>;
+}> = [];
 
 vi.mock("../src/services/api", () => ({
   streamTranscribeAudio: vi.fn(
     (
       _blob: Blob,
       onSegment: (text: string) => void,
-      onComplete: (result: WsCompleteMessage) => void
+      onComplete: (result: WsCompleteMessage) => void,
+      onConnectionError: () => void,
+      onApplicationError: (detail: string) => void
     ) => {
       capturedOnSegment = onSegment;
       capturedOnComplete = onComplete;
-      return mockStreamCleanup;
+      const cleanup = vi.fn();
+      streamCalls.push({ onComplete, onConnectionError, onApplicationError, cleanup });
+      return cleanup;
     }
   ),
   transcribeAudio: vi.fn(),
@@ -130,6 +142,7 @@ describe("App — voice commands (continuous mode)", () => {
     capturedOnSpeechEnd = undefined;
     capturedOnSegment = undefined;
     capturedOnComplete = undefined;
+    streamCalls.length = 0;
     mockIsListening = true;
     localStorage.clear();
     localStorage.setItem("voice-scribe-recording-mode", "continuous");
@@ -139,23 +152,7 @@ describe("App — voice commands (continuous mode)", () => {
     });
   });
 
-  it('"scribe stop" consumes segment, calls stopListening, state → done, no transcript added', async () => {
-    render(<App />);
-
-    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
-    act(() => { capturedOnComplete!(commandResult("Scribe stop.")); });
-
-    // stopListening called by the command handler (inside onComplete)
-    expect(mockStopListening).toHaveBeenCalledOnce();
-
-    // State lands at done — spinner gone, no transcript added
-    await waitFor(() => {
-      expect(screen.queryByText("Transcribing...")).toBeNull();
-    });
-    expect(screen.queryByRole("textbox")).toBeNull();
-  });
-
-  it('"scribe submit" writes accumulated transcript to clipboard', async () => {
+  it('"copy" writes accumulated transcript to clipboard, transcript remains', async () => {
     render(<App />);
 
     // Accumulate a transcript via a normal segment first
@@ -163,20 +160,20 @@ describe("App — voice commands (continuous mode)", () => {
     act(() => { capturedOnComplete!(COMPLETE_RESULT); }); // cleaned: "hello"
     await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
 
-    // Fire "scribe submit" on the next VAD cycle
+    // Fire "copy" on the next VAD cycle
     act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
-    act(() => { capturedOnComplete!(commandResult("Scribe submit.")); });
+    act(() => { capturedOnComplete!(commandResult("Copy.")); });
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
     });
 
-    // Transcript is not cleared by submit — still present
+    // Transcript is not cleared by copy — still present
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     expect(textarea.value).toContain("hello");
   });
 
-  it('"scribe clear" clears transcript, VAD stays active (no stopListening)', async () => {
+  it('"clear" clears transcript, VAD stays active (no stopListening)', async () => {
     render(<App />);
 
     // Accumulate transcript
@@ -184,9 +181,9 @@ describe("App — voice commands (continuous mode)", () => {
     act(() => { capturedOnComplete!(COMPLETE_RESULT); });
     await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
 
-    // Fire "scribe clear"
+    // Fire "clear"
     act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
-    act(() => { capturedOnComplete!(commandResult("Scribe clear.")); });
+    act(() => { capturedOnComplete!(commandResult("Clear.")); });
 
     await waitFor(() => {
       expect(screen.queryByText("Transcribing...")).toBeNull();
@@ -195,23 +192,6 @@ describe("App — voice commands (continuous mode)", () => {
     // Transcript cleared — textarea absent (nothing to show)
     expect(screen.queryByRole("textbox")).toBeNull();
     // VAD not stopped — mic stays open
-    expect(mockStopListening).not.toHaveBeenCalled();
-  });
-
-  it('"scribe redo" clears transcript identically to "scribe clear"', async () => {
-    render(<App />);
-
-    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
-    act(() => { capturedOnComplete!(COMPLETE_RESULT); });
-    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
-
-    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
-    act(() => { capturedOnComplete!(commandResult("Scribe Redo.")); });
-
-    await waitFor(() => {
-      expect(screen.queryByText("Transcribing...")).toBeNull();
-    });
-    expect(screen.queryByRole("textbox")).toBeNull();
     expect(mockStopListening).not.toHaveBeenCalled();
   });
 
@@ -231,59 +211,13 @@ describe("App — voice commands (continuous mode)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Hotkey: paragraph break (Ctrl+Shift+R)
-// ---------------------------------------------------------------------------
-
-describe("App — hotkey Ctrl+Shift+R paragraph break", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    capturedOnSpeechEnd = undefined;
-    capturedOnComplete = undefined;
-    mockIsListening = true;
-    localStorage.clear();
-    localStorage.setItem("voice-scribe-recording-mode", "continuous");
-
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
-    });
-  });
-
-  it("inserts \\n\\n into transcript when content is present", async () => {
-    render(<App />);
-
-    // Accumulate transcript
-    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
-    act(() => { capturedOnComplete!(COMPLETE_RESULT); }); // "hello"
-    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
-
-    // Fire Ctrl+Shift+R
-    act(() => {
-      fireEvent.keyDown(document, { key: "R", ctrlKey: true, shiftKey: true });
-    });
-
-    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
-    expect(textarea.value).toBe("hello\n\n");
-  });
-
-  it("does nothing when transcript is empty", async () => {
-    render(<App />);
-
-    act(() => {
-      fireEvent.keyDown(document, { key: "R", ctrlKey: true, shiftKey: true });
-    });
-
-    // No textarea — transcript is still empty
-    expect(screen.queryByRole("textbox")).toBeNull();
-  });
-});
-
 describe("App — continuous mode orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedOnSpeechEnd = undefined;
     capturedOnSegment = undefined;
     capturedOnComplete = undefined;
+    streamCalls.length = 0;
     mockIsListening = false;
     localStorage.clear();
 
@@ -387,5 +321,66 @@ describe("App — continuous mode orchestration", () => {
 
     // stopListening called once (on explicit stop — not called again on complete)
     expect(mockStopListening).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("App — wsCleanupSet lifecycle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedOnSpeechEnd = undefined;
+    capturedOnSegment = undefined;
+    capturedOnComplete = undefined;
+    streamCalls.length = 0;
+    mockIsListening = true;
+    localStorage.clear();
+    localStorage.setItem("voice-scribe-recording-mode", "continuous");
+
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it("unmount cleans up all in-flight connections, not just the last", () => {
+    const { unmount } = render(<App />);
+
+    // Fire three concurrent VAD segments — each creates a new WebSocket
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.2])); });
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.3])); });
+
+    expect(streamCalls).toHaveLength(3);
+
+    // Unmount before any segment completes
+    unmount();
+
+    // All three cleanup functions must have been called
+    streamCalls.forEach(({ cleanup }) => {
+      expect(cleanup).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("completed connections are deregistered — unmount only cleans in-flight ones", () => {
+    const { unmount } = render(<App />);
+
+    // Fire three concurrent VAD segments
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.2])); });
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.3])); });
+
+    expect(streamCalls).toHaveLength(3);
+
+    // Complete the first two connections naturally
+    act(() => { streamCalls[0].onComplete(COMPLETE_RESULT); });
+    act(() => { streamCalls[1].onComplete(COMPLETE_RESULT); });
+
+    // Clear call counts so we can distinguish unmount cleanup from completion
+    streamCalls.forEach(({ cleanup }) => cleanup.mockClear());
+
+    // Unmount — only the third (still in-flight) should be cleaned up
+    unmount();
+
+    expect(streamCalls[0].cleanup).not.toHaveBeenCalled();
+    expect(streamCalls[1].cleanup).not.toHaveBeenCalled();
+    expect(streamCalls[2].cleanup).toHaveBeenCalledOnce();
   });
 });

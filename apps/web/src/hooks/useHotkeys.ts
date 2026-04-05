@@ -5,7 +5,6 @@ interface UseHotkeysOptions {
   onCopyTranscript: () => void;
   onClearTranscript: () => void;
   onToggleSettings: () => void;
-  onParagraphBreak: () => void;
 }
 
 const HOTKEYS: Record<string, keyof UseHotkeysOptions> = {
@@ -13,7 +12,6 @@ const HOTKEYS: Record<string, keyof UseHotkeysOptions> = {
   "Y": "onCopyTranscript",    // Ctrl+Shift+Y
   "X": "onClearTranscript",   // Ctrl+Shift+X
   "S": "onToggleSettings",    // Ctrl+Shift+S
-  "R": "onParagraphBreak",    // Ctrl+Shift+R
 };
 
 export function useHotkeys(options: UseHotkeysOptions): void {

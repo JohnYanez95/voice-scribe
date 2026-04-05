@@ -1,11 +1,9 @@
-export type VoiceCommandKey = "stop" | "submit" | "redo" | "clear";
+export type VoiceCommandKey = "copy" | "clear";
 
-// Lookup table — extensible. Adding a fifth command is one entry here.
+// Lookup table — extensible. Adding a third command is one entry here.
 const COMMAND_MAP: Record<string, VoiceCommandKey> = {
-  "scribe stop":   "stop",
-  "scribe submit": "submit",
-  "scribe redo":   "redo",
-  "scribe clear":  "clear",
+  "copy":  "copy",
+  "clear": "clear",
 };
 
 // Normalize: trim whitespace, lowercase, strip trailing punctuation.

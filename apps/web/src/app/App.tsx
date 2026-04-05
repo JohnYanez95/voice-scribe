@@ -28,11 +28,11 @@ export function App() {
       "push-to-talk"
   );
 
-  const wsCleanupRef = useRef<(() => void) | null>(null);
+  const wsCleanupSetRef = useRef<Set<() => void>>(new Set());
   const stopRequestedRef = useRef(false);
   const lastSegmentTimestampRef = useRef<number>(0);
 
-  // Stable ref to current transcript so "scribe submit" inside
+  // Stable ref to current transcript so "copy" inside
   // triggerTranscription's closure always reads the latest value.
   const transcriptRef = useRef(transcript);
   useEffect(() => { transcriptRef.current = transcript; });
@@ -64,7 +64,10 @@ export function App() {
   }, [recorderError]);
 
   // Cleanup WebSocket on unmount
-  useEffect(() => () => { wsCleanupRef.current?.(); }, []);
+  useEffect(() => () => {
+    wsCleanupSetRef.current.forEach((fn) => fn());
+    wsCleanupSetRef.current.clear();
+  }, []);
 
   /**
    * Core transcription trigger — imperative, called directly from both the
@@ -77,10 +80,11 @@ export function App() {
    *     concurrent segments complete and append), no HTTP fallback.
    */
   const triggerTranscription = useCallback(
-    (blob: Blob, append: boolean) => {
+    (blob: Blob, append: boolean, speechEndTime?: number) => {
       if (!append) {
-        // Push-to-talk: cancel any previous in-flight connection
-        wsCleanupRef.current?.();
+        // Push-to-talk: cancel all in-flight connections
+        wsCleanupSetRef.current.forEach((fn) => fn());
+        wsCleanupSetRef.current.clear();
       }
       // Continuous (append=true): leave previous segment in-flight
 
@@ -90,6 +94,10 @@ export function App() {
         setTranscript("");
         setRawTranscript("");
       }
+
+      // Deregister hook — assigned after streamTranscribeAudio returns,
+      // called by async callbacks to remove completed connections from the set.
+      let deregister: (() => void) | undefined;
 
       const cleanup = streamTranscribeAudio(
         blob,
@@ -102,25 +110,17 @@ export function App() {
           }
         },
         (result) => {
+          deregister?.(); // Connection completed — remove from cleanup set
           const command = detectVoiceCommand(result.cleaned);
 
           if (command) {
             // Entire segment is a command — consume it, do not add to transcript.
             switch (command) {
-              case "stop":
-                if (append) {
-                  // Continuous: flag for drain + stop VAD. Transition block handles done.
-                  stopRequestedRef.current = true;
-                  stopListening();
-                }
-                // PTT: recording already stopped. Transition handles done. No-op here.
-                break;
-              case "submit":
+              case "copy":
                 if (transcriptRef.current) {
                   navigator.clipboard.writeText(transcriptRef.current).catch(() => {});
                 }
                 break;
-              case "redo":
               case "clear":
                 // Clear buffer directly — do NOT call handleClearTranscript (sets idle).
                 // The transition block below owns RecordingState; mixing setState calls
@@ -133,7 +133,11 @@ export function App() {
             // Normal transcript update — existing accumulation logic, unchanged.
             setRawTranscript(result.raw);
             if (append) {
-              const elapsed = Date.now() - lastSegmentTimestampRef.current;
+              // Measure elapsed time between speech-end events, not server
+              // completions. speechEndTime is captured at onSpeechEnd before
+              // inference starts, so GPU latency is excluded from the gap.
+              const segmentTime = speechEndTime ?? Date.now();
+              const elapsed = segmentTime - lastSegmentTimestampRef.current;
               const separator =
                 lastSegmentTimestampRef.current > 0 &&
                 elapsed > PARAGRAPH_BREAK_MS
@@ -148,15 +152,15 @@ export function App() {
           }
 
           // Timestamp update runs after both command and non-command paths.
-          // For "scribe clear" this reflects when the clear happened, not the
-          // last real segment — belt-and-suspenders since the empty-transcript
-          // branch in the accumulator already skips the separator.
-          lastSegmentTimestampRef.current = Date.now();
+          // Stores the speech-end time of this segment so the next segment's
+          // elapsed comparison measures the gap between when the user spoke,
+          // not between when the GPU finished.
+          lastSegmentTimestampRef.current = speechEndTime ?? Date.now();
 
           // State transition — unchanged. Runs for both commands and normal segments.
           if (append && stopRequestedRef.current) {
             stopRequestedRef.current = false;
-            setState("done"); // drain complete — explicit stop or "scribe stop"
+            setState("done"); // drain complete — explicit stop
           } else if (append) {
             setState("listening"); // normal cycle — mic stays open
           } else {
@@ -164,6 +168,7 @@ export function App() {
           }
         },
         () => {
+          deregister?.(); // Connection failed — remove from cleanup set
           // Connection-level failure (WebSocket never established or dropped)
           if (!append) {
             // Push-to-talk: server may still serve HTTP — fall back
@@ -186,13 +191,15 @@ export function App() {
           }
         },
         (detail) => {
+          deregister?.(); // Connection errored — remove from cleanup set
           // Application-level failure — inference or transcode error
           setError(detail);
           setState("error");
         }
       );
 
-      wsCleanupRef.current = cleanup;
+      wsCleanupSetRef.current.add(cleanup);
+      deregister = () => wsCleanupSetRef.current.delete(cleanup);
     },
     [recordingMode] // eslint-disable-line react-hooks/exhaustive-deps
     // recordingMode is not read inside this callback but kept in deps so
@@ -213,8 +220,9 @@ export function App() {
         // future: "I hear you" visual indicator
       },
       onSpeechEnd: (audio) => {
+        const speechEndTime = Date.now();
         const blob = encodeWav(audio, 16000);
-        triggerTranscription(blob, true);
+        triggerTranscription(blob, true, speechEndTime);
       },
     });
 
@@ -296,27 +304,18 @@ export function App() {
     setSettingsOpen((prev) => !prev);
   }, [state]);
 
-  const handleParagraphBreak = useCallback(() => {
-    setTranscript((prev) => (prev ? prev + "\n\n" : prev));
-    // Reset to 0 so the next segment's elapsed check evaluates false —
-    // prevents an automatic paragraph break from double-firing after a manual one.
-    lastSegmentTimestampRef.current = 0;
-  }, []);
-
   const hotkeyHandlers = useMemo(
     () => ({
       onToggleRecording: handleToggleRecording,
       onCopyTranscript: handleCopyTranscript,
       onClearTranscript: handleClearTranscript,
       onToggleSettings: handleToggleSettings,
-      onParagraphBreak: handleParagraphBreak,
     }),
     [
       handleToggleRecording,
       handleCopyTranscript,
       handleClearTranscript,
       handleToggleSettings,
-      handleParagraphBreak,
     ]
   );
 
@@ -369,8 +368,7 @@ export function App() {
       />
       <div className="hotkey-hints">
         Ctrl+Shift+Space: Record &nbsp;|&nbsp; Ctrl+Shift+Y: Copy &nbsp;|&nbsp;
-        Ctrl+Shift+X: Clear &nbsp;|&nbsp; Ctrl+Shift+S: Settings &nbsp;|&nbsp;
-        Ctrl+Shift+R: Paragraph
+        Ctrl+Shift+X: Clear &nbsp;|&nbsp; Ctrl+Shift+S: Settings
       </div>
     </div>
   );

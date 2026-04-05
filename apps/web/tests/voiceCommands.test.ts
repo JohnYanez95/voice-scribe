@@ -3,76 +3,82 @@ import { detectVoiceCommand } from "../src/utils/voiceCommands";
 
 describe("detectVoiceCommand", () => {
   // Canonical forms
-  it("matches 'scribe stop'", () => {
-    expect(detectVoiceCommand("scribe stop")).toBe("stop");
+  it("matches 'copy'", () => {
+    expect(detectVoiceCommand("copy")).toBe("copy");
   });
 
-  it("matches 'scribe submit'", () => {
-    expect(detectVoiceCommand("scribe submit")).toBe("submit");
-  });
-
-  it("matches 'scribe redo'", () => {
-    expect(detectVoiceCommand("scribe redo")).toBe("redo");
-  });
-
-  it("matches 'scribe clear'", () => {
-    expect(detectVoiceCommand("scribe clear")).toBe("clear");
+  it("matches 'clear'", () => {
+    expect(detectVoiceCommand("clear")).toBe("clear");
   });
 
   // Whisper's capitalized first letter
-  it("matches 'Scribe stop'", () => {
-    expect(detectVoiceCommand("Scribe stop")).toBe("stop");
+  it("matches 'Copy'", () => {
+    expect(detectVoiceCommand("Copy")).toBe("copy");
   });
 
-  it("matches 'Scribe Submit' (capital mid-word)", () => {
-    expect(detectVoiceCommand("Scribe Submit")).toBe("submit");
+  it("matches 'Clear'", () => {
+    expect(detectVoiceCommand("Clear")).toBe("clear");
   });
 
-  it("matches 'SCRIBE STOP' (all caps)", () => {
-    expect(detectVoiceCommand("SCRIBE STOP")).toBe("stop");
+  // All caps
+  it("matches 'COPY'", () => {
+    expect(detectVoiceCommand("COPY")).toBe("copy");
   });
 
-  it("matches 'Scribe Redo.' (capital mid-word + period)", () => {
-    expect(detectVoiceCommand("Scribe Redo.")).toBe("redo");
+  it("matches 'CLEAR'", () => {
+    expect(detectVoiceCommand("CLEAR")).toBe("clear");
   });
 
-  // Trailing punctuation variants observed in Gate 1
-  it("strips trailing period: 'scribe stop.'", () => {
-    expect(detectVoiceCommand("scribe stop.")).toBe("stop");
+  // Trailing punctuation variants
+  it("strips trailing period: 'Copy.'", () => {
+    expect(detectVoiceCommand("Copy.")).toBe("copy");
   });
 
-  it("strips trailing exclamation: 'scribe clear!'", () => {
-    expect(detectVoiceCommand("scribe clear!")).toBe("clear");
+  it("strips trailing period: 'Clear.'", () => {
+    expect(detectVoiceCommand("Clear.")).toBe("clear");
   });
 
-  it("strips trailing comma: 'scribe submit,'", () => {
-    expect(detectVoiceCommand("scribe submit,")).toBe("submit");
+  it("strips trailing exclamation: 'copy!'", () => {
+    expect(detectVoiceCommand("copy!")).toBe("copy");
   });
 
-  // Exact-segment: partial matches must NOT fire
-  it("does not match mid-sentence: 'I should scribe clear that'", () => {
-    expect(detectVoiceCommand("I should scribe clear that")).toBeNull();
+  it("strips trailing comma: 'clear,'", () => {
+    expect(detectVoiceCommand("clear,")).toBe("clear");
   });
 
-  it("does not match leading words: 'please scribe stop'", () => {
-    expect(detectVoiceCommand("please scribe stop")).toBeNull();
+  // Exact-segment: embedded occurrences must NOT fire
+  it("does not match mid-sentence: 'copy that function and paste it below'", () => {
+    expect(detectVoiceCommand("copy that function and paste it below")).toBeNull();
   });
 
-  it("does not match trailing words: 'scribe stop now'", () => {
-    expect(detectVoiceCommand("scribe stop now")).toBeNull();
+  it("does not match mid-sentence: 'let me clear this up before we move on'", () => {
+    expect(detectVoiceCommand("let me clear this up before we move on")).toBeNull();
   });
 
-  // False-positive surface — words that contain "scribe" must not match
-  it("does not match 'describe stop'", () => {
-    expect(detectVoiceCommand("describe stop")).toBeNull();
+  it("does not match mid-sentence: 'make a copy of the config'", () => {
+    expect(detectVoiceCommand("make a copy of the config")).toBeNull();
   });
 
-  it("does not match 'subscribe clear'", () => {
-    expect(detectVoiceCommand("subscribe clear")).toBeNull();
+  it("does not match mid-sentence: 'clear the cache and restart'", () => {
+    expect(detectVoiceCommand("clear the cache and restart")).toBeNull();
   });
 
-  it("does not match 'subscriber submit'", () => {
-    expect(detectVoiceCommand("subscriber submit")).toBeNull();
+  // Leading words
+  it("does not match leading words: 'please copy'", () => {
+    expect(detectVoiceCommand("please copy")).toBeNull();
+  });
+
+  it("does not match leading words: 'please clear'", () => {
+    expect(detectVoiceCommand("please clear")).toBeNull();
+  });
+
+  // Trailing words
+  it("does not match trailing words: 'copy now'", () => {
+    expect(detectVoiceCommand("copy now")).toBeNull();
+  });
+
+  it("does not match trailing words: 'clear now'", () => {
+    expect(detectVoiceCommand("clear now")).toBeNull();
   });
 
   // Edge cases
@@ -84,7 +90,11 @@ describe("detectVoiceCommand", () => {
     expect(detectVoiceCommand("Hello world")).toBeNull();
   });
 
-  it("returns null for standalone 'scribe'", () => {
-    expect(detectVoiceCommand("scribe")).toBeNull();
+  it("returns null for old 'scribe stop' phrase", () => {
+    expect(detectVoiceCommand("scribe stop")).toBeNull();
+  });
+
+  it("returns null for old 'scribe clear' phrase", () => {
+    expect(detectVoiceCommand("scribe clear")).toBeNull();
   });
 });
