@@ -1,0 +1,637 @@
+\documentclass{beamer}
+\usetheme{Dresden}
+\usecolortheme{whale}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{ragged2e}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{mathtools}
+\usepackage{commath}
+\usepackage{amsmath}
+\usepackage{wrapfig}
+\usepackage{multicol}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, shapes.symbols, fit, backgrounds, calc}
+
+\newcommand{\nt}{$\underline{\text{Note}}:$ }
+\newcommand{\ex}{$\underline{\text{Example}}:$ }
+\newcommand{\rem}{$\underline{\text{Recall}}:$ }
+\newcommand{\rmk}{$\underline{\text{Remark}}:$ }
+\newcommand{\tab}{\quad}
+\newcommand{\nll}{\\\vspace{2ex}}
+
+\graphicspath{ {images/} }
+
+\lstset{
+    basicstyle=\ttfamily\scriptsize,
+    keywordstyle=\color{blue!70!black},
+    commentstyle=\color{gray},
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!5},
+}
+
+\title[Voice Scribe v3]{Voice Scribe v3\\Desktop Application}
+\author[J. Yanez]{Johnraymond Yanez}
+\institute[Voice Scribe]{Voice Scribe}
+\date{\today}
+
+\begin{document}
+
+
+% -- Title -----------------------------------------------------------------
+\begin{frame}
+\small{\titlepage}
+\end{frame}
+
+
+% -- Overview --------------------------------------------------------------
+\begin{frame}{Overview}
+    \begin{itemize}
+        \item \textbf{Context} --- v1 and v2 in brief
+        \item \textbf{The Platform Ceiling} --- what the browser cannot close
+        \item \textbf{v3 Architecture} --- Tauri, Python sidecar, platform layer
+        \item \textbf{Roadmap} --- four sub-milestones (v3.0--v3.3)
+        \item \textbf{Key Design Decisions} --- the choices and why
+        \item \textbf{Prerequisites \& Deferrals}
+    \end{itemize}
+\end{frame}
+
+
+% =========================================================================
+\section{Context}
+% =========================================================================
+
+\begin{frame}{v1 --- The Primitive (2026-04-02)}
+    \small
+    \textbf{Goal:} local speech-to-text that never leaves the machine.
+
+    \vspace{0.4em}
+    \textbf{What shipped:}
+    \begin{itemize}\setlength{\itemsep}{2pt}
+        \item Record one utterance in the browser; POST to a local container
+        \item ffmpeg transcodes; faster-whisper (large-v3, GPU) infers
+        \item Transcript returned to an editable textarea; one-click copy
+        \item CPU fallback (\texttt{small} model) validated
+    \end{itemize}
+
+    \vspace{0.3em}
+    \textbf{What it proved:} a two-service localhost architecture --- React on the host,
+    FastAPI in Docker --- can deliver accurate, private transcription with no cloud dependency
+    and no round-trip latency beyond the GPU itself.
+
+    \vspace{0.3em}
+    \textbf{Intentionally out of scope:} streaming, continuous recording, hotkeys, voice
+    commands, server-side persistence. v1 was a primitive, not a product.
+\end{frame}
+
+
+\begin{frame}{v2 --- The Interaction Model (2026-04-04)}
+    \small
+    Built on v1 across four sequenced milestones:
+
+    \vspace{0.3em}
+    \begin{table}
+    \centering\footnotesize
+    \begin{tabular}{@{} l p{7.8cm} @{}}
+        \toprule
+        \textbf{Milestone} & \textbf{Key deliverable} \\
+        \midrule
+        v2.0 & Hotkey system (\texttt{Ctrl+Shift+*}); settings panel with
+               live model swap (threading-safe, VRAM cleanup) \\
+        v2.1 & WebSocket streaming default; words appear as segments complete;
+               HTTP POST fallback automatic \\
+        v2.2 & Continuous recording; client-side VAD (Silero v4/WASM);
+               paragraph breaks; drain-then-done \\
+        v2.3.x & Voice commands: \texttt{copy} and \texttt{clear} as single-word
+                 exact-segment matches; paragraph break timing fixed \\
+        \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \vspace{0.3em}
+    \textbf{What it proved:} streaming, browser-side ML inference, and voice-driven control
+    all work reliably at the browser layer. The interaction model is validated.
+
+    \vspace{0.1em}
+    \textbf{What it could not close:} covered next.
+\end{frame}
+
+
+% =========================================================================
+\section{The Platform Ceiling}
+% =========================================================================
+
+\begin{frame}{What the Browser Cannot Do}
+    \small
+    v2 delivers a capable continuous dictation tool. One constraint cannot be engineered around:
+
+    \vspace{0.4em}
+    \begin{block}{The Clipboard Focus Rule}
+        \texttt{navigator.clipboard.writeText()} requires the browser tab to have
+        document focus. If the user has switched to another application ---
+        which is the entire point of a transcription tool --- the write is blocked.
+    \end{block}
+
+    \vspace{0.4em}
+    This is a security boundary enforced by the browser platform. Not a missing feature.
+    Workarounds are fragile and non-portable.
+
+    \vspace{0.3em}
+    VAD and recording work cross-window --- Voice Scribe listens while the user works
+    elsewhere. \textbf{Delivery is what breaks.} The full loop requires native OS access.
+\end{frame}
+
+
+\begin{frame}{The Delivery Gap --- Diagram}
+    \begin{center}
+    \begin{tikzpicture}[scale=0.88, every node/.style={transform shape},
+        box/.style={draw, rounded corners=3pt, minimum width=2.8cm,
+                    minimum height=0.5cm, font=\scriptsize, align=center},
+        ok/.style={box, fill=green!12},
+        gap/.style={box, fill=red!12},
+        arr/.style={-{Stealth[length=4pt]}, thick},
+        darr/.style={-{Stealth[length=4pt]}, thick, dashed, red!60},
+        lbl/.style={font=\tiny, text=gray},
+        hdr/.style={font=\small\bfseries, text=gray!80},
+    ]
+        % Column headers
+        \node[hdr] at (-0.4, 0.5)  {v2 (Browser)};
+        \node[hdr] at (-0.4, -1.4) {v3 (Desktop)};
+
+        % v2 row
+        \node[ok]  (v2a) at (1.8,  0)   {Speak + Transcribe};
+        \node[gap] (v2b) at (5.0,  0)   {Clipboard};
+        \node[gap] (v2c) at (8.2,  0)   {Destination App};
+        \draw[arr]  (v2a) -- (v2b);
+        \draw[darr] (v2b) -- (v2c);
+        \node[lbl, above=0.06cm of v2b] {focus required};
+        \node[lbl, above=0.06cm of v2c] {manual paste};
+
+        % v3 row
+        \node[ok]  (v3a) at (1.8,  -1.9) {Speak + Transcribe};
+        \node[ok]  (v3b) at (5.0,  -1.9) {platform.ts};
+        \node[ok]  (v3c) at (8.2,  -1.9) {Destination App};
+        \draw[arr] (v3a) -- (v3b);
+        \draw[arr] (v3b) -- (v3c);
+        \node[lbl, below=0.06cm of v3b] {native OS API};
+        \node[lbl, below=0.06cm of v3c] {direct delivery};
+
+    \end{tikzpicture}
+    \end{center}
+
+    \vspace{0.3em}
+    {\scriptsize
+    \textcolor{green!50!black}{Green} = works as intended. \quad
+    \textcolor{red!60!black}{Red} = browser platform ceiling. \quad
+    v3 closes the last step.}
+\end{frame}
+
+
+% =========================================================================
+\section{v3 Architecture}
+% =========================================================================
+
+\begin{frame}{System Architecture at v3}
+    \small
+    v3 is a platform change, not a rewrite. The same React frontend and Python backend
+    are wrapped in a Tauri desktop application.
+
+    \vspace{0.3em}
+    \begin{itemize}\setlength{\itemsep}{3pt}
+        \item \textbf{Tauri} hosts the Vite/React frontend in a native webview ---
+              the same build, no component forks
+        \item \textbf{Python sidecar} replaces Docker --- Tauri spawns
+              \texttt{uvicorn app.main:app} as a managed child process
+        \item \textbf{\texttt{platform.ts}} routes platform-conditional behavior
+              at the service layer --- clipboard, injection, context detection
+        \item \textbf{No Docker dependency} at runtime --- the model runs bare
+              on the host GPU; Docker path (\texttt{make dev}) remains for web
+              development
+    \end{itemize}
+
+    \vspace{0.2em}
+    \begin{block}{What is unchanged}
+        \small All of v2: push-to-talk, continuous mode, VAD, streaming, voice commands
+        (\texttt{copy}, \texttt{clear}), settings panel, hotkeys. The browser
+        build continues to work without modification.
+    \end{block}
+\end{frame}
+
+
+\begin{frame}{Architecture --- Diagram}
+    \begin{center}
+    \begin{tikzpicture}[scale=0.73, every node/.style={transform shape},
+        node distance=0.28cm,
+        box/.style={draw, rounded corners=3pt, minimum width=5.2cm,
+                    minimum height=0.45cm, font=\small, align=center},
+        webview/.style={box, fill=blue!12},
+        sidecar/.style={box, fill=orange!15},
+        plugin/.style={box, fill=violet!12},
+        native/.style={box, fill=green!12},
+        arr/.style={-{Stealth[length=5pt]}, thick},
+        lbl/.style={font=\scriptsize, text=gray},
+        boundary/.style={draw, dashed, rounded corners=5pt, gray, inner sep=7pt},
+    ]
+        % Webview stack
+        \node[webview] (app)  {App.tsx + \texttt{useVAD} / \texttt{useRecorder}};
+        \node[webview, below=of app] (pt)  {\texttt{platform.ts}};
+        \node[webview, below=of pt]  (apits) {\texttt{api.ts} (WebSocket / HTTP)};
+
+        \begin{scope}[on background layer]
+            \node[boundary, fit=(app)(pt)(apits),
+                  label={[font=\scriptsize,text=gray]above left:Tauri Webview}] (wv) {};
+        \end{scope}
+
+        % IPC label
+        \node[lbl] (ipc) [below=0.5cm of apits] {$\updownarrow$ IPC (Tauri commands)};
+
+        % Plugin + sidecar row
+        \node[plugin] (plugins) [below=0.15cm of ipc]
+            {Tauri plugins: clipboard-manager \quad global-shortcut \quad tray};
+
+        % Sidecar
+        \node[sidecar] (sc) [below=0.32cm of plugins]
+            {Python sidecar: FastAPI \texttt{localhost:8000}};
+        \node[sidecar, below=of sc] (inf)
+            {ffmpeg + faster-whisper (CUDA)};
+
+        \begin{scope}[on background layer]
+            \node[boundary, fit=(sc)(inf),
+                  label={[font=\scriptsize,text=gray]left:Managed child process}] (scbound) {};
+        \end{scope}
+
+        % OS
+        \node[native, below=0.32cm of inf] (os)
+            {Windows OS APIs (SendInput, global hotkey, tray icon)};
+
+        % Arrows
+        \draw[arr] (app)  -- (pt);
+        \draw[arr] (pt)   -- (apits);
+        \draw[arr] (apits.south) -- ++(0,-0.22) -- (ipc.north);
+        \draw[arr] (ipc.south)   -- (plugins.north);
+        \draw[arr] (plugins.south) -- (sc.north);
+        \draw[arr] (sc)   -- (inf);
+        \draw[arr] (inf.south) -- (os.north);
+
+        % WS arrow label
+        \node[lbl, right=0.15cm of apits] {\textit{WebSocket / HTTP}};
+    \end{tikzpicture}
+    \end{center}
+
+    {\scriptsize
+    \textcolor{blue!50!black}{Blue} = React webview \quad
+    \textcolor{orange!70!black}{Orange} = Python sidecar \quad
+    \textcolor{violet!60!black}{Lavender} = Tauri plugins \quad
+    \textcolor{green!50!black}{Green} = OS APIs.}
+\end{frame}
+
+
+\begin{frame}{Monorepo Structure}
+    \small
+    One repository, three app directories. The API is shared between web and desktop.
+
+    \vspace{0.3em}
+    \begin{columns}[T]
+        \begin{column}{0.52\textwidth}
+            \footnotesize
+            \textbf{\texttt{apps/web/}} --- unchanged. Vite frontend.
+            Serves both browser tabs and the Tauri webview.
+
+            \vspace{0.35em}
+            \textbf{\texttt{apps/api/}} --- unchanged. FastAPI backend.
+            v2: runs in Docker. v3: runs as a managed
+            sidecar. Same code, different launch context.
+
+            \vspace{0.35em}
+            \textbf{\texttt{apps/desktop/}} --- new. Contains
+            \texttt{tauri.conf.json} and \texttt{src-tauri/}
+            (Rust config and Tauri commands) \emph{only}.
+            No component copies live here.
+        \end{column}
+        \begin{column}{0.44\textwidth}
+            \begin{block}{The Fork Rule}
+                \footnotesize
+                Two copies of a component are two maintenance
+                surfaces that diverge silently.
+
+                Capability differences (native clipboard,
+                direct injection) live in
+                \texttt{platform.ts} --- not in component
+                forks and not in a parallel service file.
+
+                If you find yourself copying a component
+                into \texttt{apps/desktop/}, stop.
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+
+\begin{frame}{\texttt{platform.ts} --- The Service Layer}
+    \small
+    The single routing surface for all platform-conditional behavior.
+    Components call \texttt{platform.*} and are unaware of context.
+
+    \vspace{0.3em}
+    \begin{table}
+    \centering\scriptsize
+    \begin{tabular}{@{} l p{3.6cm} p{3.6cm} @{}}
+        \toprule
+        \textbf{Export} & \textbf{Browser} & \textbf{Tauri (Desktop)} \\
+        \midrule
+        \texttt{isDesktop()} &
+            Returns \texttt{false} &
+            Returns \texttt{true}
+            (\texttt{window.\_\_TAURI\_\_}) \\[4pt]
+        \texttt{writeClipboard()} &
+            \texttt{navigator.clipboard} \texttt{.writeText()} &
+            Clipboard plugin \texttt{writeText()} ---
+            no focus required \\[4pt]
+        \texttt{submitText()} &
+            Calls \texttt{writeClipboard()} (safe fallback) &
+            IPC $\to$ Rust $\to$ \texttt{SendInput} $\to$ focused app \\
+        \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \vspace{0.2em}
+    {\footnotesize\textbf{Build contract:} \texttt{@tauri-apps/} packages loaded via dynamic
+    \texttt{import()} only. One Vite build, one artifact. Browser build produces zero
+    import errors.}
+\end{frame}
+
+
+% =========================================================================
+\section{Roadmap}
+% =========================================================================
+
+\begin{frame}{Milestone Timeline}
+    \begin{center}
+    \includegraphics[width=0.95\textwidth]{images/milestone-timeline.png}
+    \end{center}
+
+    {\scriptsize Delivered milestones show actual dates and key outputs.
+    Planned milestones show sequence --- no hard deadlines.}
+\end{frame}
+
+
+\begin{frame}{v3.0 --- Tauri Shell + Sidecar Lifecycle}
+    \small
+    \textbf{Deliverable:} Tauri app launches, manages the Python sidecar, all v2
+    functionality works identically to the browser version.
+
+    \vspace{0.2em}
+    \textbf{Key scope:}
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item \texttt{apps/desktop/} scaffolding: Tauri v2 CLI, \texttt{tauri.conf.json},
+              Cargo project
+        \item Sidecar lifecycle: startup health poll, graceful shutdown (SIGTERM $\to$
+              SIGKILL after timeout), crash surface, port-conflict error dialog
+        \item \texttt{config.py} defaults for host: \texttt{\textasciitilde/.cache/voice-scribe},
+              system temp dir, Tauri webview CORS origin
+        \item WebSocket origin enforcement updated; \texttt{make desktop} target added
+    \end{itemize}
+
+    \vspace{0.2em}
+    \textbf{Gate:} record $\to$ transcribe $\to$ display via WebSocket (primary) and
+    HTTP POST (fallback). Close app $\to$ no orphan \texttt{uvicorn} process.
+    Relaunch works clean.
+
+    \textbf{Not in scope:} native clipboard, \texttt{submit}, global hotkeys, system tray.
+\end{frame}
+
+
+\begin{frame}{v3.1 --- Native Clipboard}
+    \small
+    \textbf{Deliverable:} \texttt{copy} voice command and \texttt{Ctrl+Shift+Y} use native
+    OS clipboard. No window focus required.
+
+    \vspace{0.3em}
+    \textbf{Key scope:}
+    \begin{itemize}\setlength{\itemsep}{1pt}
+        \item \texttt{platform.ts} introduced: \texttt{isDesktop()},
+              \texttt{writeClipboard()}, \texttt{submitText()} stub
+        \item Two \texttt{App.tsx} clipboard call sites routed through
+              \texttt{platform.writeClipboard()}: the \texttt{copy} voice command
+              and \texttt{handleCopyTranscript}
+        \item \texttt{@tauri-apps/plugin-clipboard-manager} declared in Tauri
+              \texttt{capabilities}
+        \item \texttt{voiceCommands.ts} unchanged; \texttt{submit} lands in v3.2
+    \end{itemize}
+
+    \vspace{0.2em}
+    \textbf{Gate:} dictate $\to$ say ``copy'' $\to$ switch to VS Code $\to$ Ctrl+V $\to$
+    transcript is there. Same with Ctrl+Shift+Y. Browser build: \texttt{npm run build}
+    produces zero import errors; \texttt{npx vitest run} passes.
+\end{frame}
+
+
+\begin{frame}{v3.2 --- Direct Injection (\texttt{submit})}
+    \small
+    \textbf{Deliverable:} saying ``submit'' types the transcript into the focused
+    application. No clipboard. Windows-only for this milestone.
+
+    \vspace{0.3em}
+    \textbf{Key scope:}
+    \begin{itemize}\setlength{\itemsep}{1pt}
+        \item Rust: \texttt{SendInput} via Windows API (\texttt{enigo} or equivalent),
+              exposed as a Tauri IPC command
+        \item Hard requirement: restore focus to the previous window before injecting
+        \item \texttt{voiceCommands.ts}: \texttt{submit} added to \texttt{COMMAND\_MAP};
+              \texttt{App.tsx} gains \texttt{case "submit"} $\to$
+              \texttt{platform.submitText()}
+        \item Browser fallback: \texttt{submitText()} calls \texttt{writeClipboard()}
+    \end{itemize}
+
+    \vspace{0.2em}
+    \textbf{Gate:} focus VS Code, say ``submit'', transcript appears at cursor --- no
+    clipboard. 10 false-positive sentences with ``submit'' as a non-command word, zero
+    fires. One-week soak period required before marking complete.
+
+    \vspace{0.1em}
+    \textbf{Deferred:} Linux/macOS injection.
+\end{frame}
+
+
+\begin{frame}{v3.3 --- System Tray + Global Hotkeys}
+    \small
+    \textbf{Deliverable:} Voice Scribe runs in the background. A global hotkey triggers
+    recording from any application.
+
+    \vspace{0.3em}
+    \textbf{Key scope:}
+    \begin{itemize}\setlength{\itemsep}{1pt}
+        \item System tray: icon, menu (Record, Settings, Quit), status indicator
+              (idle / listening / processing)
+        \item Global hotkeys: \texttt{@tauri-apps/plugin-global-shortcut}. Registration
+              failure surfaces as a user-visible error dialog --- not a crash.
+              The error message and UX must be implemented and verified in the gate.
+        \item Window management: React state updates while the window is hidden require
+              explicit verification --- not assumed
+    \end{itemize}
+
+    \vspace{0.2em}
+    \textbf{Gate:} hide to tray $\to$ focus VS Code $\to$ press global hotkey $\to$
+    dictate $\to$ say ``copy'' or ``submit'' $\to$ delivered. Window never appeared.
+    Failure path: conflicting hotkey $\to$ user-visible error, no crash.
+    Tray Quit: sidecar gone.
+\end{frame}
+
+
+% =========================================================================
+\section{Key Design Decisions}
+% =========================================================================
+
+\begin{frame}{Why Python Sidecar, Not Rust Inference?}
+    \small
+    \begin{columns}[T]
+        \begin{column}{0.54\textwidth}
+            \textbf{The decision}
+
+            Tauri spawns the existing FastAPI backend as a managed child process.
+            No Docker. No rewrite of the inference layer.
+
+            \vspace{0.4em}
+            \textbf{Why not rewrite in Rust?}
+            \begin{itemize}\setlength{\itemsep}{1pt}
+                \item faster-whisper is proven --- accuracy and
+                      speed validated in production use
+                \item Building the Tauri shell \textit{and}
+                      rewriting inference simultaneously is
+                      scope explosion
+                \item The two problems are independent and
+                      can be sequenced
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.42\textwidth}
+            \begin{block}{When to revisit}
+                \footnotesize
+                Rust-native inference (whisper.cpp) is a
+                \textbf{named future milestone}.
+
+                Trigger: distribution to non-developer
+                users becomes a requirement.
+
+                Single-binary packaging is the forcing
+                function --- not performance.
+
+                Until then, the Python sidecar is
+                the correct decision, not technical debt.
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+
+\begin{frame}{Why Runtime Detection, Not Build Flags?}
+    \small
+    \textbf{The decision:} one Vite build serves both the browser and the Tauri webview.
+    Platform context detected at runtime, not build time.
+
+    \vspace{0.4em}
+    \begin{itemize}\setlength{\itemsep}{3pt}
+        \item \textbf{\texttt{window.\_\_TAURI\_\_}} --- injected by Tauri into the webview.
+              Absent in the browser. \texttt{platform.ts} reads this at call time, not
+              at bundle time.
+
+        \item \textbf{Dynamic \texttt{import()}} --- \texttt{@tauri-apps/} packages imported
+              with \texttt{import()} not \texttt{import}. Vite does not statically resolve
+              dynamic imports. Browser build has no missing-module errors.
+
+        \item \textbf{\texttt{optimizeDeps.exclude}} in \texttt{vite.config.ts} --- prevents
+              Vite's pre-bundler from touching Tauri packages.
+    \end{itemize}
+
+    \vspace{0.3em}
+    \textbf{What this avoids:} separate build targets, separate environment variables,
+    build-time divergence. One artifact to test, one to ship.
+\end{frame}
+
+
+\begin{frame}{Why \texttt{copy} and \texttt{submit} Are Separate Commands}
+    \small
+    \begin{table}
+    \centering\footnotesize
+    \begin{tabular}{@{} l p{3.9cm} p{3.9cm} @{}}
+        \toprule
+        & \textbf{\texttt{copy}} & \textbf{\texttt{submit}} \\
+        \midrule
+        Action    & Writes to clipboard      & Injects keystrokes into focused app \\
+        Reversible & Yes                     & No --- undo may be limited \\
+        Focus req. & None (native API)       & Previous window must be correct \\
+        Risk       & Overwrites clipboard    & May type into wrong application \\
+        Browser    & \texttt{navigator.clipboard} & Falls back to \texttt{copy} \\
+        \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \vspace{0.3em}
+    Collapsing \texttt{copy} and \texttt{submit} into one command removes the user's
+    safe fallback. \texttt{copy} is predictable. \texttt{submit} is irreversible.
+
+    \vspace{0.2em}
+    The \textbf{command separation is non-negotiable}.
+    The \textbf{specific words} are subject to gate evaluation before each milestone ships.
+\end{frame}
+
+
+% =========================================================================
+\section{Prerequisites \& Deferrals}
+% =========================================================================
+
+\begin{frame}{Prerequisites Before v3.0}
+    \small
+    \textbf{Prereq 1 --- \texttt{wsCleanupRef} refactor.}
+    Standalone PR on \texttt{main} before any Tauri code exists.
+
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item Current: single ref, only the last WebSocket cleanup survives.
+              Low-risk in-browser (SPA never navigates).
+        \item v3 risk: Tauri webview persists; ``close the panel'' is a real unmount.
+              Orphaned connections become real.
+        \item Fix: \texttt{Set<() => void>} --- register on open, deregister on close,
+              iterate on unmount. Browser-tested before \texttt{apps/desktop/} exists.
+    \end{itemize}
+
+    \vspace{0.2em}
+    \textbf{Prereq 2 --- Host environment validation.}
+    The API currently runs in Docker. v3 runs it bare on the host.
+
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item Python 3.10+, faster-whisper, ffmpeg on \texttt{PATH}, CUDA toolkit
+        \item API starts without Docker; \texttt{GET /health} returns
+              \texttt{"device": "gpu"}
+        \item Close condition: setup documented in \texttt{docs/v3-host-setup.md}
+    \end{itemize}
+\end{frame}
+
+
+\begin{frame}{What Is Deferred (Named, Not Forgotten)}
+    \small
+    \begin{itemize}\setlength{\itemsep}{4pt}
+        \item \textbf{Model management UI} --- download progress, cache management
+              without editing config files. The existing settings panel handles
+              runtime model swap; that is sufficient for v3.0--v3.3. Deferred to v3.x.
+
+        \item \textbf{Linux/macOS \texttt{submit} injection} --- different APIs
+              (\texttt{xdotool}, \texttt{CGEvent}), different failure modes.
+              Windows-only is pragmatic scope discipline. Deferred to v3.x.
+
+        \item \textbf{Hotkey configurability} --- registration failure is handled and
+              surfaced; the specific keys are not user-configurable in v3.3.
+              Deferred to v3.x.
+
+        \item \textbf{Auto-update} --- Tauri has built-in support.
+              Not in scope for any v3 sub-milestone.
+
+        \item \textbf{Rust-native inference} --- single-binary distribution.
+              Trigger condition stated above. Named future milestone.
+    \end{itemize}
+\end{frame}
+
+
+\end{document}
