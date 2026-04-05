@@ -40,7 +40,10 @@ export function useVAD(options: UseVADOptions): UseVADResult {
     // Destroy any previous paused instance before creating a new one.
     // Without this, repeated start/stop cycles orphan MicVAD instances
     // (ONNX runtime + AudioWorklet + MediaStream) until component unmount.
-    vadRef.current?.destroy();
+    // pause() internally releases the ONNX session; destroy() may then
+    // attempt a second release and throw. Suppress — we're replacing the
+    // instance regardless.
+    try { vadRef.current?.destroy(); } catch (_) {}
     try {
       const vad = await MicVAD.new({
         baseAssetPath: "/",
