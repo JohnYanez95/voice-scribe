@@ -6,6 +6,7 @@ import { useRecorder } from "../hooks/useRecorder";
 import { useHotkeys } from "../hooks/useHotkeys";
 import { useVAD } from "../hooks/useVAD";
 import { encodeWav } from "../utils/audio";
+import { detectVoiceCommand } from "../utils/voiceCommands";
 import { streamTranscribeAudio, transcribeAudio } from "../services/api";
 import type { RecordingMode, RecordingState } from "../types";
 
@@ -30,6 +31,11 @@ export function App() {
   const wsCleanupRef = useRef<(() => void) | null>(null);
   const stopRequestedRef = useRef(false);
   const lastSegmentTimestampRef = useRef<number>(0);
+
+  // Stable ref to current transcript so "scribe submit" inside
+  // triggerTranscription's closure always reads the latest value.
+  const transcriptRef = useRef(transcript);
+  useEffect(() => { transcriptRef.current = transcript; });
 
   const handleSetShowRawComparison = useCallback((show: boolean) => {
     localStorage.setItem("voice-scribe-show-comparison", String(show));
@@ -96,26 +102,61 @@ export function App() {
           }
         },
         (result) => {
-          setRawTranscript(result.raw);
-          if (append) {
-            const elapsed = Date.now() - lastSegmentTimestampRef.current;
-            const separator =
-              lastSegmentTimestampRef.current > 0 &&
-              elapsed > PARAGRAPH_BREAK_MS
-                ? "\n\n"
-                : "";
-            setTranscript((prev) =>
-              prev ? prev + separator + result.cleaned : result.cleaned
-            );
+          const command = detectVoiceCommand(result.cleaned);
+
+          if (command) {
+            // Entire segment is a command — consume it, do not add to transcript.
+            switch (command) {
+              case "stop":
+                if (append) {
+                  // Continuous: flag for drain + stop VAD. Transition block handles done.
+                  stopRequestedRef.current = true;
+                  stopListening();
+                }
+                // PTT: recording already stopped. Transition handles done. No-op here.
+                break;
+              case "submit":
+                if (transcriptRef.current) {
+                  navigator.clipboard.writeText(transcriptRef.current).catch(() => {});
+                }
+                break;
+              case "redo":
+              case "clear":
+                // Clear buffer directly — do NOT call handleClearTranscript (sets idle).
+                // The transition block below owns RecordingState; mixing setState calls
+                // within the same callback risks non-deterministic ordering in React batching.
+                setTranscript("");
+                setRawTranscript("");
+                break;
+            }
           } else {
-            setTranscript(result.cleaned);
+            // Normal transcript update — existing accumulation logic, unchanged.
+            setRawTranscript(result.raw);
+            if (append) {
+              const elapsed = Date.now() - lastSegmentTimestampRef.current;
+              const separator =
+                lastSegmentTimestampRef.current > 0 &&
+                elapsed > PARAGRAPH_BREAK_MS
+                  ? "\n\n"
+                  : "";
+              setTranscript((prev) =>
+                prev ? prev + separator + result.cleaned : result.cleaned
+              );
+            } else {
+              setTranscript(result.cleaned);
+            }
           }
+
+          // Timestamp update runs after both command and non-command paths.
+          // For "scribe clear" this reflects when the clear happened, not the
+          // last real segment — belt-and-suspenders since the empty-transcript
+          // branch in the accumulator already skips the separator.
           lastSegmentTimestampRef.current = Date.now();
 
-          // State transition — append=true means continuous mode is in play
+          // State transition — unchanged. Runs for both commands and normal segments.
           if (append && stopRequestedRef.current) {
             stopRequestedRef.current = false;
-            setState("done"); // drain complete — explicit stop was pending
+            setState("done"); // drain complete — explicit stop or "scribe stop"
           } else if (append) {
             setState("listening"); // normal cycle — mic stays open
           } else {
@@ -255,18 +296,27 @@ export function App() {
     setSettingsOpen((prev) => !prev);
   }, [state]);
 
+  const handleParagraphBreak = useCallback(() => {
+    setTranscript((prev) => (prev ? prev + "\n\n" : prev));
+    // Reset to 0 so the next segment's elapsed check evaluates false —
+    // prevents an automatic paragraph break from double-firing after a manual one.
+    lastSegmentTimestampRef.current = 0;
+  }, []);
+
   const hotkeyHandlers = useMemo(
     () => ({
       onToggleRecording: handleToggleRecording,
       onCopyTranscript: handleCopyTranscript,
       onClearTranscript: handleClearTranscript,
       onToggleSettings: handleToggleSettings,
+      onParagraphBreak: handleParagraphBreak,
     }),
     [
       handleToggleRecording,
       handleCopyTranscript,
       handleClearTranscript,
       handleToggleSettings,
+      handleParagraphBreak,
     ]
   );
 
@@ -319,7 +369,8 @@ export function App() {
       />
       <div className="hotkey-hints">
         Ctrl+Shift+Space: Record &nbsp;|&nbsp; Ctrl+Shift+Y: Copy &nbsp;|&nbsp;
-        Ctrl+Shift+X: Clear &nbsp;|&nbsp; Ctrl+Shift+S: Settings
+        Ctrl+Shift+X: Clear &nbsp;|&nbsp; Ctrl+Shift+S: Settings &nbsp;|&nbsp;
+        Ctrl+Shift+R: Paragraph
       </div>
     </div>
   );

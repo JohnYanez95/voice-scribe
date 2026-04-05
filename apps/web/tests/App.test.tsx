@@ -115,6 +115,169 @@ function setContinuousMode() {
 // Tests
 // ---------------------------------------------------------------------------
 
+// Command-carrying complete result — the entire segment is a command phrase.
+function commandResult(cleaned: string): WsCompleteMessage {
+  return { ...COMPLETE_RESULT, cleaned, raw: cleaned };
+}
+
+// ---------------------------------------------------------------------------
+// Voice command tests
+// ---------------------------------------------------------------------------
+
+describe("App — voice commands (continuous mode)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedOnSpeechEnd = undefined;
+    capturedOnSegment = undefined;
+    capturedOnComplete = undefined;
+    mockIsListening = true;
+    localStorage.clear();
+    localStorage.setItem("voice-scribe-recording-mode", "continuous");
+
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it('"scribe stop" consumes segment, calls stopListening, state → done, no transcript added', async () => {
+    render(<App />);
+
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(commandResult("Scribe stop.")); });
+
+    // stopListening called by the command handler (inside onComplete)
+    expect(mockStopListening).toHaveBeenCalledOnce();
+
+    // State lands at done — spinner gone, no transcript added
+    await waitFor(() => {
+      expect(screen.queryByText("Transcribing...")).toBeNull();
+    });
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it('"scribe submit" writes accumulated transcript to clipboard', async () => {
+    render(<App />);
+
+    // Accumulate a transcript via a normal segment first
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(COMPLETE_RESULT); }); // cleaned: "hello"
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+
+    // Fire "scribe submit" on the next VAD cycle
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(commandResult("Scribe submit.")); });
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
+    });
+
+    // Transcript is not cleared by submit — still present
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.value).toContain("hello");
+  });
+
+  it('"scribe clear" clears transcript, VAD stays active (no stopListening)', async () => {
+    render(<App />);
+
+    // Accumulate transcript
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(COMPLETE_RESULT); });
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+
+    // Fire "scribe clear"
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(commandResult("Scribe clear.")); });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Transcribing...")).toBeNull();
+    });
+
+    // Transcript cleared — textarea absent (nothing to show)
+    expect(screen.queryByRole("textbox")).toBeNull();
+    // VAD not stopped — mic stays open
+    expect(mockStopListening).not.toHaveBeenCalled();
+  });
+
+  it('"scribe redo" clears transcript identically to "scribe clear"', async () => {
+    render(<App />);
+
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(COMPLETE_RESULT); });
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(commandResult("Scribe Redo.")); });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Transcribing...")).toBeNull();
+    });
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(mockStopListening).not.toHaveBeenCalled();
+  });
+
+  it("non-command segment accumulates normally with no side effects", async () => {
+    render(<App />);
+
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(COMPLETE_RESULT); });
+
+    await waitFor(() => {
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+      expect(textarea.value).toContain("hello");
+    });
+
+    expect(mockStopListening).not.toHaveBeenCalled();
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hotkey: paragraph break (Ctrl+Shift+R)
+// ---------------------------------------------------------------------------
+
+describe("App — hotkey Ctrl+Shift+R paragraph break", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedOnSpeechEnd = undefined;
+    capturedOnComplete = undefined;
+    mockIsListening = true;
+    localStorage.clear();
+    localStorage.setItem("voice-scribe-recording-mode", "continuous");
+
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it("inserts \\n\\n into transcript when content is present", async () => {
+    render(<App />);
+
+    // Accumulate transcript
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(COMPLETE_RESULT); }); // "hello"
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+
+    // Fire Ctrl+Shift+R
+    act(() => {
+      fireEvent.keyDown(document, { key: "R", ctrlKey: true, shiftKey: true });
+    });
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("hello\n\n");
+  });
+
+  it("does nothing when transcript is empty", async () => {
+    render(<App />);
+
+    act(() => {
+      fireEvent.keyDown(document, { key: "R", ctrlKey: true, shiftKey: true });
+    });
+
+    // No textarea — transcript is still empty
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});
+
 describe("App — continuous mode orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
