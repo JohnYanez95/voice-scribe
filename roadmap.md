@@ -632,14 +632,14 @@ Tauri-only power feature — it requires native OS access the browser cannot pro
   **Complete (2026-04-05, `8cbc933`).** Set pattern shipped with deregister-on-completion. 68
   frontend tests.
 
-- **Voice command surface** — three commands: `copy` (clipboard write, native API removes focus
-  requirement), `clear` (buffer wipe, carried from v2), `submit` (direct injection into focused
-  application, Tauri-only). `copy` and `submit` are separate commands with separate risk profiles —
-  clipboard write is safe and predictable; injection requires focus to be correct and must be opted
-  into deliberately. Collapsing them removes the user's safe fallback. `submit` is registered in
-  `COMMAND_MAP` unconditionally; execution is platform-conditional. In browser context, `submit`
-  executes the same path as `copy` (clipboard write — the safe fallback). Specific words subject to
-  gate evaluation; the command separation is non-negotiable.
+- **Voice command surface** — two shipped commands: `copy` (clipboard write, native API removes focus
+  requirement), `clear` (buffer wipe, carried from v2). `submit` (direct injection into focused
+  application) is deferred — WSL2 runs Linux/WebKitGTK, `SendInput` is Win32 with no path into the
+  Linux process namespace. The `submitText()` stub remains in `platform.ts`; the architectural
+  separation between `copy` and `submit` is preserved as a locked decision (clipboard write is safe
+  and predictable; injection requires focus to be correct and must be opted into deliberately).
+  Re-evaluation trigger: Windows-native Tauri build. Specific words subject to gate evaluation; the
+  command separation is non-negotiable.
 
 - **Port management** — fixed port, fail loudly. The sidecar binds to port 8000. If 8000 is occupied,
   the sidecar fails to start and Tauri surfaces a user-visible error. `api.ts` hardcodes
@@ -776,50 +776,45 @@ Switch to VS Code. Ctrl+V. Transcript is there. Same test with Ctrl+Shift+Y hotk
 build: `npm run build` produces zero import errors, `npx vitest run` passes, clipboard works in
 Chrome.
 
-#### v3.2 — `submit` Voice Command (Direct Injection, Windows-Only)
+#### v3.2 — Audio Feedback + Clipboard Cleanup
 
-**Deliverable:** Saying "submit" types the transcript directly into the focused application. No
-clipboard involved. Windows-only for this milestone.
+**Deliverable:** Audible confirmation when voice commands fire. All clipboard call sites consistent
+through the platform layer.
 
 **Scope:**
 
-1. **OS-level keystroke simulation.** Rust side uses `SendInput` via the Windows API (crate: `enigo`
-   or equivalent). Exposed as a Tauri command. Receives transcript text from the webview via IPC,
-   simulates keyboard input into the focused window.
+1. **Audio feedback for `copy`.** Short chime plays after `writeClipboard()` resolves successfully.
+   Hard requirement: the chime must play after the clipboard write succeeds, not on command
+   detection. A chime followed by a silent clipboard failure is worse than no chime at all. If
+   `writeClipboard()` rejects, no sound plays.
 
-2. **Focus management.** The injection target is whatever was focused before Voice Scribe. With
-   system tray (v3.3), focus is already elsewhere. Without tray, the user must have tabbed away.
-   Hard requirement: restore focus to the previous window before injecting. Focus management on
-   Windows has edge cases across window managers and accessibility settings. A one-week soak period
-   of daily use is required before marking v3.2 complete — included as a gate condition.
+2. **Audio feedback for `clear`.** Whoosh/sweep plays immediately when `clear` fires. `clear` is a
+   synchronous React state setter — no async timing concern.
 
-3. **Voice command registration.** `voiceCommands.ts`: `VoiceCommandKey` becomes
-   `"copy" | "clear" | "submit"`, `COMMAND_MAP` gains `"submit": "submit"`. Detection layer stays
-   platform-unaware. App.tsx gains `case "submit"` → `platform.submitText(transcriptRef.current)`.
+3. **Audio implementation.** Web Audio API or bundled audio files in `App.tsx` voice command dispatch.
+   No backend changes, no new dependencies beyond the sound assets themselves. Both browser and
+   desktop contexts should produce the same sounds.
 
-4. **Platform layer fill-in.** `platform.ts` `submitText()`:
-   - Browser: calls `writeClipboard()` (safe fallback, identical to `copy`)
-   - Tauri: calls Tauri IPC command → Rust `SendInput` injection
-
-5. **False-positive testing.** Severity asymmetry: accidental `submit` types arbitrary text into
-   whatever application has focus — worse than accidental `copy`. Gate must include false-positive
-   testing with sentences containing "submit" as a non-command word.
-
-6. **Transcript.tsx clipboard routing (cleanup).** The "Copy to Clipboard" button in `Transcript.tsx`
-   calls `navigator.clipboard.writeText()` directly instead of routing through
+4. **Transcript.tsx clipboard routing (cleanup from v3.1).** The "Copy to Clipboard" button in
+   `Transcript.tsx` calls `navigator.clipboard.writeText()` directly instead of routing through
    `platform.writeClipboard()`. It functions via its `execCommand("copy")` fallback in the Tauri
    webview, but is inconsistent with the two call sites migrated in v3.1. Route through the platform
-   layer for consistency.
+   layer so all three clipboard call sites use the same path.
 
-**Dependency:** v3.1's `platform.ts` must be in place. The platform layer is the routing surface for
-all platform-conditional behavior — it's not just a clipboard concern.
+**Dependency:** v3.1's `platform.ts` and HTTP clipboard server.
 
-**Deferred:** Linux/macOS injection. Named deferral — different APIs (`xdotool`, `CGEvent`), different
-failure modes. Windows-only is pragmatic scope discipline.
+**Not in v3.2:** `submit` voice command. The development environment runs the Tauri desktop app
+inside WSL2 (Linux/WebKitGTK). `SendInput` is a Win32 API with no path into the Linux process
+namespace. The clipboard delivery loop works end-to-end: dictate → say "copy" → switch app →
+Ctrl+V → transcript is there. `submit` is deferred until a Windows-native build happens for other
+reasons (distribution packaging, WebView2 migration). The `submitText()` stub in `platform.ts`
+remains — it costs nothing and the routing surface is tested.
 
-**Gate:** Dictate into Voice Scribe. Focus VS Code editor. Say "submit." Transcript appears at cursor
-in VS Code. No clipboard involvement. False-positive test: 10 sentences containing "submit" as a
-non-command word, zero fires. Soak period: one week of daily use before marking complete.
+**Gate:** Dictate → say "copy" → chime plays → switch app → Ctrl+V → transcript is there. Dictate →
+say "clear" → sweep plays → textarea is empty. Silence test: force `writeClipboard()` failure (e.g.,
+clipboard server not running in desktop mode) → no chime plays. All three clipboard call sites
+(`App.tsx` copy command, `App.tsx` handleCopyTranscript, `Transcript.tsx` button) route through
+`platform.writeClipboard()`. Browser build: `npm run build` zero errors, `npx vitest run` passes.
 
 #### v3.3 — System Tray + Global Hotkeys
 
@@ -840,20 +835,26 @@ application. System tray provides status and quick access.
 3. **Window management.** Recording triggered via global hotkey while the window is hidden. React
    state updates work regardless of window visibility — needs explicit verification, not assumption.
 
-4. **Full loop verification.** With tray + global hotkeys + `submit` in place, verify the end-to-end
-   path: global hotkey → recording starts → user speaks → transcription → "submit" → text appears in
-   focused app. Voice Scribe window never appears. This is the scenario the gate must exercise.
+4. **Full loop verification.** With tray + global hotkeys in place, verify the end-to-end path:
+   global hotkey → recording starts → user speaks → transcription → "copy" → clipboard write →
+   switch app → paste. Voice Scribe window never appears. This is the scenario the gate must
+   exercise. (If `submit` has shipped by this point, also verify direct injection path.)
 
-**Gate:** Hide Voice Scribe to tray. Focus VS Code. Press global hotkey. Dictate. Say "copy" (or
-"submit"). Transcript is in clipboard (or typed into VS Code). Voice Scribe window never appeared.
+**Gate:** Hide Voice Scribe to tray. Focus VS Code. Press global hotkey. Dictate. Say "copy."
+Transcript is in clipboard. Ctrl+V in VS Code. Voice Scribe window never appeared.
 Failure path: with a conflicting hotkey registered in another application, confirm Voice Scribe
 surfaces a user-visible error dialog and does not crash. Tray "Quit": confirm sidecar is gone.
 
 #### Deferred from v3 (named, not forgotten)
 
+- **`submit` voice command (direct injection)** — types the transcript directly into the focused
+  application without clipboard. Requires `SendInput` (Win32). The development environment runs
+  inside WSL2 (Linux/WebKitGTK) — no path to Win32 APIs. Trigger: Windows-native Tauri build
+  (WebView2, distribution packaging). The `submitText()` stub in `platform.ts` and the
+  copy/submit separation architecture are in place. When re-evaluated, Linux/macOS injection
+  (`xdotool`, `CGEvent`) remains a separate deferral — different APIs, different failure modes.
 - **Model management UI enhancements** — download progress, cache management without config files.
   Deferred to v3.x. The settings panel already handles runtime model swap.
-- **Linux/macOS `submit` injection** — different OS APIs, different failure modes. Deferred to v3.x.
 - **Auto-update** — Tauri has built-in update support. Not in scope for v3.0–v3.3.
 - **Rust-native inference** — single-binary distribution via whisper.cpp. Trigger: "when distribution
   to non-developer users becomes a requirement." Not v3.
