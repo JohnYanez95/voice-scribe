@@ -1,10 +1,16 @@
-.PHONY: dev build test gpu-check api web desktop
+.PHONY: dev dev-cpu build test gpu-check api web desktop
 
 COMPOSE := docker compose -f ops/docker/compose.dev.yml
 export PATH := $(HOME)/.cargo/bin:$(PATH)
 
+COMPOSE_CPU := docker compose -f ops/docker/compose.dev.yml -f ops/docker/compose.cpu.yml
+
 dev: gpu-check
 	$(COMPOSE) up --build -d
+	cd apps/web && npm run dev
+
+dev-cpu:
+	$(COMPOSE_CPU) up --build -d
 	cd apps/web && npm run dev
 
 build:

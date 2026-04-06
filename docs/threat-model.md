@@ -42,4 +42,4 @@
 1. **Accidental LAN exposure**: If someone changes the bind address from localhost to 0.0.0.0 in the compose file, the API becomes network-accessible. The compose file ships with localhost binding only.
 2. **Temp audio not cleaned up**: Container crash or OOM kill during transcription. Mitigation: monitor `data/tmp/` size.
 3. **Transcript in logs**: A code change that logs the transcription result. Mitigation: code review, structured logging pattern that separates operational events from content.
-4. **GPU setup confusion**: Contributors unable to get GPU passthrough working. Mitigation: `gpu-setup.md` guide and `bootstrap_gpu_check.sh` script.
+4. **GPU setup confusion**: Contributors unable to get GPU passthrough working. Mitigation: `docker-setup.md` guide and `bootstrap_gpu_check.sh` script.

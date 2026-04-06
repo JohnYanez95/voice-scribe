@@ -8,7 +8,7 @@ Complete all items before any public release.
 - [ ] SECURITY.md with vulnerability reporting process
 - [ ] Privacy documentation (docs/privacy.md)
 - [ ] Threat model documentation (docs/threat-model.md)
-- [ ] GPU setup guide (docs/gpu-setup.md)
+- [ ] Docker setup guide (docs/docker-setup.md)
 
 ## Security
 

@@ -271,7 +271,7 @@ voice-scribe/
 │  │     ├─ main.pdf
 │  │     └─ images/                        # Rendered Mermaid PNGs
 │  ├─ architecture.md
-│  ├─ gpu-setup.md
+│  ├─ docker-setup.md
 │  ├─ privacy.md
 │  ├─ threat-model.md
 │  └─ release-checklist.md

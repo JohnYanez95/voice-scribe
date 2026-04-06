@@ -29,28 +29,30 @@ Audio is transient — deleted in a `finally` block after processing. Transcript
 ## Quick start
 
 ```bash
-# Verify GPU + Docker readiness
-make gpu-check
+# GPU (requires NVIDIA GPU + Container Toolkit)
+make gpu-check   # verify GPU + container readiness
+make dev         # start API container (CUDA) + frontend dev server
 
-# Start API container (GPU) + frontend dev server
-make dev
+# CPU (no GPU required)
+make dev-cpu     # start API container (CPU, small model) + frontend dev server
 ```
 
 Frontend: `http://localhost:5173` | API: `http://localhost:8000`
 
 ## Requirements
 
-- NVIDIA GPU with CUDA support
-- Docker Desktop with WSL 2 backend
+- Docker Engine or Docker Desktop
 - Node.js 20+
-- Chrome
 
-See [docs/gpu-setup.md](docs/gpu-setup.md) for GPU and driver troubleshooting.
+GPU mode additionally requires an NVIDIA GPU with CUDA support and drivers installed on the host.
+
+See [docs/docker-setup.md](docs/docker-setup.md) for full setup and troubleshooting.
 
 ## Development
 
 ```bash
-make dev        # Start API container + frontend dev server
+make dev        # Start API container (GPU) + frontend dev server
+make dev-cpu    # Start API container (CPU) + frontend dev server
 make api        # API container only
 make web        # Frontend dev server only
 make build      # Build the API Docker image
@@ -75,7 +77,7 @@ ops/
   docker/       Compose config, GPU passthrough
   scripts/      Smoke test, GPU bootstrap check
 docs/
-  gpu-setup.md  GPU/WSL2/Docker troubleshooting
+  docker-setup.md  Docker setup (GPU and CPU) and troubleshooting
   v2/           Presentation and delivery report (frozen, v2 complete)
   v3/           Presentation (living, updated as v3 milestones ship)
   diagrams/     Mermaid source files for all diagrams

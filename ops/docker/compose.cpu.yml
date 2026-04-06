@@ -1,0 +1,6 @@
+services:
+  api:
+    environment:
+      - DEVICE=cpu
+      - WHISPER_MODEL=small
+    deploy: {}
