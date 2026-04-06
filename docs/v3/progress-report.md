@@ -1,8 +1,8 @@
-# Voice Scribe v3.0 — Progress Report
+# Voice Scribe v3 — Progress Report
 
 **Date:** April 5, 2026
 **Author:** Johnraymond Yanez
-**Status:** Phase B complete — desktop app records and transcribes via GPU on bare host
+**Status:** v3.0 and v3.1 gate-passed (2026-04-05)
 
 ---
 
@@ -10,7 +10,9 @@
 
 The Tauri desktop application launches, spawns the Python API as a sidecar, waits for health, and transitions the UI from "Starting backend..." to an active Record button. Push-to-talk recording through the desktop webview produces GPU-accelerated transcription at sub-second inference latency (0.8–1.0s on large-v3).
 
-111 automated tests pass (70 frontend, 41 backend). Rust compiles clean with zero warnings. TypeScript compiles clean.
+v3.1 adds the platform abstraction layer (`platform.ts`) and native clipboard support. The `copy` voice command and `Ctrl+Shift+Y` hotkey route through `platform.writeClipboard()`, which POSTs to a Rust-side HTTP clipboard server (`tiny_http` on port 8001 + `arboard`) in desktop context — no window focus required. The Tauri clipboard plugin was tested and confirmed to crash WebKitGTK when called without user activation (see Triage #6). Browser behavior is unchanged. Auto-scroll was added to continuous mode in a prior session.
+
+125 automated tests pass (84 frontend, 41 backend). Rust compiles clean with zero warnings. TypeScript compiles clean.
 
 | Deliverable | Status |
 |---|---|
@@ -24,7 +26,12 @@ The Tauri desktop application launches, spawns the Python API as a sidecar, wait
 | Phase B — WebKitGTK media permissions | Complete (triage fix) |
 | Phase B — CUDA runtime for bare host | Complete (triage fix) |
 | Bare-host GPU inference | Verified |
-| `docs/v3/host-setup.md` | Pending |
+| `docs/v3/host-setup.md` | Complete (`69457d0`) |
+| v3.1 — `platform.ts` abstraction | Complete |
+| v3.1 — Native clipboard (HTTP server + arboard) | Complete |
+| v3.1 — Clipboard call site routing | Complete (2 of 3 call sites — see backlog) |
+| v3.1 — Desktop clipboard routing test | Complete |
+| Auto-scroll in continuous mode | Complete |
 
 ---
 
@@ -45,11 +52,11 @@ Covered in detail in the prior progress report revision. Summary:
 
 | File | Purpose |
 |---|---|
-| `Cargo.toml` | Dependencies: tauri 2, tauri-plugin-shell 2, reqwest (blocking), webkit2gtk (Linux), libc (Unix) |
+| `Cargo.toml` | Dependencies: tauri 2, tauri-plugin-shell 2, arboard 3, tiny\_http 0.12, reqwest (blocking), webkit2gtk (Linux), libc (Unix) |
 | `tauri.conf.json` | devUrl `http://localhost:5173`, CSP allowing API and WebSocket on localhost:8000, `wasm-unsafe-eval` for ONNX VAD runtime |
-| `capabilities/default.json` | Tauri v2 capability permissions for shell spawn/kill and events |
+| `capabilities/default.json` | Tauri v2 capability permissions: shell spawn/kill, events |
 | `build.rs` | Standard Tauri build script |
-| `src/main.rs` | Sidecar lifecycle, WebKitGTK media permissions, shutdown handler |
+| `src/main.rs` | Sidecar lifecycle, HTTP clipboard server, WebKitGTK media permissions, shutdown handler |
 | `icons/icon.png` | 32x32 placeholder |
 
 ### Sidecar Lifecycle
@@ -73,6 +80,57 @@ Covered in detail in the prior progress report revision. Summary:
 ### Makefile
 
 `make desktop` starts Vite as a background process, writes its PID to `/tmp/voice-scribe-vite.pid`, traps EXIT/INT/TERM, then runs `cargo tauri dev`. `PATH` export at the top of the Makefile includes `~/.cargo/bin` so `cargo` is findable from `/bin/sh`.
+
+---
+
+## v3.1 — Platform Abstraction + Native Clipboard (Code-Complete)
+
+### platform.ts
+
+`apps/web/src/services/platform.ts` is the single routing surface for platform-conditional behavior. Three exports:
+
+| Export | Browser | Tauri |
+|---|---|---|
+| `isDesktop()` | Returns `false` | Returns `true` (`window.__TAURI__`) |
+| `writeClipboard(text)` | `navigator.clipboard.writeText()` | `fetch()` POST to `http://127.0.0.1:8001/clipboard` |
+| `submitText(text)` | Calls `writeClipboard()` (stub) | Calls `writeClipboard()` (filled in v3.2) |
+
+Desktop clipboard writes use `fetch()` POST to a Rust-side HTTP listener (`tiny_http` on port 8001). The Rust process reads the request body and writes to the system clipboard via `arboard`. This bypasses WebKitGTK entirely — the browser's Fetch API has no user-activation requirement for POST requests, so voice commands (which fire from WebSocket callbacks with no user gesture) work. See Triage #6 for why the Tauri clipboard plugin is not used.
+
+### Clipboard Call Site Routing
+
+Two of three clipboard call sites in the frontend now route through `platform.writeClipboard()`:
+
+1. **`App.tsx` — `copy` voice command:** `platform.writeClipboard(transcriptRef.current)`
+2. **`App.tsx` — `handleCopyTranscript`:** `platform.writeClipboard(transcript)`
+
+The third call site — the "Copy to Clipboard" button in `Transcript.tsx` — still calls `navigator.clipboard.writeText()` directly. It functions via its `execCommand("copy")` fallback in the Tauri webview, but is inconsistent with the platform layer. Tracked as a v3.2 cleanup item.
+
+### HTTP Clipboard Server
+
+`main.rs` spawns a `tiny_http` listener on `127.0.0.1:8001` during `setup()`. The listener accepts `POST /clipboard` with a plain text body, writes the body to the system clipboard via `arboard::Clipboard::set_text()`, and returns 204. CORS is set to allow `http://localhost:5173` (the Vite dev server origin). The server thread runs for the lifetime of the Tauri process — no explicit shutdown needed (thread is not joined; OS reclaims on process exit).
+
+The Tauri clipboard plugin (`tauri-plugin-clipboard-manager`) was tested and rejected. See Triage #6.
+
+### Tests
+
+Eight tests in `apps/web/tests/platform.test.ts` cover `isDesktop()` detection in both contexts, `writeClipboard()` browser path, `writeClipboard()` Tauri/HTTP path (fetch mock), `submitText()` delegation, and error handling.
+
+One integration test in `apps/web/tests/App.test.tsx` ("desktop voice command clipboard routing") sets `window.__TAURI__`, re-imports App via `vi.resetModules()`, fires the "copy" voice command through a full VAD cycle, and asserts: (1) `isDesktop()` returns true, (2) `fetch()` was called on `http://127.0.0.1:8001/clipboard`, (3) `navigator.clipboard.writeText` was NOT called. This test would have caught the original `isDesktop()` routing bug directly.
+
+---
+
+## Auto-Scroll in Continuous Mode
+
+Transcript textarea pins to the bottom as new segments arrive during continuous recording. Pin behavior:
+
+- **Engaged** on new recording session start and when user scrolls to bottom
+- **Released** on user scroll away from bottom or manual text edit
+- **Re-engaged** on scroll-to-bottom or next session start
+
+Five new tests in `apps/web/tests/Transcript.test.tsx` verify pin/release/re-engage behavior.
+
+This was not in the v3.1 roadmap scope — it's a UX improvement that shipped in the same session. Continuous mode without auto-scroll required manual scrolling to see incoming segments, which was a practical friction point during field testing.
 
 ---
 
@@ -110,16 +168,32 @@ Five issues surfaced during the first successful `make desktop` runs. Each was e
 **Symptom:** The codec-unsupported error message reads "Please use Chrome." — incorrect in desktop context where the user has no browser choice.
 **Fix:** Updated to `"Your environment does not support audio/webm;codecs=opus recording."` Context-neutral, accurate in both browser and Tauri webview.
 
+### 6. Tauri clipboard plugin crashes WebKitGTK without user activation
+
+**Symptom:** Saying "copy" after dictation crashes the Tauri desktop app. Terminal shows `VM 0x... on pid ... received NeedDebuggerBreak trap`. The webview process is killed — not a JS error, a hard trap.
+**Cause:** The Tauri clipboard plugin (`tauri-plugin-clipboard-manager`) calls through WebKitGTK's IPC mechanism (`window.webkit.messageHandlers`), which requires user activation. Voice commands fire from WebSocket callbacks — no user gesture — so the IPC call triggers a `NeedDebuggerBreak` trap in the WebKitGTK renderer process.
+**Investigation sequence:** The original clipboard failure (v3.1 initial implementation) was traced to `isDesktop()` returning false because `withGlobalTauri: true` was missing from `tauri.conf.json`. An HTTP server bypass (`tiny_http` on 8001 + `arboard`) was built as a workaround. Once `withGlobalTauri` was fixed, the plugin was restored alongside the HTTP server to test whether the plugin worked with correct routing. It does not — the crash is the definitive result.
+**Fix:** HTTP clipboard server is the permanent architecture. `writeClipboard()` uses `fetch()` POST to `127.0.0.1:8001/clipboard` in desktop context. The Rust process writes to the system clipboard via `arboard`, bypassing WebKitGTK entirely. The plugin package (`@tauri-apps/plugin-clipboard-manager`) and its Rust counterpart (`tauri-plugin-clipboard-manager`) are removed from all dependency and capability files.
+**CSP requirement:** `tauri.conf.json` CSP `connect-src` must include `http://127.0.0.1:8001` for the `fetch()` call to succeed in the Tauri webview. This entry was reverted during unrelated debugging and needs to be re-added before the gate test.
+
+### 7. WSL2 audio device loss after WebKitGTK crash
+
+**Symptom:** After the clipboard plugin crash (Triage #6), clicking Record freezes the app. WebKitGTK console shows `OverconstrainedError: "Invalid constraint"` and `"Audio capture was requested but no device was found amongst 0 devices"`.
+**Cause:** WSL2 audio passthrough depends on WSLg's PipeWire/PulseAudio session. The WebKitGTK crash orphaned the audio pipeline. `arecord -l` shows no soundcards, `/proc/asound/` does not exist, and ALSA kernel modules are not loaded. PipeWire runs but sees only `Dummy-Driver` — it is not connected to WSLg's PulseAudio server despite `PULSE_SERVER=unix:/mnt/wslg/PulseServer` being set and the socket existing.
+**Fix:** `wsl --shutdown` from PowerShell on the Windows side restarts WSLg and re-initializes the audio device passthrough. This is the standard recovery for WSL2 audio loss.
+**Impact on gate:** Blocks all manual gate validation (recording requires a microphone). Not a code issue — environment-only. All automated tests pass without audio hardware.
+
 ---
 
 ## Runtime Warnings (Non-Blocking)
 
-Two WebKitGTK warnings appear in the terminal during desktop operation. Neither affects functionality.
+Three WebKitGTK warnings or traps observed during desktop operation. None affect functionality.
 
 | Warning | Cause | Impact |
 |---|---|---|
 | `Unable to connect to D-Bus session bus` | WSL2 does not provide a D-Bus session bus by default | None — WebKitGTK falls back gracefully |
 | `g_object_set_is_valid_property: object class 'GstAppSrc' has no property named 'automatic-eos'` | GStreamer version mismatch between WebKitGTK's expectation and the installed GStreamer 1.20 | None — recording and playback work |
+| `VM 0x... received NeedDebuggerBreak trap` | Observed once during continuous-mode dictation (not during clipboard operations). Two candidate causes: (1) Tauri IPC user-activation enforcement on a non-clipboard code path, (2) GStreamer `automatic-eos` property mismatch surfacing as a transient media pipeline fault | None — app survived without crash or state loss, subsequent WebSocket connections succeeded. No investigation unless recurrence with a pattern |
 
 ---
 
@@ -127,26 +201,41 @@ Two WebKitGTK warnings appear in the terminal during desktop operation. Neither 
 
 | Suite | Count | Status |
 |---|---|---|
-| Frontend (vitest) | 70 | All pass |
+| Frontend (vitest) | 84 | All pass |
 | Backend (pytest) | 41 | All pass |
 | Rust (cargo check) | — | Clean, zero warnings |
 | TypeScript (tsc --noEmit) | — | Clean |
-| **Total** | **111** | **Green** |
+| **Total** | **125** | **Green** |
 
-New tests added in Phase B:
+New tests by phase:
 
-| Test | File | Verifies |
-|---|---|---|
-| Browser context: Record button enabled on mount | `App.test.tsx` | `backendReady` defaults true when `__TAURI__` absent |
-| Tauri context: disabled until backend-ready event | `App.test.tsx` | `backendReady` starts false, transitions to true on event |
+| Phase | Test | File | Verifies |
+|---|---|---|---|
+| v3.0 | Browser context: Record button enabled on mount | `App.test.tsx` | `backendReady` defaults true when `__TAURI__` absent |
+| v3.0 | Tauri context: disabled until backend-ready event | `App.test.tsx` | `backendReady` starts false, transitions to true on event |
+| v3.1 | `isDesktop()` detection (×2) | `platform.test.ts` | Returns correct value based on `__TAURI__` presence |
+| v3.1 | `writeClipboard()` browser path | `platform.test.ts` | Delegates to `navigator.clipboard.writeText()` |
+| v3.1 | `writeClipboard()` Tauri path | `platform.test.ts` | POSTs to HTTP clipboard server, `navigator.clipboard` not called |
+| v3.1 | `writeClipboard()` error handling | `platform.test.ts` | Throws on non-OK response from clipboard server |
+| v3.1 | `submitText()` delegation | `platform.test.ts` | Calls `writeClipboard()` (stub behavior) |
+| v3.1 | Error handling | `platform.test.ts` | Graceful failure on clipboard API rejection |
+| v3.1 | Desktop voice command clipboard routing | `App.test.tsx` | `__TAURI__` set, "copy" routes through HTTP server, not `navigator.clipboard` |
+| v3.1 | Auto-scroll pin/release/re-engage (×5) | `Transcript.test.tsx` | Scroll behavior in continuous mode |
 
 ---
 
-## What Remains Before v3.0 Gate
+## Gate Validation — Complete
 
-1. **`docs/v3/host-setup.md`** — Document the bare-host setup procedure: Rust toolchain, system dependencies, `nvidia-cublas-cu12` pip package, and verification steps. The content is now fully known from the triage — this is documentation, not discovery.
-2. **Manual gate validation** — The gate checklist items that require a running desktop app: continuous mode, voice commands ("copy", "clear"), settings panel, WebSocket origin verification, sidecar cleanup on close, clean relaunch. Push-to-talk with GPU inference is confirmed.
-3. **Commit Phase B work** — All changes are in the working tree, not yet committed.
+Both gates passed on 2026-04-05 at the physical desktop.
+
+**v3.0 gate (roadmap line 732–734):** App launched, sidecar started and passed health check, continuous-mode recording worked through Tauri webview, model loaded (large-v3, CUDA) with sub-second inference latency (0.4–1.0s). Voice commands and settings panel exercised during v3.1 gate session.
+
+**v3.1 gate (roadmap line 771–774):**
+1. Dictate → say "copy" → paste in Discord → transcript appeared ✓
+2. Dictate → Ctrl+Shift+Y → paste in Discord → transcript appeared ✓
+3. Browser build: `npm run build` zero errors, `npx vitest run` 84/84, `tsc --noEmit` clean, clipboard works in Chrome via Ctrl+Shift+Y ✓
+
+**Fix applied at gate:** `tauri.conf.json` CSP `connect-src` was missing `http://127.0.0.1:8001` (clipboard server origin). Entry had been added in a prior session, reverted during unrelated debugging, never restored. One-line fix, no other code changes.
 
 ---
 
@@ -154,11 +243,11 @@ New tests added in Phase B:
 
 ### For PM
 
-Scope held. Phase B delivered the five planned deliverables plus two triage fixes that were direct consequences of the bare-host transition (CUDA runtime, WebKitGTK permissions). No scope additions — both fixes address runtime requirements that were always implicit in "desktop app records audio with GPU inference" but only became visible at integration time.
+**v3.0 scope held.** Phase B delivered the five planned deliverables plus two triage fixes that were direct consequences of the bare-host transition (CUDA runtime, WebKitGTK permissions). No scope additions — both fixes address runtime requirements that were always implicit in "desktop app records audio with GPU inference" but only became visible at integration time. The `useRecorder.ts` error message update was flagged by the Principal during triage review. `docs/v3/host-setup.md` delivered at `69457d0`.
 
-The `useRecorder.ts` error message update was flagged by the Principal during triage review. One-line change, context-neutral wording.
+**v3.1 scope held.** Three of four roadmap scope items delivered: platform abstraction layer, native clipboard (HTTP server, not plugin — see Triage #6), and clipboard call site routing. `voiceCommands.ts` unchanged per plan — `submit` is v3.2. One call site (`Transcript.tsx` "Copy to Clipboard" button) not routed through the platform layer; tracked as v3.2 cleanup.
 
-The `docs/v3/host-setup.md` deliverable is the remaining documentation obligation. Its content is fully determined — no open questions.
+**Auto-scroll** was not in v3.1 roadmap scope. It shipped in the same session as a UX improvement discovered during field testing — continuous mode without it required manual scrolling to track incoming segments. Scope expansion is small (one behavior, five tests) and does not affect any other milestone.
 
 ### For Principal
 
@@ -170,6 +259,10 @@ The `docs/v3/host-setup.md` deliverable is the remaining documentation obligatio
 
 **`resource_dir()` vs `CARGO_MANIFEST_DIR`.** The API directory resolution was simplified to `CARGO_MANIFEST_DIR` only. `resource_dir()` is the correct approach for production bundles but returned `target/debug/` in dev mode, producing a wrong relative path. Mixing both in an `or_else` chain masked the dev-mode failure because `resource_dir()` succeeded (returned a path) but the path was wrong. The compile-time constant is correct for all dev builds and makes the failure mode obvious if the directory doesn't exist (panic with path in message). Production bundling is post-v3.0. `CARGO_MANIFEST_DIR` bakes the build machine's absolute path into the binary — the moment distribution packaging produces a `.deb` or `.msi`, the API directory resolution must switch to `resource_dir()` or `app.path().resolve()`.
 
-**Outstanding non-blocking items.** D-Bus and GStreamer warnings in WSL2 are cosmetic. `navigator.clipboard` is denied in the Tauri webview (non-HTTPS context) — already guarded with `.catch(() => {})`, native clipboard is v3.1. WebSocket smoke test gap from v2 delivery report remains open.
+**Outstanding non-blocking items.** D-Bus and GStreamer warnings in WSL2 are cosmetic. `navigator.clipboard` denial in the Tauri webview is resolved by v3.1's HTTP clipboard server — the two `App.tsx` call sites now route through `platform.writeClipboard()`. One call site remains on `navigator.clipboard` (`Transcript.tsx` button); functions via `execCommand("copy")` fallback. WebSocket smoke test gap from v2 delivery report remains open.
 
-**Triage as operational reference.** `docs/v3/host-setup.md` should include a troubleshooting section referencing triage items #2 (CUDA runtime — `libcublas.so.12` not found, resolved by `nvidia-cublas-cu12` pip package + `cuda_ld_library_path()` injection) and #4 (WebKitGTK permissions — silent `getUserMedia` denial, resolved by `enable-media-stream` feature gate + `connect_permission_request` signal handler). These are the exact problems someone will hit on a new machine.
+**Clipboard plugin crash.** The Tauri clipboard plugin (`tauri-plugin-clipboard-manager`) was the original v3.1 plan. It crashes WebKitGTK with a `NeedDebuggerBreak` trap when called from a WebSocket callback (no user activation). This was confirmed by restoring the plugin with correct `isDesktop()` routing (`withGlobalTauri: true` verified) and observing the crash on a "copy" voice command. The HTTP server bypass (Triage #6) is the permanent architecture. The plugin should not be retested — this is a closed decision.
+
+**WSL2 audio loss.** The plugin crash (Triage #6) orphaned the WSL2 audio pipeline. `arecord -l` sees no soundcards, PipeWire sees only Dummy-Driver. Fix is `wsl --shutdown` from PowerShell. This blocks manual gate validation but is environment-only — all 125 automated tests pass without audio hardware.
+
+**Triage as operational reference.** `docs/v3/host-setup.md` should include a troubleshooting section referencing triage items #2 (CUDA runtime — `libcublas.so.12` not found, resolved by `nvidia-cublas-cu12` pip package + `cuda_ld_library_path()` injection), #4 (WebKitGTK permissions — silent `getUserMedia` denial, resolved by `enable-media-stream` feature gate + `connect_permission_request` signal handler), and #6 (clipboard plugin crash — resolved by HTTP server on 8001). These are the exact problems someone will hit on a new machine.

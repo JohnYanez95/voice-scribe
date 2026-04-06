@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
 **Last Updated:** April 5, 2026
-**Status:** v3.0 Phase B Complete — v3.1 next
+**Status:** v3.0 and v3.1 code-complete — manual gate validation pending
 
 ---
 
@@ -37,6 +37,8 @@ Both use cases demand the same underlying capabilities: accurate multilingual tr
 **Scope matches the milestone.** Repo structure and services reflect current reality, not future aspirations.
 
 **Public-safe defaults.** The repo and runtime assume eventual public distribution and default toward safe behavior.
+
+**Close-mic audio source assumed.** VAD accuracy and inference quality degrade with distant or ambient-noise-contaminated input. A headset or USB microphone is recommended in any environment with background noise. Laptop microphone is viable in quiet single-speaker conditions only.
 
 ---
 
@@ -742,26 +744,27 @@ requirement). Web version unchanged.
 
 1. **Platform abstraction layer.** `platform.ts` module with three exports:
    - `isDesktop(): boolean` — checks `window.__TAURI__`
-   - `writeClipboard(text: string): Promise<void>` — Tauri: dynamic
-     `import("@tauri-apps/plugin-clipboard-manager")` → `writeText()`; browser:
+   - `writeClipboard(text: string): Promise<void>` — Tauri: `fetch()` POST to
+     `http://127.0.0.1:8001/clipboard` (plain text body); browser:
      `navigator.clipboard.writeText()`
    - `submitText(text: string): Promise<void>` — stub in v3.1, calls `writeClipboard()` in both
      environments. Filled in v3.2 for Tauri.
 
-   Dynamic `import()` is the mechanism. Vite does not resolve dynamic imports at static analysis time.
-   `vite.config.ts` adds `optimizeDeps.exclude` for `@tauri-apps/` packages. If dynamic import fails
-   despite exclusion, fallback is a Vite `resolve.alias` mapping `@tauri-apps/*` to no-op stubs in
-   browser builds — documented as contingency, not plan.
-
-2. **Tauri clipboard plugin.** `@tauri-apps/plugin-clipboard-manager` declared in Tauri `capabilities`
-   config. Tested on Windows.
+2. **HTTP clipboard server.** `main.rs` spawns a `tiny_http` listener on `127.0.0.1:8001` during
+   Tauri `setup()`. Accepts `POST /clipboard` with plain text body, writes to system clipboard via
+   `arboard::Clipboard::set_text()`, returns 204. CORS allows `http://localhost:5173` (dev mode
+   origin). `tauri.conf.json` CSP `connect-src` includes `http://127.0.0.1:8001`. The Tauri clipboard
+   plugin (`tauri-plugin-clipboard-manager`) was tested and rejected — it crashes WebKitGTK with a
+   `NeedDebuggerBreak` trap when called without user activation (voice commands fire from WebSocket
+   callbacks, no user gesture). See progress report Triage #6.
 
 3. **Clipboard call site routing.** Two call sites in App.tsx route through `platform.writeClipboard()`:
-   - `case "copy"` voice command: `navigator.clipboard.writeText(transcriptRef.current)`
-     → `platform.writeClipboard(transcriptRef.current)`
-   - `handleCopyTranscript`: `navigator.clipboard.writeText(transcript)`
-     → `platform.writeClipboard(transcript)`
+   - `case "copy"` voice command: `platform.writeClipboard(transcriptRef.current)`
+   - `handleCopyTranscript`: `platform.writeClipboard(transcript)`
    - Both keep the existing `.catch(() => {})` fire-and-forget contract.
+   - The third call site — "Copy to Clipboard" button in `Transcript.tsx` — remains on
+     `navigator.clipboard.writeText()` directly. Functions via `execCommand("copy")` fallback in
+     the Tauri webview. Deferred to v3.2 scope item 6 for platform layer consistency.
 
 4. **`voiceCommands.ts` unchanged.** Still two commands (`copy`, `clear`). The `submit` entry lands
    in v3.2.
@@ -799,6 +802,12 @@ clipboard involved. Windows-only for this milestone.
 5. **False-positive testing.** Severity asymmetry: accidental `submit` types arbitrary text into
    whatever application has focus — worse than accidental `copy`. Gate must include false-positive
    testing with sentences containing "submit" as a non-command word.
+
+6. **Transcript.tsx clipboard routing (cleanup).** The "Copy to Clipboard" button in `Transcript.tsx`
+   calls `navigator.clipboard.writeText()` directly instead of routing through
+   `platform.writeClipboard()`. It functions via its `execCommand("copy")` fallback in the Tauri
+   webview, but is inconsistent with the two call sites migrated in v3.1. Route through the platform
+   layer for consistency.
 
 **Dependency:** v3.1's `platform.ts` must be in place. The platform layer is the routing surface for
 all platform-conditional behavior — it's not just a clipboard concern.

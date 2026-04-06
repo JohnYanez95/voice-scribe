@@ -86,6 +86,14 @@ On first launch:
 
 The Vite dev server starts in parallel. The webview loads `http://localhost:5173`. The record button shows "Starting backend..." until the sidecar health check passes.
 
+## Recommended Audio Input
+
+Voice Scribe assumes a close-mic audio source. VAD segmentation and inference quality both degrade with distant or ambient-noise-contaminated input.
+
+- **Headset or USB microphone** — use in any environment with background noise. The relevant property is proximity to the speaker, not price or noise cancellation tier.
+- **Laptop microphone** — viable in quiet rooms with a single speaker. Not recommended for shared spaces, open offices, or environments with fans, HVAC, or other continuous noise sources.
+- **Bluetooth headsets** — continuous recording mode keeps the microphone active, which holds Bluetooth in headset profile (HFP) rather than the audio-only profile (A2DP). This increases battery drain compared to passive listening. Not a functional issue — awareness for long sessions.
+
 ## Troubleshooting
 
 ### Microphone not working in the desktop app
