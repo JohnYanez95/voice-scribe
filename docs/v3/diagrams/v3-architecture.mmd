@@ -1,0 +1,32 @@
+flowchart TB
+    subgraph webview ["Tauri Webview"]
+        direction TB
+        app["App.tsx +<br/>useVAD / useRecorder"]
+        pt["platform.ts"]
+        apits["api.ts<br/>(WebSocket / HTTP)"]
+        app --> pt --> apits
+    end
+
+    apits -->|"IPC<br/>(Tauri commands)"| plugins
+
+    plugins["Tauri plugins:<br/>clipboard-manager<br/>global-shortcut, tray"]
+
+    subgraph sidecar ["Managed child process"]
+        direction TB
+        sc["Python sidecar:<br/>FastAPI localhost:8000"]
+        inf["ffmpeg +<br/>faster-whisper (CUDA)"]
+        sc --> inf
+    end
+
+    plugins --> sc
+    inf --> os["Windows OS APIs<br/>(SendInput, global hotkey,<br/>tray icon)"]
+
+    classDef webviewStyle fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef sidecarStyle fill:#ffd6b3,stroke:#cc7700,color:#333
+    classDef pluginStyle fill:#ede8ff,stroke:#7755aa,color:#333
+    classDef nativeStyle fill:#ddf5dd,stroke:#448844,color:#333
+
+    class app,pt,apits webviewStyle
+    class sc,inf sidecarStyle
+    class plugins pluginStyle
+    class os nativeStyle

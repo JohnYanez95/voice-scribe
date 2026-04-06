@@ -1,0 +1,24 @@
+flowchart TB
+    subgraph v2 ["v2 (Browser)"]
+        direction LR
+        v2a["Speak + Transcribe"]
+        v2b["Clipboard<br/>(focus required)"]
+        v2c["Destination App<br/>(manual paste)"]
+        v2a --> v2b -.-> v2c
+    end
+
+    subgraph v3g ["v3 (Desktop)"]
+        direction LR
+        v3a["Speak + Transcribe"]
+        v3b["platform.ts<br/>(native OS API)"]
+        v3c["Destination App<br/>(direct delivery)"]
+        v3a --> v3b --> v3c
+    end
+
+    v2 ~~~ v3g
+
+    classDef ok fill:#ddf5dd,stroke:#448844,color:#333
+    classDef gap fill:#ffdddd,stroke:#cc4444,color:#333
+
+    class v2a,v3a,v3b,v3c ok
+    class v2b,v2c gap

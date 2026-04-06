@@ -13,8 +13,6 @@
 \usepackage{wrapfig}
 \usepackage{multicol}
 \usepackage{listings}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning, shapes.geometric, shapes.symbols, fit, backgrounds, calc}
 
 \newcommand{\nt}{$\underline{\text{Note}}:$ }
 \newcommand{\ex}{$\underline{\text{Example}}:$ }
@@ -148,39 +146,7 @@
 
 \begin{frame}{The Delivery Gap --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.88, every node/.style={transform shape},
-        box/.style={draw, rounded corners=3pt, minimum width=2.8cm,
-                    minimum height=0.5cm, font=\scriptsize, align=center},
-        ok/.style={box, fill=green!12},
-        gap/.style={box, fill=red!12},
-        arr/.style={-{Stealth[length=4pt]}, thick},
-        darr/.style={-{Stealth[length=4pt]}, thick, dashed, red!60},
-        lbl/.style={font=\tiny, text=gray},
-        hdr/.style={font=\small\bfseries, text=gray!80},
-    ]
-        % Column headers
-        \node[hdr] at (-0.4, 0.5)  {v2 (Browser)};
-        \node[hdr] at (-0.4, -1.4) {v3 (Desktop)};
-
-        % v2 row
-        \node[ok]  (v2a) at (1.8,  0)   {Speak + Transcribe};
-        \node[gap] (v2b) at (5.0,  0)   {Clipboard};
-        \node[gap] (v2c) at (8.2,  0)   {Destination App};
-        \draw[arr]  (v2a) -- (v2b);
-        \draw[darr] (v2b) -- (v2c);
-        \node[lbl, above=0.06cm of v2b] {focus required};
-        \node[lbl, above=0.06cm of v2c] {manual paste};
-
-        % v3 row
-        \node[ok]  (v3a) at (1.8,  -1.9) {Speak + Transcribe};
-        \node[ok]  (v3b) at (5.0,  -1.9) {platform.ts};
-        \node[ok]  (v3c) at (8.2,  -1.9) {Destination App};
-        \draw[arr] (v3a) -- (v3b);
-        \draw[arr] (v3b) -- (v3c);
-        \node[lbl, below=0.06cm of v3b] {native OS API};
-        \node[lbl, below=0.06cm of v3c] {direct delivery};
-
-    \end{tikzpicture}
+    \includegraphics[width=0.95\textwidth,keepaspectratio]{images/delivery-gap.png}
     \end{center}
 
     \vspace{0.3em}
@@ -224,62 +190,7 @@
 
 \begin{frame}{Architecture --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.73, every node/.style={transform shape},
-        node distance=0.28cm,
-        box/.style={draw, rounded corners=3pt, minimum width=5.2cm,
-                    minimum height=0.45cm, font=\small, align=center},
-        webview/.style={box, fill=blue!12},
-        sidecar/.style={box, fill=orange!15},
-        plugin/.style={box, fill=violet!12},
-        native/.style={box, fill=green!12},
-        arr/.style={-{Stealth[length=5pt]}, thick},
-        lbl/.style={font=\scriptsize, text=gray},
-        boundary/.style={draw, dashed, rounded corners=5pt, gray, inner sep=7pt},
-    ]
-        % Webview stack
-        \node[webview] (app)  {App.tsx + \texttt{useVAD} / \texttt{useRecorder}};
-        \node[webview, below=of app] (pt)  {\texttt{platform.ts}};
-        \node[webview, below=of pt]  (apits) {\texttt{api.ts} (WebSocket / HTTP)};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(app)(pt)(apits),
-                  label={[font=\scriptsize,text=gray]above left:Tauri Webview}] (wv) {};
-        \end{scope}
-
-        % IPC label
-        \node[lbl] (ipc) [below=0.5cm of apits] {$\updownarrow$ IPC (Tauri commands)};
-
-        % Plugin + sidecar row
-        \node[plugin] (plugins) [below=0.15cm of ipc]
-            {Tauri plugins: clipboard-manager \quad global-shortcut \quad tray};
-
-        % Sidecar
-        \node[sidecar] (sc) [below=0.32cm of plugins]
-            {Python sidecar: FastAPI \texttt{localhost:8000}};
-        \node[sidecar, below=of sc] (inf)
-            {ffmpeg + faster-whisper (CUDA)};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(sc)(inf),
-                  label={[font=\scriptsize,text=gray]left:Managed child process}] (scbound) {};
-        \end{scope}
-
-        % OS
-        \node[native, below=0.32cm of inf] (os)
-            {Windows OS APIs (SendInput, global hotkey, tray icon)};
-
-        % Arrows
-        \draw[arr] (app)  -- (pt);
-        \draw[arr] (pt)   -- (apits);
-        \draw[arr] (apits.south) -- ++(0,-0.22) -- (ipc.north);
-        \draw[arr] (ipc.south)   -- (plugins.north);
-        \draw[arr] (plugins.south) -- (sc.north);
-        \draw[arr] (sc)   -- (inf);
-        \draw[arr] (inf.south) -- (os.north);
-
-        % WS arrow label
-        \node[lbl, right=0.15cm of apits] {\textit{WebSocket / HTTP}};
-    \end{tikzpicture}
+    \includegraphics[height=0.72\textheight,keepaspectratio]{images/v3-architecture.png}
     \end{center}
 
     {\scriptsize
@@ -405,28 +316,29 @@
 \end{frame}
 
 
-\begin{frame}{v3.1 --- Native Clipboard}
+\begin{frame}{v3.1 --- Native Clipboard + Auto-Scroll}
     \small
     \textbf{Deliverable:} \texttt{copy} voice command and \texttt{Ctrl+Shift+Y} use native
     OS clipboard. No window focus required.
 
-    \vspace{0.3em}
+    \vspace{0.15em}
     \textbf{Key scope:}
-    \begin{itemize}\setlength{\itemsep}{1pt}
+    \begin{itemize}\setlength{\itemsep}{0pt}
         \item \texttt{platform.ts} introduced: \texttt{isDesktop()},
               \texttt{writeClipboard()}, \texttt{submitText()} stub
         \item Two \texttt{App.tsx} clipboard call sites routed through
-              \texttt{platform.writeClipboard()}: the \texttt{copy} voice command
-              and \texttt{handleCopyTranscript}
-        \item \texttt{@tauri-apps/plugin-clipboard-manager} declared in Tauri
-              \texttt{capabilities}
+              \texttt{platform.writeClipboard()}
+        \item HTTP clipboard server (\texttt{tiny\_http} + \texttt{arboard}
+              on port 8001) --- bypasses WebKitGTK user-activation requirement
         \item \texttt{voiceCommands.ts} unchanged; \texttt{submit} lands in v3.2
+        \item Continuous mode auto-scroll: pins to bottom, releases on user
+              interaction
     \end{itemize}
 
-    \vspace{0.2em}
+    \vspace{0.1em}
     \textbf{Gate:} dictate $\to$ say ``copy'' $\to$ switch to VS Code $\to$ Ctrl+V $\to$
-    transcript is there. Same with Ctrl+Shift+Y. Browser build: \texttt{npm run build}
-    produces zero import errors; \texttt{npx vitest run} passes.
+    transcript is there. Same with Ctrl+Shift+Y. Browser build: zero import errors,
+    all tests pass.
 \end{frame}
 
 
