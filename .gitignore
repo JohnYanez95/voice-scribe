@@ -10,6 +10,7 @@ dist/
 build/
 *.egg-info/
 target/
+*.tsbuildinfo
 
 # Environment
 .env

@@ -83,7 +83,7 @@ Covered in detail in the prior progress report revision. Summary:
 
 ---
 
-## v3.1 — Platform Abstraction + Native Clipboard (Code-Complete)
+## v3.1 — Platform Abstraction + Native Clipboard (Complete)
 
 ### platform.ts
 
@@ -174,7 +174,7 @@ Five issues surfaced during the first successful `make desktop` runs. Each was e
 **Cause:** The Tauri clipboard plugin (`tauri-plugin-clipboard-manager`) calls through WebKitGTK's IPC mechanism (`window.webkit.messageHandlers`), which requires user activation. Voice commands fire from WebSocket callbacks — no user gesture — so the IPC call triggers a `NeedDebuggerBreak` trap in the WebKitGTK renderer process.
 **Investigation sequence:** The original clipboard failure (v3.1 initial implementation) was traced to `isDesktop()` returning false because `withGlobalTauri: true` was missing from `tauri.conf.json`. An HTTP server bypass (`tiny_http` on 8001 + `arboard`) was built as a workaround. Once `withGlobalTauri` was fixed, the plugin was restored alongside the HTTP server to test whether the plugin worked with correct routing. It does not — the crash is the definitive result.
 **Fix:** HTTP clipboard server is the permanent architecture. `writeClipboard()` uses `fetch()` POST to `127.0.0.1:8001/clipboard` in desktop context. The Rust process writes to the system clipboard via `arboard`, bypassing WebKitGTK entirely. The plugin package (`@tauri-apps/plugin-clipboard-manager`) and its Rust counterpart (`tauri-plugin-clipboard-manager`) are removed from all dependency and capability files.
-**CSP requirement:** `tauri.conf.json` CSP `connect-src` must include `http://127.0.0.1:8001` for the `fetch()` call to succeed in the Tauri webview. This entry was reverted during unrelated debugging and needs to be re-added before the gate test.
+**CSP requirement:** `tauri.conf.json` CSP `connect-src` must include `http://127.0.0.1:8001` for the `fetch()` call to succeed in the Tauri webview. This entry was reverted during unrelated debugging and restored at the v3.1 gate (2026-04-05).
 
 ### 7. WSL2 audio device loss after WebKitGTK crash
 

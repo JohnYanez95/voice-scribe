@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
 **Last Updated:** April 5, 2026
-**Status:** v3.0 and v3.1 code-complete — manual gate validation pending
+**Status:** v3.1 Complete — v3.2 next
 
 ---
 
