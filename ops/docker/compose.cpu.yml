@@ -1,6 +1,21 @@
 services:
   api:
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile.cpu
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "8000:8000"
     environment:
-      - DEVICE=cpu
       - WHISPER_MODEL=small
-    deploy: {}
+      - WHISPER_AVAILABLE_MODELS=small
+      - DEVICE=cpu
+      - MAX_AUDIO_SECONDS=60
+      - MAX_UPLOAD_MB=10
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+      - MODEL_CACHE_DIR=/cache
+      - TEMP_DIR=/tmp/voice-scribe
+      - LOG_LEVEL=info
+    volumes:
+      - ../../data/cache:/cache
+      - ../../data/tmp:/tmp/voice-scribe

@@ -3,7 +3,7 @@
 COMPOSE := docker compose -f ops/docker/compose.dev.yml
 export PATH := $(HOME)/.cargo/bin:$(PATH)
 
-COMPOSE_CPU := docker compose -f ops/docker/compose.dev.yml -f ops/docker/compose.cpu.yml
+COMPOSE_CPU := docker compose -f ops/docker/compose.cpu.yml
 
 dev: gpu-check
 	$(COMPOSE) up --build -d
