@@ -38,6 +38,18 @@ Frontend: `http://localhost:5173` | API: `http://localhost:8000`
 
 On first run, the Whisper model downloads inside the container. This is cached in `data/cache/` and reused on subsequent starts.
 
+## Stopping
+
+```bash
+# GPU
+docker compose -f ops/docker/compose.dev.yml down
+
+# CPU
+docker compose -f ops/docker/compose.cpu.yml down
+```
+
+Ctrl+C in the terminal stops the Vite dev server. The API container runs in the background and must be stopped separately with the command above.
+
 ## GPU Verification
 
 ```bash
