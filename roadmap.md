@@ -776,6 +776,15 @@ Switch to VS Code. Ctrl+V. Transcript is there. Same test with Ctrl+Shift+Y hotk
 build: `npm run build` produces zero import errors, `npx vitest run` passes, clipboard works in
 Chrome.
 
+**v3.2 planning (2026-04-05).** Principal review after v3.1 gate closure: `submit` dropped (WSL2 is
+Linux, `SendInput` is Win32 — no path), audio feedback proposed as replacement scope. PM concurred
+on deferral, accepted audio feedback as headline, recommended global hotkeys stay as v3.3 (separate
+triage surface). Two v3.0 gate sub-items not explicitly verified at the gate session: HTTP fallback
+in the Tauri webview and sidecar cleanup on close (`ps aux | grep uvicorn` clean after quit).
+Neither blocks v3.2 — engineer runs both at the next `make desktop` session and notes results in
+the progress report. `CARGO_MANIFEST_DIR` rework trigger already documented in progress report
+(line 258) — no separate tracking entry needed.
+
 #### v3.2 — Audio Feedback + Clipboard Cleanup
 
 **Deliverable:** Audible confirmation when voice commands fire. All clipboard call sites consistent
