@@ -5,13 +5,17 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 
 COMPOSE_CPU := docker compose -f ops/docker/compose.cpu.yml
 
+# Configurable ports (defaults: API=8000, Web=5173)
+export API_PORT ?= 8000
+export WEB_PORT ?= 5173
+
 dev: gpu-check
 	$(COMPOSE) up --build -d
-	cd apps/web && npm run dev
+	cd apps/web && VITE_API_PORT=$(API_PORT) VITE_PORT=$(WEB_PORT) npm run dev
 
 dev-cpu:
 	$(COMPOSE_CPU) up --build -d
-	cd apps/web && npm run dev
+	cd apps/web && VITE_API_PORT=$(API_PORT) VITE_PORT=$(WEB_PORT) npm run dev
 
 build:
 	$(COMPOSE) build
@@ -27,7 +31,7 @@ api:
 	$(COMPOSE) up --build
 
 web:
-	cd apps/web && npm run dev
+	cd apps/web && VITE_API_PORT=$(API_PORT) VITE_PORT=$(WEB_PORT) npm run dev
 
 desktop:
 	@cleanup() { \

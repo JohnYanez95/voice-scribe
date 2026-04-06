@@ -7,8 +7,9 @@ import type {
   WsMessage,
 } from "../types";
 
-const BASE_URL = "http://localhost:8000";
-const WS_BASE_URL = "ws://localhost:8000";
+const API_PORT = import.meta.env.VITE_API_PORT || "8000";
+const BASE_URL = `http://localhost:${API_PORT}`;
+const WS_BASE_URL = `ws://localhost:${API_PORT}`;
 
 export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE_URL}/health`);
