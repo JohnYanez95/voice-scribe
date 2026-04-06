@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface TranscriptProps {
   text: string;
@@ -6,10 +6,60 @@ interface TranscriptProps {
   isLoading: boolean;
   onTextChange: (text: string) => void;
   showComparison: boolean;
+  isRecordingActive: boolean;
 }
 
-export function Transcript({ text, rawText, isLoading, onTextChange, showComparison }: TranscriptProps) {
+/** Pixel tolerance for float-rounding in scrollTop comparisons. */
+const SCROLL_THRESHOLD = 2;
+
+export function Transcript({
+  text,
+  rawText,
+  isLoading,
+  onTextChange,
+  showComparison,
+  isRecordingActive,
+}: TranscriptProps) {
   const [copied, setCopied] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isPinnedRef = useRef(true);
+
+  // Auto-scroll to bottom when text changes, if pinned.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el && isPinnedRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [text]);
+
+  // Re-engage pin when a new recording session starts.
+  useEffect(() => {
+    if (isRecordingActive) {
+      isPinnedRef.current = true;
+    }
+  }, [isRecordingActive]);
+
+  // onScroll: detect whether the user is at the bottom of the textarea.
+  // Fires on both user scroll and programmatic scrollTop assignment.
+  // Programmatic scroll lands at the bottom, so isPinned stays true — no conflict.
+  const handleScroll = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const atBottom =
+      el.scrollTop + el.clientHeight >= el.scrollHeight - SCROLL_THRESHOLD;
+    isPinnedRef.current = atBottom;
+  }, []);
+
+  // onChange only fires on user input (keystrokes), never on React prop changes.
+  // Unpin so the viewport stays where the user is editing — new segments arriving
+  // via prop updates won't yank the scroll position away.
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      isPinnedRef.current = false;
+      onTextChange(e.target.value);
+    },
+    [onTextChange]
+  );
 
   const handleCopy = useCallback(async () => {
     try {
@@ -58,8 +108,10 @@ export function Transcript({ text, rawText, isLoading, onTextChange, showCompari
         </div>
       )}
       <textarea
+        ref={textareaRef}
         value={text}
-        onChange={(e) => onTextChange(e.target.value)}
+        onChange={handleChange}
+        onScroll={handleScroll}
         rows={8}
         placeholder="Transcript will appear here..."
       />

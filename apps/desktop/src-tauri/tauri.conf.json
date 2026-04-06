@@ -8,6 +8,7 @@
     "frontendDist": "../../web/dist/"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Voice Scribe",
@@ -18,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:8000 ws://localhost:8000; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8000 ws://localhost:8000 http://127.0.0.1:8001; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:"
     }
   },
   "plugins": {

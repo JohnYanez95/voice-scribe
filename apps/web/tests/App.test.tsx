@@ -10,7 +10,7 @@
  * Push-to-talk behavior is the same as v2.1 (unchanged) and is not re-tested here.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { App } from "../src/app/App";
 import type { WsCompleteMessage } from "../src/types";
@@ -445,5 +445,109 @@ describe("App — backend readiness gate", () => {
       expect(recordBtn).toBeTruthy();
       expect((recordBtn as HTMLButtonElement).disabled).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Desktop voice command clipboard routing
+// ---------------------------------------------------------------------------
+
+describe("App — desktop voice command clipboard routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    streamCalls.length = 0;
+    localStorage.clear();
+    localStorage.setItem("voice-scribe-recording-mode", "continuous");
+    // Start with isListening=false so the readiness gate renders
+    // "Starting backend..." before backend-ready fires.
+    mockIsListening = false;
+
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  afterEach(() => {
+    delete (window as any).__TAURI__;
+  });
+
+  it('"copy" voice command routes through HTTP clipboard server, not navigator.clipboard', async () => {
+    // Set up __TAURI__ with event.listen so backend-ready can fire
+    let listenCallback: (() => void) | undefined;
+    (window as any).__TAURI__ = {
+      event: {
+        listen: vi.fn((_event: string, cb: () => void) => {
+          listenCallback = cb;
+          return Promise.resolve(() => {});
+        }),
+      },
+    };
+
+    // Mock fetch for the HTTP clipboard server (127.0.0.1:8001)
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+
+    // Re-import App so isDesktop() evaluates with __TAURI__ present
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+
+    // Verify isDesktop returns true in this test environment
+    const { isDesktop } = await import("../src/services/platform");
+    expect(isDesktop()).toBe(true);
+
+    render(<TauriApp />);
+
+    // Button shows "Starting backend..." initially (readiness gate)
+    expect(screen.getByText("Starting backend...")).toBeTruthy();
+
+    // Fire backend-ready event — button transitions to "Record"
+    act(() => { listenCallback!(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Click Record to start continuous mode — switch isListening so
+    // useVAD mock reflects active listening state
+    mockIsListening = true;
+    act(() => { fireEvent.click(screen.getByText("Record")); });
+
+    // Accumulate transcript via normal VAD cycle
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => {
+      capturedOnComplete!({
+        type: "complete",
+        raw: "hello raw",
+        cleaned: "hello",
+        language: "en",
+        duration: 1.0,
+        processing_mode: "ws",
+        model_name: "small",
+      });
+    });
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+
+    // Fire "copy" voice command
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => {
+      capturedOnComplete!({
+        type: "complete",
+        raw: "Copy.",
+        cleaned: "Copy.",
+        language: "en",
+        duration: 0.5,
+        processing_mode: "ws",
+        model_name: "small",
+      });
+    });
+
+    // Assert: HTTP clipboard server was called with transcript text
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        "http://127.0.0.1:8001/clipboard",
+        { method: "POST", body: "hello" }
+      );
+    });
+
+    // Assert: navigator.clipboard.writeText was NOT called
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 });

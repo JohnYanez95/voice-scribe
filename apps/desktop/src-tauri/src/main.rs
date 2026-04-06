@@ -189,6 +189,13 @@ fn kill_sidecar(child: &mut Child) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        // Clipboard write via HTTP + arboard.
+        // The Tauri clipboard plugin (tauri-plugin-clipboard-manager) was tested
+        // and confirmed to crash WebKitGTK with a NeedDebuggerBreak trap when
+        // called without user activation (voice commands fire from WebSocket
+        // callbacks — no user gesture). The HTTP server bypasses WebKitGTK
+        // entirely: fetch() POST has no activation requirement, and arboard
+        // writes to the system clipboard from the Rust process.
         .manage(Sidecar(Mutex::new(None)))
         .setup(|app| {
             // Resolve the API directory relative to CARGO_MANIFEST_DIR
@@ -236,6 +243,79 @@ fn main() {
                 }
             }
 
+
+            // Clipboard HTTP endpoint on 127.0.0.1:8001.
+            // WebKitGTK gates all Tauri IPC (invoke / emit) on user activation.
+            // Voice commands fire from WebSocket callbacks — no user gesture — so
+            // every JS→Rust path through window.webkit.messageHandlers is blocked.
+            // A plain fetch() POST bypasses WebKitGTK entirely: the request travels
+            // over TCP to this listener, arboard writes to the system clipboard,
+            // and the browser never sees a clipboard operation.
+            let server = tiny_http::Server::http("127.0.0.1:8001").map_err(|e| {
+                format!("Clipboard server failed to bind 127.0.0.1:8001: {}", e)
+            })?;
+            eprintln!("Clipboard server listening on 127.0.0.1:8001");
+
+            thread::spawn(move || {
+                for mut request in server.incoming_requests() {
+                    let cors = tiny_http::Header::from_bytes(
+                        &b"Access-Control-Allow-Origin"[..],
+                        &b"http://localhost:5173"[..],
+                    )
+                    .unwrap();
+
+                    if request.method() != &tiny_http::Method::Post
+                        || request.url() != "/clipboard"
+                    {
+                        let resp = tiny_http::Response::from_string("Not Found")
+                            .with_status_code(404)
+                            .with_header(cors);
+                        let _ = request.respond(resp);
+                        continue;
+                    }
+
+                    let mut body = String::new();
+                    if let Err(e) = request.as_reader().read_to_string(&mut body) {
+                        eprintln!("Clipboard request read failed: {}", e);
+                        let resp = tiny_http::Response::from_string(format!("Read error: {}", e))
+                            .with_status_code(500)
+                            .with_header(cors);
+                        let _ = request.respond(resp);
+                        continue;
+                    }
+
+                    match arboard::Clipboard::new() {
+                        Ok(mut clipboard) => match clipboard.set_text(&body) {
+                            Ok(()) => {
+                                let resp = tiny_http::Response::from_string("")
+                                    .with_status_code(204)
+                                    .with_header(cors);
+                                let _ = request.respond(resp);
+                            }
+                            Err(e) => {
+                                eprintln!("Clipboard set_text failed: {}", e);
+                                let resp = tiny_http::Response::from_string(format!(
+                                    "Clipboard write failed: {}",
+                                    e
+                                ))
+                                .with_status_code(500)
+                                .with_header(cors);
+                                let _ = request.respond(resp);
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("Clipboard init failed: {}", e);
+                            let resp = tiny_http::Response::from_string(format!(
+                                "Clipboard init failed: {}",
+                                e
+                            ))
+                            .with_status_code(500)
+                            .with_header(cors);
+                            let _ = request.respond(resp);
+                        }
+                    }
+                }
+            });
 
             // Spawn sidecar
             let mut child = match spawn_sidecar(&api_dir) {

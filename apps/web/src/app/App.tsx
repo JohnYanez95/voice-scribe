@@ -8,20 +8,17 @@ import { useVAD } from "../hooks/useVAD";
 import { encodeWav } from "../utils/audio";
 import { detectVoiceCommand } from "../utils/voiceCommands";
 import { streamTranscribeAudio, transcribeAudio } from "../services/api";
+import { isDesktop, writeClipboard } from "../services/platform";
 import type { RecordingMode, RecordingState } from "../types";
 
 const PARAGRAPH_BREAK_MS = 3000;
-
-// Runtime platform detection — no @tauri-apps/api import needed (deferred to v3.1).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const isDesktop = typeof (window as any).__TAURI__ !== "undefined";
 
 export function App() {
   const [state, setState] = useState<RecordingState>("idle");
   // In Tauri, the sidecar needs time to start. Gate recording until the Rust
   // side emits "backend-ready". In the browser, the backend is already running
   // (or will surface errors at transcription time) — no gate.
-  const [backendReady, setBackendReady] = useState(!isDesktop);
+  const [backendReady, setBackendReady] = useState(!isDesktop());
   const [transcript, setTranscript] = useState("");
   const [rawTranscript, setRawTranscript] = useState("");
   const [error, setError] = useState("");
@@ -73,7 +70,7 @@ export function App() {
 
   // Listen for sidecar readiness in Tauri context
   useEffect(() => {
-    if (!isDesktop) return;
+    if (!isDesktop()) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tauriEvent = (window as any).__TAURI__?.event;
     if (!tauriEvent) return;
@@ -141,7 +138,9 @@ export function App() {
             switch (command) {
               case "copy":
                 if (transcriptRef.current) {
-                  navigator.clipboard.writeText(transcriptRef.current).catch(() => {});
+                  writeClipboard(transcriptRef.current).catch((err) => {
+                    console.error("[copy command] clipboard write failed:", err);
+                  });
                 }
                 break;
               case "clear":
@@ -311,7 +310,9 @@ export function App() {
 
   const handleCopyTranscript = useCallback(() => {
     if (transcript) {
-      navigator.clipboard.writeText(transcript).catch(() => {});
+      writeClipboard(transcript).catch((err) => {
+        console.error("[hotkey] clipboard write failed:", err);
+      });
     }
   }, [transcript]);
 
@@ -380,6 +381,7 @@ export function App() {
         isLoading={state === "processing"}
         onTextChange={setTranscript}
         showComparison={showRawComparison}
+        isRecordingActive={isActiveSession}
       />
       <Settings
         isOpen={settingsOpen}
