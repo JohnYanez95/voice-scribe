@@ -1,0 +1,24 @@
+flowchart LR
+    hf(["HuggingFace Hub"])
+
+    subgraph container ["Container"]
+        direction TB
+        cache["/cache"]
+        model["WhisperModel"]
+        cache --> model
+    end
+
+    subgraph hostfs ["Host"]
+        hostcache["data/cache/<br/>(gitignored, persistent)"]
+    end
+
+    hf -.->|"first run only"| cache
+    cache <-->|"volume mount"| hostcache
+
+    classDef cloudStyle fill:#e0e0e0,stroke:#999999,color:#777
+    classDef containerStyle fill:#ffd6b3,stroke:#cc7700,color:#333
+    classDef hostStyle fill:#ddeeff,stroke:#5588bb,color:#333
+
+    class hf cloudStyle
+    class cache,model containerStyle
+    class hostcache hostStyle

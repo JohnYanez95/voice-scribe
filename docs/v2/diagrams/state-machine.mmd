@@ -1,0 +1,46 @@
+stateDiagram-v2
+    direction LR
+
+    classDef idleClass    fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef activeClass  fill:#ffdddd,stroke:#cc4444,color:#333
+    classDef inflightClass fill:#fffacc,stroke:#b8900a,color:#333
+    classDef successClass fill:#ddf5dd,stroke:#448844,color:#333
+    classDef failureClass fill:#ffe0e0,stroke:#aa3333,color:#555
+    classDef uiClass      fill:#ede8ff,stroke:#7755aa,color:#333
+
+    idle --> recording : record<br/>(push-to-talk)
+    idle --> listening : start continuous
+
+    recording --> processing : stop<br/>(hotkey / button)
+
+    listening : Mic open<br/>VAD active<br/>silence discarded
+    listening --> processing : speech detected<br/>(VAD fires)
+    listening --> done : stop continuous
+    listening --> error : VAD failure
+
+    state processing {
+        direction TB
+        connecting : connecting<br/>spinner · text empty
+        receiving : receiving<br/>partial transcript visible
+        connecting --> receiving
+    }
+
+    processing --> done : complete<br/>(push-to-talk /<br/>final segment)
+    processing --> listening : complete<br/>(continuous)
+    processing --> error : error
+
+    done --> idle : record
+    error --> idle : record
+
+    idle --> settings : open settings<br/>(gear / hotkey)
+    done --> settings : open settings
+    error --> settings : open settings
+    settings --> idle : close settings
+
+    class idle idleClass
+    class recording activeClass
+    class listening activeClass
+    class processing inflightClass
+    class done successClass
+    class error failureClass
+    class settings uiClass

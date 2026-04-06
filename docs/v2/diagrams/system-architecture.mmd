@@ -1,0 +1,28 @@
+flowchart TB
+    subgraph host ["Host"]
+        direction TB
+        mic["Microphone<br/>(getUserMedia)"]
+        ui["React UI<br/>(localhost:5173)"]
+        clip["Clipboard"]
+        mic --> ui --> clip
+    end
+
+    clip --> transport["HTTP / WebSocket<br/>over localhost"]
+
+    subgraph docker ["Docker Container"]
+        direction TB
+        api["FastAPI"]
+        ff["ffmpeg"]
+        w["faster-whisper"]
+        api --> ff --> w
+    end
+
+    transport --> api
+
+    classDef hostStyle fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef containerStyle fill:#ffd6b3,stroke:#cc7700,color:#333
+    classDef transportStyle fill:#f0f0f0,stroke:#999999,color:#555
+
+    class mic,ui,clip hostStyle
+    class api,ff,w containerStyle
+    class transport transportStyle

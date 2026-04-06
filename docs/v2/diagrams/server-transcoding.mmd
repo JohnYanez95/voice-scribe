@@ -1,0 +1,26 @@
+flowchart LR
+    subgraph inputs ["Accepted MIME types"]
+        webm["audio/webm"]
+        ogg["audio/ogg"]
+        wav["audio/wav"]
+        mp4["audio/mp4"]
+        mp3["audio/mpeg"]
+    end
+
+    ffmpeg["ffmpeg<br/>-ar 16000 -ac 1 -f wav"]
+    output["16 kHz mono WAV<br/>(model input format)"]
+
+    webm --> ffmpeg
+    ogg --> ffmpeg
+    wav --> ffmpeg
+    mp4 --> ffmpeg
+    mp3 --> ffmpeg
+    ffmpeg --> output
+
+    classDef inputStyle fill:#ffdddd,stroke:#cc4444,color:#333
+    classDef procStyle fill:#ffd6b3,stroke:#cc7700,color:#333
+    classDef outputStyle fill:#ddf5dd,stroke:#448844,color:#333
+
+    class webm,ogg,wav,mp4,mp3 inputStyle
+    class ffmpeg procStyle
+    class output outputStyle

@@ -1,0 +1,19 @@
+flowchart TB
+    gpu["NVIDIA GPU<br/>(hardware)"]
+    driver["Windows NVIDIA Driver<br/>(provides CUDA to WSL)"]
+    wsl["WSL2 Kernel<br/>(/dev/dxg virtual device)"]
+    docker["Docker Desktop<br/>(WSL2 backend, --gpus all)"]
+    compose["Docker Compose<br/>(nvidia runtime, deploy.resources)"]
+    app["faster-whisper<br/>(CUDA 12.6, float16 inference)"]
+
+    gpu --> driver --> wsl --> docker --> compose --> app
+
+    classDef hwStyle fill:#e0e0e0,stroke:#999999,color:#333
+    classDef osStyle fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef dockerStyle fill:#ffd6b3,stroke:#cc7700,color:#333
+    classDef appStyle fill:#ddf5dd,stroke:#448844,color:#333
+
+    class gpu hwStyle
+    class driver,wsl osStyle
+    class docker,compose dockerStyle
+    class app appStyle

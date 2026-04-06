@@ -1,0 +1,21 @@
+flowchart TB
+    s1["1. Browser records audio<br/>(webm/opus)"]
+    s2["2. POST /transcribe<br/>(multipart/form-data)"]
+    s3["3. Validate MIME type<br/>and file size"]
+    s4["4. Write upload to<br/>temp file"]
+    s5["5. ffmpeg transcode<br/>to 16 kHz mono WAV"]
+    s6["6. faster-whisper<br/>inference"]
+    s7["7. Delete temp files<br/>(finally block)"]
+    s8["8. Return transcript<br/>JSON to browser"]
+
+    s1 --> s2 --> s3 --> s4 --> s5 --> s6 --> s7 --> s8
+
+    classDef frontend fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef validation fill:#fffacc,stroke:#b8900a,color:#333
+    classDef processing fill:#ffd6b3,stroke:#cc7700,color:#333
+    classDef cleanup fill:#ddf5dd,stroke:#448844,color:#333
+
+    class s1,s8 frontend
+    class s2,s3 validation
+    class s4,s5,s6 processing
+    class s7 cleanup

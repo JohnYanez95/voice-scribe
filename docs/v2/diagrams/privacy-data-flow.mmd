@@ -1,0 +1,41 @@
+flowchart TD
+    subgraph ui ["UI Context (browser)"]
+        mic["Microphone audio"]
+        vad["VAD<br/>silence discarded"]
+        blob["Audio blob"]
+        mic --> vad --> blob
+    end
+
+    blob --> http["HTTP POST"]
+    blob --> wsIn["WebSocket binary"]
+
+    subgraph backend ["Backend (Docker container)"]
+        tmp1["Temp file — input"]
+        tmp2["Temp file — WAV"]
+        txt["Transcript text"]
+        del["Deleted"]
+        tmp1 --> tmp2
+        tmp2 -- inference --> txt
+        tmp2 --> del
+    end
+
+    http --> tmp1
+    wsIn --> tmp1
+
+    txt --> resp["JSON response"]
+    txt --> wsOut["WS segments"]
+
+    resp --> area["Editable textarea"]
+    wsOut --> area
+
+    area --> clip["Clipboard"]
+
+    classDef sensitive fill:#ffdddd,stroke:#cc4444
+    classDef ephemeral fill:#fffacc,stroke:#b8900a
+    classDef output fill:#ddf5dd,stroke:#448844
+    classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
+
+    class mic,blob sensitive
+    class vad,http,wsIn,tmp1,tmp2 ephemeral
+    class txt,resp,wsOut,area,clip output
+    class del deleted

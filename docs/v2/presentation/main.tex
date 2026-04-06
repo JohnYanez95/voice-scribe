@@ -13,8 +13,6 @@
 \usepackage{wrapfig}
 \usepackage{multicol}
 \usepackage{listings}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning, shapes.geometric, shapes.symbols, fit, backgrounds, calc}
 
 \newcommand{\nt}{$\underline{\text{Note}}:$ }
 \newcommand{\ex}{$\underline{\text{Example}}:$ }
@@ -34,7 +32,7 @@
     backgroundcolor=\color{gray!5},
 }
 
-\title[Voice Scribe]{Voice Scribe v2--v3\\Local-First Speech-to-Text for Development Workflows}
+\title[Voice Scribe]{Voice Scribe v2\\Local-First Speech-to-Text for Development Workflows}
 \author[J. Yanez]{Johnraymond Yanez}
 \institute[Voice Scribe]{Voice Scribe}
 \date{\today}
@@ -59,7 +57,6 @@
         \item \textbf{Security} --- Threat model, privacy, operational telemetry
         \item \textbf{Development} --- Workflow, tooling, and testing
         \item \textbf{Roadmap, v2.0+} --- Milestones and what just shipped
-        \item \textbf{v3.0} --- Desktop application, sidecar lifecycle, triage
     \end{itemize}
 \end{frame}
 
@@ -144,9 +141,8 @@
     \begin{itemize}\setlength{\itemsep}{2pt}
         \item The \textbf{frontend} runs on the host --- it owns browser APIs
               (microphone, clipboard, DOM) that cannot exist inside a container
-        \item The \textbf{backend} runs GPU-accelerated inference via CUDA.
-              Two runtime contexts: Docker container (browser mode) or
-              bare-host Python sidecar (desktop/Tauri mode)
+        \item The \textbf{backend} runs GPU-accelerated inference via CUDA
+              inside a Docker container with GPU passthrough
         \item Communication uses WebSocket (default, v2.1+) and HTTP
               (fallback). No reverse proxy, no message queue
         \item Both services bind to \texttt{localhost} only --- never
@@ -163,78 +159,13 @@
 
 \begin{frame}{System Architecture --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.62, every node/.style={transform shape},
-        node distance=0.25cm,
-        box/.style={draw, rounded corners=3pt, minimum width=3.2cm,
-                    minimum height=0.4cm, font=\scriptsize, align=center},
-        host/.style={box, fill=blue!12},
-        container/.style={box, fill=orange!15},
-        sidecar/.style={box, fill=green!12},
-        transport/.style={draw, rounded corners=3pt, minimum width=2.6cm,
-                    minimum height=0.4cm, font=\tiny, align=center,
-                    fill=gray!8, dashed},
-        arr/.style={-{Stealth[length=4pt]}, thick},
-        lbl/.style={font=\tiny, text=gray},
-        boundary/.style={draw, dashed, rounded corners=5pt, gray,
-                         inner sep=5pt},
-    ]
-        % Host boundary — shared UI
-        \node[host] (mic) {Microphone (getUserMedia)};
-        \node[host, below=0.25cm of mic] (ui) {React UI (localhost:5173)};
-        \node[host, below=0.25cm of ui] (clip) {Clipboard};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(mic)(ui)(clip),
-                  label={[font=\scriptsize, text=gray]above left:Host / Webview}] {};
-        \end{scope}
-
-        % Transport layer
-        \node[transport] (trans) [below=0.4cm of clip]
-              {HTTP / WebSocket over localhost};
-
-        % Arrows — host internal flow
-        \draw[arr] (mic) -- (ui);
-        \draw[arr] (ui) -- (clip);
-        \draw[arr] (clip) -- (trans);
-
-        % Left: Docker path
-        \node[container, below left=0.5cm and 0.6cm of trans] (api1) {FastAPI};
-        \node[container, below=0.2cm of api1] (ff1) {ffmpeg};
-        \node[container, below=0.2cm of ff1] (w1) {faster-whisper};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(api1)(ff1)(w1),
-                  label={[font=\scriptsize, text=gray]left:Docker Container}] {};
-        \end{scope}
-
-        % Right: Sidecar path
-        \node[sidecar, below right=0.5cm and 0.6cm of trans] (api2) {FastAPI};
-        \node[sidecar, below=0.2cm of api2] (ff2) {ffmpeg};
-        \node[sidecar, below=0.2cm of ff2] (w2) {faster-whisper};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(api2)(ff2)(w2),
-                  label={[font=\scriptsize, text=gray]right:Bare-host Sidecar}] {};
-        \end{scope}
-
-        % Arrows to backends
-        \draw[arr] (trans.south) -- (api1.north);
-        \draw[arr] (trans.south) -- (api2.north);
-        \draw[arr] (api1) -- (ff1);
-        \draw[arr] (ff1) -- (w1);
-        \draw[arr] (api2) -- (ff2);
-        \draw[arr] (ff2) -- (w2);
-
-        % Mode labels
-        \node[lbl, below left=0.05cm and 0.0cm of api1.north west] {Browser mode};
-        \node[lbl, below right=0.05cm and 0.0cm of api2.north east] {Desktop mode};
-    \end{tikzpicture}
+    \includegraphics[height=0.68\textheight,keepaspectratio]{images/system-architecture.png}
     \end{center}
 
     \vspace{0.1em}
-    {\scriptsize Same backend, different isolation boundary. Browser mode
-    uses Docker; desktop mode uses a Tauri-managed sidecar.
-    Both bind to \texttt{localhost:8000}.}
+    {\scriptsize The frontend runs on the host; the backend runs inside a
+    Docker container with GPU passthrough.
+    Both bind to \texttt{localhost}.}
 \end{frame}
 
 
@@ -250,7 +181,6 @@
         STT Engine & faster-whisper (large-v3) & Accuracy/speed on local GPU \\
         Transcode  & ffmpeg (in container)     & Normalizes browser audio to WAV \\
         Container  & Docker, CUDA 12.6         & GPU isolation, reproducibility \\
-        Desktop    & Tauri v2, Rust            & Native OS access, sidecar management \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -288,39 +218,7 @@
 
 \begin{frame}{Request Lifecycle --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.92, every node/.style={transform shape},
-        node distance=0.28cm,
-        stepbox/.style={draw, rounded corners=2pt, minimum width=5.5cm,
-                     minimum height=0.38cm, font=\scriptsize, align=center},
-        fe/.style={stepbox, fill=blue!10},
-        val/.style={stepbox, fill=yellow!12},
-        proc/.style={stepbox, fill=orange!12},
-        clean/.style={stepbox, fill=green!10},
-        arr/.style={-{Stealth[length=3pt]}, thick},
-        brace/.style={decorate, decoration={brace, amplitude=4pt, mirror}},
-        lbl/.style={font=\tiny, text=gray},
-    ]
-        \node[fe]    (s1) {1. Browser records audio (webm/opus)};
-        \node[val,   below=of s1] (s2) {2. POST /transcribe (multipart/form-data)};
-        \node[val,   below=of s2] (s3) {3. Validate MIME type and file size};
-        \node[proc,  below=of s3] (s4) {4. Write upload to temp file};
-        \node[proc,  below=of s4] (s5) {5. ffmpeg transcode to 16kHz mono WAV};
-        \node[proc,  below=of s5] (s6) {6. faster-whisper inference};
-        \node[clean, below=of s6] (s7) {7. Delete temp files (finally block)};
-        \node[fe,    below=of s7] (s8) {8. Return transcript JSON to browser};
-
-        \foreach \a/\b in {s1/s2, s2/s3, s3/s4, s4/s5, s5/s6, s6/s7, s7/s8} {
-            \draw[arr] (\a) -- (\b);
-        }
-
-        % Side labels
-        \node[lbl, right=0.4cm of s1] {frontend};
-        \node[lbl, right=0.4cm of s3] {$\le$ 10\,MB, MIME check};
-        \node[lbl, right=0.4cm of s5] {30\,s timeout};
-        \node[lbl, right=0.4cm of s6] {$\le$ 60\,s audio};
-        \node[lbl, right=0.4cm of s7] {guaranteed cleanup};
-        \node[lbl, right=0.4cm of s8] {frontend};
-    \end{tikzpicture}
+    \includegraphics[height=0.72\textheight,keepaspectratio]{images/request-lifecycle.png}
     \end{center}
 
     \vspace{0.1em}
@@ -335,14 +233,14 @@
 \section{Container Strategy}
 % =========================================================================
 
-\begin{frame}{Host vs.\ Container vs.\ Sidecar}
+\begin{frame}{Host vs.\ Container}
     \small
-    Two runtime modes share the same UI/inference boundary.
+    The two-service boundary isolates browser APIs from GPU inference.
 
-    \vspace{0.2em}
+    \vspace{0.4em}
     \begin{columns}[T]
-        \begin{column}{0.30\textwidth}
-            \textbf{UI Layer}\\{\scriptsize (browser or webview)}
+        \begin{column}{0.45\textwidth}
+            \textbf{Host (Browser)}
             \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Microphone access
                 \item Audio recording
@@ -351,30 +249,22 @@
                 \item Clipboard access
             \end{itemize}
         \end{column}
-        \begin{column}{0.30\textwidth}
-            \textbf{Docker Container}\\{\scriptsize (browser mode)}
+        \begin{column}{0.45\textwidth}
+            \textbf{Docker Container}
             \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
                 \item Model weights
                 \item ffmpeg transcode
-                \item GPU inference
+                \item GPU inference (CUDA)
                 \item MIME validation
                 \item Temp file lifecycle
             \end{itemize}
         \end{column}
-        \begin{column}{0.33\textwidth}
-            \textbf{Bare-host Sidecar}\\{\scriptsize (desktop mode)}
-            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-                \item Same five responsibilities
-                \item Tauri manages lifecycle
-                \item CUDA library discovery
-                \item WebKitGTK permissions
-            \end{itemize}
-        \end{column}
     \end{columns}
 
-    \vspace{0.2em}
-    {\footnotesize Backend code is identical --- only the process boundary changes.
-    Desktop mode adds: sidecar spawn, health poll, CUDA runtime injection.}
+    \vspace{0.3em}
+    {\footnotesize The frontend cannot run inside the container (no mic, no DOM).
+    The backend must run inside the container (GPU passthrough, CUDA isolation).
+    Each service does what only it can do.}
 \end{frame}
 
 
@@ -406,37 +296,7 @@
 
 \begin{frame}{GPU Passthrough --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.9, every node/.style={transform shape},
-        node distance=0.45cm,
-        layer/.style={draw, rounded corners=3pt, minimum width=6cm,
-                      minimum height=0.5cm, font=\small, align=center},
-        hw/.style={layer, fill=gray!15},
-        os/.style={layer, fill=blue!10},
-        dock/.style={layer, fill=orange!12},
-        app/.style={layer, fill=green!12},
-        arr/.style={-{Stealth[length=4pt]}, thick},
-        lbl/.style={font=\tiny, text=gray},
-    ]
-        \node[hw]   (gpu)    {NVIDIA GPU (hardware)};
-        \node[os,   below=of gpu]   (driver) {Windows NVIDIA Driver (v591.86, validated 2026-04-04)};
-        \node[os,   below=of driver](wsl)    {WSL2 Kernel (GPU bridge)};
-        \node[dock, below=of wsl]   (docker) {Docker Desktop (WSL2 backend)};
-        \node[dock, below=of docker](compose){Docker Compose (nvidia runtime)};
-        \node[app,  below=of compose](app)   {faster-whisper (CUDA 12.6)};
-
-        \draw[arr] (gpu) -- (driver);
-        \draw[arr] (driver) -- (wsl);
-        \draw[arr] (wsl) -- (docker);
-        \draw[arr] (docker) -- (compose);
-        \draw[arr] (compose) -- (app);
-
-        % Annotations
-        \node[lbl, right=0.3cm of driver] {provides CUDA to WSL};
-        \node[lbl, right=0.3cm of wsl]    {/dev/dxg virtual device};
-        \node[lbl, right=0.3cm of docker]  {--gpus all};
-        \node[lbl, right=0.3cm of compose] {deploy.resources.reservations};
-        \node[lbl, right=0.3cm of app]     {float16 inference};
-    \end{tikzpicture}
+    \includegraphics[height=0.68\textheight,keepaspectratio]{images/gpu-passthrough.png}
     \end{center}
 
     \vspace{0.2em}
@@ -469,45 +329,7 @@
 
 \begin{frame}{Model Caching --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.85, every node/.style={transform shape},
-        node distance=0.4cm,
-        box/.style={draw, rounded corners=3pt, minimum width=3cm,
-                    minimum height=0.55cm, font=\small, align=center},
-        cbox/.style={box, fill=orange!15},
-        hbox/.style={box, fill=blue!10},
-        cloudnode/.style={draw, cloud, cloud puffs=8, cloud puff arc=120,
-                      minimum width=2.2cm, minimum height=1cm,
-                      font=\scriptsize, align=center, fill=gray!10},
-        arr/.style={-{Stealth[length=5pt]}, thick},
-        lbl/.style={font=\tiny, text=gray},
-        boundary/.style={draw, dashed, rounded corners=5pt, gray, inner sep=12pt},
-    ]
-        % HuggingFace — top center, clearly above both boundaries
-        \node[cloudnode] (hf) at (3.0, 2.0) {HuggingFace\\Hub};
-
-        % Container — /cache on top so HuggingFace arrow drops cleanly to it
-        \node[cbox] (cache) at (0, 0) {/cache};
-        \node[cbox, below=0.35cm of cache] (model) {WhisperModel};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(cache)(model),
-                  label={[font=\scriptsize, text=gray]above left:Container}] (cbound) {};
-        \end{scope}
-
-        % Host — pushed right so volume mount label has clear air
-        \node[hbox] (hostcache) at (7.0, 0) {data/cache/};
-        \node[lbl, below=0.12cm of hostcache] {gitignored, persistent};
-
-        \begin{scope}[on background layer]
-            \node[boundary, fit=(hostcache),
-                  label={[font=\scriptsize, text=gray]above right:Host}] (hbound) {};
-        \end{scope}
-
-        % Arrows
-        \draw[arr, dashed] (hf.west) -- node[above left, lbl]{first run only} (cache.north);
-        \draw[arr, <->] (cbound.east) -- node[above, font=\scriptsize]{volume mount} (hbound.west);
-        \draw[arr] (cache) -- (model);
-    \end{tikzpicture}
+    \includegraphics[width=0.85\textwidth,keepaspectratio]{images/model-caching.png}
     \end{center}
 
     \vspace{0.1em}
@@ -548,32 +370,7 @@
 
 \begin{frame}{Browser Recording --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[scale=0.88, every node/.style={transform shape},
-        node distance=0.35cm,
-        box/.style={draw, rounded corners=2pt, minimum width=3.2cm,
-                    minimum height=0.42cm, font=\scriptsize, align=center},
-        api/.style={box, fill=blue!10},
-        check/.style={draw, diamond, aspect=2.2, font=\scriptsize,
-                      align=center, fill=yellow!15, inner sep=1pt},
-        err/.style={box, fill=red!12},
-        arr/.style={-{Stealth[length=4pt]}, thick},
-        lbl/.style={font=\tiny, text=gray},
-    ]
-        \node[api]   (gum)    {getUserMedia(\{audio: true\})};
-        \node[check, below=0.45cm of gum] (sup)  {isTypeSupported?};
-        \node[err,   below left=0.55cm and 0.8cm of sup]  (error) {Show codec error};
-        \node[api,   below right=0.55cm and 0.8cm of sup] (rec)   {new MediaRecorder};
-        \node[api,   below=0.4cm of rec]   (chunks) {Accumulate chunks};
-        \node[api,   below=0.4cm of chunks](blob)   {Assemble Blob};
-        \node[api,   below=0.4cm of blob]  (post)   {POST to /transcribe};
-
-        \draw[arr] (gum) -- (sup);
-        \draw[arr] (sup) -- node[above left, font=\tiny]{no} (error);
-        \draw[arr] (sup) -- node[above right, font=\tiny]{yes} (rec);
-        \draw[arr] (rec) -- node[right, lbl]{ondataavailable} (chunks);
-        \draw[arr] (chunks) -- node[right, lbl]{onstop} (blob);
-        \draw[arr] (blob) -- (post);
-    \end{tikzpicture}
+    \includegraphics[height=0.68\textheight,keepaspectratio]{images/browser-recording.png}
     \end{center}
 
     \vspace{0.2em}
@@ -611,44 +408,7 @@
 
 \begin{frame}{Server-Side Transcoding --- Diagram}
     \begin{center}
-    \begin{tikzpicture}[
-        node distance=0.4cm,
-        fmt/.style={draw, rounded corners=2pt, minimum width=1.6cm,
-                    minimum height=0.42cm, font=\scriptsize, align=center,
-                    fill=red!10},
-        proc/.style={draw, rounded corners=3pt, minimum width=2.5cm,
-                     minimum height=0.8cm, font=\small\bfseries,
-                     align=center, fill=orange!20},
-        outbox/.style={draw, rounded corners=3pt, minimum width=2.8cm,
-                    minimum height=0.6cm, font=\small, align=center,
-                    fill=green!15},
-        arr/.style={-{Stealth[length=4pt]}, thick},
-        lbl/.style={font=\tiny, text=gray},
-    ]
-        % Input formats
-        \node[fmt] (webm) at (0, 0.0) {audio/webm};
-        \node[fmt] (ogg)  at (0, -0.6) {audio/ogg};
-        \node[fmt] (wav)  at (0, -1.2) {audio/wav};
-        \node[fmt] (mp4)  at (0, -1.8) {audio/mp4};
-        \node[fmt] (mp3)  at (0, -2.4) {audio/mpeg};
-
-        % ffmpeg
-        \node[proc] (ffmpeg) at (4.0, -1.2) {ffmpeg};
-
-        % Output
-        \node[outbox] (output) at (7.5, -1.2) {16\,kHz mono WAV};
-
-        % Arrows
-        \foreach \src in {webm, ogg, wav, mp4, mp3} {
-            \draw[arr] (\src.east) -- (ffmpeg.west);
-        }
-        \draw[arr] (ffmpeg.east) -- (output.west);
-
-        % Labels
-        \node[lbl, above=0.2cm of webm] {Accepted MIME types};
-        \node[lbl, above=0.2cm of output] {Model input format};
-        \node[lbl, below=0.15cm of ffmpeg] {-ar 16000 -ac 1 -f wav};
-    \end{tikzpicture}
+    \includegraphics[width=0.85\textwidth,height=0.55\textheight,keepaspectratio]{images/server-transcoding.png}
     \end{center}
 
     \vspace{0.4em}
@@ -764,7 +524,7 @@
 
 \begin{frame}{State Machine --- Diagram}
     \begin{center}
-    \includegraphics[height=0.52\textheight,keepaspectratio]{images/state-machine.png}
+    \includegraphics[width=0.95\textwidth,keepaspectratio]{images/state-machine.png}
     \end{center}
 
     {\scriptsize
@@ -915,7 +675,6 @@
         \texttt{make build}     & Build the API Docker image \\
         \texttt{make test}      & Run all tests (pytest + vitest) \\
         \texttt{make gpu-check} & Verify GPU/Docker readiness \\
-        \texttt{make desktop}  & Start Tauri desktop app + sidecar \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -1011,8 +770,8 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
         \end{column}
     \end{columns}
 
-    \textbf{v3.0} (complete) --- Tauri shell + sidecar. v3.1: native
-    clipboard; v3.2: \texttt{submit} injection; v3.3: tray + global hotkeys.
+    \textbf{What comes next:} v3 --- desktop application. Native OS access
+    to close the clipboard and injection gaps identified in v2.3.
 \end{frame}
 
 
@@ -1201,134 +960,6 @@ bash ops/scripts/smoke_test.sh ops/scripts/test.mp3
     \textbf{v3.2} adds direct text injection.}
 \end{frame}
 
-
-
-% =========================================================================
-\section{v3.0 --- Desktop Application}
-% =========================================================================
-
-\begin{frame}{v3.0 --- Desktop Application}
-    \small
-    v3.0 is a platform change, not a feature addition. All v2 functionality
-    is preserved --- recording modes, streaming, VAD, voice commands, settings.
-
-    \vspace{0.3em}
-    \begin{columns}[T]
-        \begin{column}{0.48\textwidth}
-            \textbf{What changed}
-            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-                \item Tauri v2 desktop shell
-                \item Python sidecar (replaces Docker)
-                \item Bare-host GPU inference
-                \item WebKitGTK media permissions
-                \item CUDA runtime discovery
-                \item Backend-readiness gate
-            \end{itemize}
-        \end{column}
-        \begin{column}{0.48\textwidth}
-            \textbf{What stayed the same}
-            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-                \item Same React frontend build
-                \item Same FastAPI backend code
-                \item Same WebSocket/HTTP transports
-                \item Same localhost-only binding
-                \item Browser mode unchanged
-                \item 111 tests (70 frontend, 41 backend)
-            \end{itemize}
-        \end{column}
-    \end{columns}
-
-    \vspace{0.3em}
-    \begin{block}{Runtime split}
-        \scriptsize
-        \texttt{window.\_\_TAURI\_\_} at module scope. One Vite build
-        serves both browser and Tauri webview. No build-time flags.
-    \end{block}
-\end{frame}
-
-
-\begin{frame}{v3.0 --- Sidecar Lifecycle}
-    \small
-    Tauri spawns the Python API as a managed child process. No Docker, no
-    container overhead.
-
-    \vspace{0.3em}
-    \begin{description}\setlength{\itemsep}{2pt}
-        \item[Spawn] \texttt{find\_uvicorn()} resolves the Python executable.
-              \texttt{cuda\_ld\_library\_path()} discovers pip-installed NVIDIA
-              libraries under \texttt{site-packages/nvidia/*/lib/} and injects
-              via \texttt{LD\_LIBRARY\_PATH}.
-        \item[Health poll] Background thread polls
-              \texttt{GET http://127.0.0.1:8000/health} every 500\,ms.
-              120\,s timeout. Crash detection via \texttt{try\_wait()} each cycle
-              --- port conflicts surface immediately, not after full timeout.
-        \item[Ready] On health success, emits \texttt{backend-ready} Tauri event.
-              UI transitions from ``Starting backend\ldots'' to active.
-        \item[Shutdown] \texttt{on\_window\_event} sends SIGTERM on
-              \texttt{CloseRequested}. 5\,s grace period, then SIGKILL.
-              \texttt{Child} handle in \texttt{Mutex<Option<Child>{}>} as Tauri
-              managed state.
-    \end{description}
-\end{frame}
-
-
-\begin{frame}{v3.0 --- Triage Highlights}
-    \small
-    Two architecturally significant findings during desktop bring-up.
-
-    \vspace{0.4em}
-    \textbf{WebKitGTK media permissions.}
-    Two-layer model for \texttt{getUserMedia}: (1)~feature gate
-    (\texttt{enable-media-stream}) and (2)~runtime permission grant via the
-    \texttt{permission-request} signal. Without both layers, recording is
-    \textit{silently denied} --- no prompt, no error dialog. Chromium
-    auto-prompts; WebKitGTK delegates to the application.
-    Fix: \texttt{connect\_permission\_request} auto-grants all requests.
-
-    \vspace{0.4em}
-    \textbf{CUDA runtime discovery on bare host.}
-    \texttt{ctranslate2} dlopens \texttt{libcublas.so.12} at inference time.
-    Docker's NVIDIA runtime provides it automatically. On bare host, it
-    requires \texttt{pip install nvidia-cublas-cu12}. \texttt{cuda\_ld\_library\_path()}
-    discovers the library under \texttt{site-packages/nvidia/*/lib/} and
-    injects it via \texttt{LD\_LIBRARY\_PATH} on the sidecar child process.
-\end{frame}
-
-
-\begin{frame}{v3.0 --- Backend-Readiness Gate}
-    \small
-    \textbf{Problem:} The sidecar takes 2--5\,s to start (model loading).
-    The UI must not allow recording until the backend is ready.
-
-    \vspace{0.4em}
-    \begin{columns}[T]
-        \begin{column}{0.48\textwidth}
-            \textbf{Tauri context}
-            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-                \item \texttt{backendReady} starts \texttt{false}
-                \item \texttt{useEffect} listens for
-                      \texttt{backend-ready} Tauri event
-                \item Record button shows
-                      ``Starting backend\ldots''
-                \item Event fires $\to$ button enables
-            \end{itemize}
-        \end{column}
-        \begin{column}{0.48\textwidth}
-            \textbf{Browser context}
-            \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-                \item \texttt{backendReady} starts \texttt{true}
-                \item No gate, no behavior change
-                \item Record button enabled on mount
-                \item No Tauri dependency loaded
-            \end{itemize}
-        \end{column}
-    \end{columns}
-
-    \vspace{0.4em}
-    {\footnotesize Detection: \texttt{typeof window.\_\_TAURI\_\_ !== "undefined"}
-    at module scope. Two tests verify both paths (dynamic import with
-    \texttt{vi.resetModules()} for the Tauri context).}
-\end{frame}
 
 
 \end{document}

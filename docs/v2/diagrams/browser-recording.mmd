@@ -1,0 +1,21 @@
+flowchart TB
+    gum["getUserMedia<br/>({audio: true})"]
+    sup{"isTypeSupported?"}
+    error["Show codec error"]
+    rec["new MediaRecorder<br/>(webm/opus)"]
+    chunks["Accumulate chunks<br/>(ondataavailable)"]
+    blob["Assemble Blob<br/>(onstop)"]
+    post["POST to /transcribe"]
+
+    gum --> sup
+    sup -->|"no"| error
+    sup -->|"yes"| rec
+    rec --> chunks --> blob --> post
+
+    classDef apiStyle fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef checkStyle fill:#fffacc,stroke:#b8900a,color:#333
+    classDef errStyle fill:#ffdddd,stroke:#cc4444,color:#333
+
+    class gum,rec,chunks,blob,post apiStyle
+    class sup checkStyle
+    class error errStyle
