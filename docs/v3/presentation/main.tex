@@ -260,8 +260,8 @@
             (\texttt{window.\_\_TAURI\_\_}) \\[4pt]
         \texttt{writeClipboard()} &
             \texttt{navigator.clipboard} \texttt{.writeText()} &
-            Clipboard plugin \texttt{writeText()} ---
-            no focus required \\[4pt]
+            \texttt{fetch()} POST to \texttt{:8001} ---
+            Rust writes via \texttt{arboard} \\[4pt]
         \texttt{submitText()} &
             Calls \texttt{writeClipboard()} (safe fallback) &
             IPC $\to$ Rust $\to$ \texttt{SendInput} $\to$ focused app \\
@@ -270,9 +270,9 @@
     \end{table}
 
     \vspace{0.2em}
-    {\footnotesize\textbf{Build contract:} \texttt{@tauri-apps/} packages loaded via dynamic
-    \texttt{import()} only. One Vite build, one artifact. Browser build produces zero
-    import errors.}
+    {\footnotesize\textbf{Build contract:} One Vite build, one artifact. Desktop clipboard
+    uses \texttt{fetch()} to a Rust HTTP server --- no Tauri plugin imports needed.
+    Browser build produces zero import errors.}
 \end{frame}
 
 
@@ -450,12 +450,13 @@
               Absent in the browser. \texttt{platform.ts} reads this at call time, not
               at bundle time.
 
-        \item \textbf{Dynamic \texttt{import()}} --- \texttt{@tauri-apps/} packages imported
-              with \texttt{import()} not \texttt{import}. Vite does not statically resolve
-              dynamic imports. Browser build has no missing-module errors.
+        \item \textbf{No Tauri imports in the clipboard path} --- desktop clipboard
+              uses \texttt{fetch()} to a Rust HTTP server, not a Tauri plugin.
+              No \texttt{@tauri-apps/} imports needed for v3.1.
 
-        \item \textbf{\texttt{optimizeDeps.exclude}} in \texttt{vite.config.ts} --- prevents
-              Vite's pre-bundler from touching Tauri packages.
+        \item \textbf{Dynamic \texttt{import()} for future plugins} --- v3.3 will use
+              \texttt{@tauri-apps/plugin-global-shortcut}. Loaded via dynamic
+              \texttt{import()}, excluded from \texttt{optimizeDeps}.
     \end{itemize}
 
     \vspace{0.3em}

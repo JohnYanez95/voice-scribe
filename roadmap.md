@@ -602,10 +602,12 @@ Tauri-only power feature — it requires native OS access the browser cannot pro
 
 **Locked architectural decisions (Principal, 2026-04-04):**
 
-- **Tauri v2** — locked. Plugins: `@tauri-apps/plugin-clipboard-manager`,
-  `@tauri-apps/plugin-global-shortcut`, `@tauri-apps/plugin-shell` (sidecar), tray via
-  `tauri::tray`. Rust side uses Tauri v2 API (`tauri::Builder`, `tauri::AppHandle`). v1 plugins are
-  not forward-compatible; this is not revisitable.
+- **Tauri v2** — locked. Plugins: `@tauri-apps/plugin-global-shortcut` (v3.3),
+  `@tauri-apps/plugin-shell` (sidecar), tray via `tauri::tray`. Clipboard uses HTTP server
+  (`tiny_http` + `arboard` on port 8001), not the Tauri clipboard plugin — plugin crashes
+  WebKitGTK without user activation (see progress report Triage #6). Rust side uses Tauri v2 API
+  (`tauri::Builder`, `tauri::AppHandle`). v1 plugins are not forward-compatible; this is not
+  revisitable.
 
 - **Repo structure** — monorepo. `apps/desktop/` alongside `apps/web/` and `apps/api/`. The API
   backend is shared. Tauri points its dev server at Vite (`apps/web/`) and its build at Vite's output.
