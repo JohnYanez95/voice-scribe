@@ -12,7 +12,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-API_URL="${API_URL:-http://localhost:8000}"
+API_URL="${API_URL:-http://localhost:8084}"
 AUDIO_FILE="${1:-}"
 
 pass() { echo -e "${GREEN}[PASS]${NC} $1"; }

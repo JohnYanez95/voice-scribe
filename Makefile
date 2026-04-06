@@ -5,9 +5,9 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 
 COMPOSE_CPU := docker compose -f ops/docker/compose.cpu.yml
 
-# Configurable ports (defaults: API=8000, Web=5173)
-export API_PORT ?= 8000
-export WEB_PORT ?= 5173
+# Configurable ports (defaults: API=8084, Web=5174)
+export API_PORT ?= 8084
+export WEB_PORT ?= 5174
 
 dev: gpu-check
 	$(COMPOSE) up --build -d

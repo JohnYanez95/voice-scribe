@@ -10,13 +10,13 @@ from app.main import app
 
 client = TestClient(app, raise_server_exceptions=False)
 
-ALLOWED_ORIGIN = "http://localhost:5173"
+ALLOWED_ORIGIN = "http://localhost:5174"
 ALLOWED_HEADERS = {"origin": ALLOWED_ORIGIN}
 
 
 def _settings(**overrides):
     s = MagicMock()
-    s.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5173"]
+    s.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5174"]
     s.max_upload_bytes = 10 * 1024 * 1024
     s.MAX_UPLOAD_MB = 10
     s.TEMP_DIR = "/tmp"
@@ -45,7 +45,7 @@ def _model(texts=None):
 @patch("app.routes.transcribe_ws.subprocess.run")
 @patch("app.routes.transcribe_ws.settings")
 def test_ws_happy_path(mock_settings, mock_subprocess, mock_get_model, mock_get_name):
-    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5173"]
+    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5174"]
     mock_settings.max_upload_bytes = 10 * 1024 * 1024
     mock_settings.MAX_UPLOAD_MB = 10
     mock_settings.TEMP_DIR = "/tmp"
@@ -82,7 +82,7 @@ def test_ws_happy_path(mock_settings, mock_subprocess, mock_get_model, mock_get_
 
 @patch("app.routes.transcribe_ws.settings")
 def test_ws_rejects_disallowed_origin(mock_settings):
-    mock_settings.cors_origins = ["http://localhost:5173"]
+    mock_settings.cors_origins = ["http://localhost:5174"]
 
     with pytest.raises(WebSocketDisconnect) as exc_info:
         with client.websocket_connect(
@@ -100,7 +100,7 @@ def test_ws_rejects_disallowed_origin(mock_settings):
 
 @patch("app.routes.transcribe_ws.settings")
 def test_ws_oversized_payload(mock_settings):
-    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5173"]
+    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5174"]
     mock_settings.max_upload_bytes = 10  # 10 bytes — any real payload will exceed this
     mock_settings.MAX_UPLOAD_MB = 0
 
@@ -120,7 +120,7 @@ def test_ws_oversized_payload(mock_settings):
 @patch("app.routes.transcribe_ws.subprocess.run")
 @patch("app.routes.transcribe_ws.settings")
 def test_ws_inference_failure(mock_settings, mock_subprocess, mock_get_model):
-    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5173"]
+    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5174"]
     mock_settings.max_upload_bytes = 10 * 1024 * 1024
     mock_settings.MAX_UPLOAD_MB = 10
     mock_settings.TEMP_DIR = "/tmp"

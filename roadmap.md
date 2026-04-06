@@ -950,3 +950,18 @@ Voice commands pay the full transcription round-trip (~1.2–1.5s from speech en
 
 **CPU-only deployment path**
 The CPU fallback is wired and verified (v1 close-out, ~1.87s latency on i9-12900K with `small` model). Open question: is this a distribution target (machines without NVIDIA GPUs) or a development convenience? Current state: `DEVICE=cpu` wiring exists and was verified in v1. Untested: CPU inference through the Tauri sidecar path — `cuda_ld_library_path()` would no-op, but `config.py` defaults `DEVICE` to `cuda`, so a CPU-only host needs `DEVICE=cpu` in the sidecar spawn environment. The entry should be scoped as a distribution target or dropped.
+
+---
+
+## Thoughts
+
+**Makefile target restructure — dev vs prod separation**
+
+The current `make dev` and `make dev-cpu` targets spin up a Docker container for the API, which adds lifecycle overhead (build, up, down) to every dev cycle. `make desktop` avoids this entirely — Tauri spawns the Python sidecar directly, and Ctrl+C cleanly stops everything. The dev targets should follow the same pattern.
+
+Proposed split:
+- **`make dev`** / **`make dev-cpu`** — run both services directly on the host (frontend + bare Python API), no Docker. Ctrl+C stops everything. Same developer experience as `make desktop` but in the browser.
+- **`make desktop`** — Tauri webview + sidecar. Already works this way.
+- **`make prod`** — the Docker path. Containerized, built images, production-like deployment. This is where Docker belongs: packaging and distribution, not the inner dev loop.
+
+The goal: Docker stops being a dev dependency and becomes a packaging concern. Dev = fast iteration, prod = deployment.

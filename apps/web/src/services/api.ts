@@ -7,7 +7,7 @@ import type {
   WsMessage,
 } from "../types";
 
-const API_PORT = import.meta.env.VITE_API_PORT || "8000";
+const API_PORT = import.meta.env.VITE_API_PORT || "8084";
 const BASE_URL = `http://localhost:${API_PORT}`;
 const WS_BASE_URL = `ws://localhost:${API_PORT}`;
 

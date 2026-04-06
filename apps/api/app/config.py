@@ -22,7 +22,7 @@ class Settings:
         os.path.join(tempfile.gettempdir(), "voice-scribe"),
     )
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
-    API_PORT: int = int(os.getenv("API_PORT", "8000"))
+    API_PORT: int = int(os.getenv("API_PORT", "8084"))
 
     @property
     def cors_origins(self) -> list[str]:
@@ -30,7 +30,7 @@ class Settings:
         # Both included so WebSocket origin checks don't silently reject with 4003.
         raw = os.getenv(
             "CORS_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173,https://tauri.localhost,tauri://localhost",
+            "http://localhost:5174,http://127.0.0.1:5174,https://tauri.localhost,tauri://localhost",
         )
         return [origin.strip() for origin in raw.split(",")]
 
