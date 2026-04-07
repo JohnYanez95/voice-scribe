@@ -70,6 +70,12 @@ export function useRecorder(): UseRecorderResult {
 
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
+        if (blob.size === 0) {
+          console.warn(
+            "[useRecorder] empty recording — mimeType:", mimeTypeRef.current,
+            "chunks:", chunksRef.current.length,
+          );
+        }
         setAudioBlob(blob);
         setIsRecording(false);
 

@@ -205,6 +205,25 @@ def test_ws_unknown_format_uses_no_extension(mock_settings, mock_subprocess, moc
 
 
 # ---------------------------------------------------------------------------
+# Empty payload — 0-byte audio rejected immediately
+# ---------------------------------------------------------------------------
+
+@patch("app.routes.transcribe_ws.settings")
+def test_ws_empty_payload_rejected(mock_settings):
+    """Server sends error immediately for 0-byte audio instead of crashing ffmpeg."""
+    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5174"]
+    mock_settings.max_upload_bytes = 10 * 1024 * 1024
+    mock_settings.MAX_UPLOAD_MB = 10
+
+    with client.websocket_connect("/ws/transcribe", headers=ALLOWED_HEADERS) as ws:
+        ws.send_bytes(b"")
+        msg = ws.receive_json()
+
+    assert msg["type"] == "error"
+    assert "no audio data" in msg["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
 # Concurrency contract — swap_model() during active streaming inference
 #
 # The inference thread holds a strong local reference to the model via

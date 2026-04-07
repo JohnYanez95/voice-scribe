@@ -35,6 +35,12 @@ export async function transcribeAudio(
   blob: Blob,
   language?: string
 ): Promise<TranscribeResponse> {
+  if (blob.size === 0) {
+    throw new Error(
+      "No audio data was captured. Recording may not be supported in this environment."
+    );
+  }
+
   const formData = new FormData();
   formData.append("file", blob, blobFilename(blob));
   if (language) {
@@ -74,6 +80,16 @@ export function streamTranscribeAudio(
   onApplicationError: (detail: string) => void,
   language?: string
 ): () => void {
+  if (blob.size === 0) {
+    // Deferred: caller assigns deregister after this function returns.
+    queueMicrotask(() =>
+      onApplicationError(
+        "No audio data was captured. Recording may not be supported in this environment."
+      )
+    );
+    return () => {};
+  }
+
   const url = new URL(`${WS_BASE_URL}/ws/transcribe`);
   if (language) url.searchParams.set("language", language);
   if (blob.type) {

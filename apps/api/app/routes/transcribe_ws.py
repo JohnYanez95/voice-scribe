@@ -63,6 +63,13 @@ async def ws_transcribe(
         # Receive audio blob
         audio_data = await websocket.receive_bytes()
 
+        if len(audio_data) == 0:
+            await websocket.send_json({
+                "type": "error",
+                "detail": "No audio data received.",
+            })
+            return
+
         # Size validation
         if len(audio_data) > settings.max_upload_bytes:
             await websocket.send_json({
