@@ -1,6 +1,6 @@
 # Voice Scribe — Roadmap
 
-**Last Updated:** April 5, 2026
+**Last Updated:** April 7, 2026
 **Status:** v3.1 Complete — v3.2 next
 
 ---
@@ -46,7 +46,7 @@ Both use cases demand the same underlying capabilities: accurate multilingual tr
 
 ```text
 [Browser UI on host]
-    ├─ record audio (MediaRecorder, webm/opus)
+    ├─ record audio (MediaRecorder or PCM fallback)
     ├─ show editable transcript
     └─ copy final text
 
@@ -117,13 +117,17 @@ Error codes: `400` (unsupported MIME), `413` (too large), `422` (malformed reque
 
 #### Audio Format and Transcoding
 
-The browser `MediaRecorder` produces `webm/opus`. Transcoding happens server-side, not in the frontend.
+The browser `MediaRecorder` produces encoded audio (typically `webm/opus`, negotiated at
+runtime). When `MediaRecorder` has no working encoder (e.g., broken GStreamer on WebKitGTK),
+`useRecorder.ts` falls back to raw PCM capture via `ScriptProcessorNode` and encodes to WAV
+in JavaScript — the same approach continuous mode already uses. The backend accepts both
+paths. Transcoding happens server-side, not in the frontend.
 
 Accepted inputs: `audio/webm`, `audio/ogg`, `audio/wav`, `audio/x-wav`, `audio/mp4`, `audio/mpeg`.
 
 Normalized internal format: mono 16kHz WAV via `ffmpeg`.
 
-**Codec note (from senior review):** `MediaRecorder` doesn't guarantee `webm/opus` on every browser. Chrome on Windows is consistent, but Firefox or Edge may produce different formats. For v1, Chrome on Windows is the supported browser — do not build a universal codec negotiation layer. But the frontend must explicitly request `audio/webm;codecs=opus` via the `mimeType` option and fall back gracefully with a user-visible error if the browser doesn't support it.
+**Codec negotiation (evolved from v1 codec note):** `MediaRecorder` doesn't guarantee `webm/opus` on every browser or runtime. `useRecorder.ts` negotiates from a prioritized list (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/webm`, `audio/ogg`) via `isTypeSupported()`. If no format is supported — as happens on WebKitGTK when GStreamer's encoding pipeline fails to initialize — the hook falls back to `ScriptProcessorNode` raw PCM capture, encoding to WAV client-side via `encodeWav()`. The WebSocket endpoint accepts an `audio_format` query parameter so temp file suffixes match the actual container; ffmpeg probes magic bytes regardless.
 
 #### MIME Validation (Hard Requirement)
 
@@ -156,8 +160,8 @@ Build the recording flow with a mock API response while the backend is being sto
 #### Core User Flow
 
 1. User presses Record
-2. Frontend captures audio via `MediaRecorder` (explicitly requesting `audio/webm;codecs=opus`)
-3. If browser doesn't support the codec, show a clear error message
+2. Frontend captures audio via `MediaRecorder` (negotiated codec) or `ScriptProcessorNode` PCM fallback
+3. If neither capture path works, show a clear error message
 4. User stops recording
 5. Frontend sends audio blob to `POST /transcribe`
 6. Frontend shows returned transcript in an editable text area
@@ -770,6 +774,29 @@ requirement). Web version unchanged.
 
 4. **`voiceCommands.ts` unchanged.** Still two commands (`copy`, `clear`). The `submit` entry lands
    in v3.2.
+
+5. **WebKitGTK recording fallback (triage completion, 2026-04-07).** Push-to-talk recording in the
+   Tauri desktop app produced empty audio on WebKitGTK. `getUserMedia` succeeded (mic access was
+   fine), but `MediaRecorder` silently produced zero bytes because GStreamer's encoding pipeline
+   failed to initialize — a missing API (`automatic-eos` on `GstAppSrc`) prevented the encoder
+   from starting. Continuous mode was unaffected because it already captures raw PCM via
+   `AudioWorklet` and encodes to WAV in JavaScript, bypassing `MediaRecorder` entirely.
+
+   Three-layer fix:
+   - **Backend guard:** `transcribe_ws.py` rejects 0-byte audio with a clear error instead of
+     crashing in ffmpeg. New `audio_format` query parameter drives temp file suffix selection;
+     ffmpeg still probes magic bytes.
+   - **Frontend guard:** `api.ts` catches empty blobs before sending on both WebSocket and HTTP
+     paths. Clear error message: "No audio data was captured."
+   - **Recording fallback:** `useRecorder.ts` detects when `negotiateMimeType()` returns null (no
+     supported `MediaRecorder` format) and falls back to `ScriptProcessorNode` PCM capture →
+     `encodeWav()` → WAV blob. Same approach continuous mode uses. The hook's external interface
+     is unchanged — downstream code does not know which capture path ran.
+
+   This is not new scope — push-to-talk on the desktop shell was a v3.1 deliverable. The fix is
+   resilient to the entire class of GStreamer-version mismatches on Linux, not just this specific
+   WSL2 configuration. The `NeedDebuggerBreak` trap and `GstAppSrc automatic-eos` warning (formerly
+   in the Runtime Warnings table) were symptoms of the same root cause and are resolved.
 
 **Gate:** Start a second application (e.g., VS Code). Dictate into Voice Scribe (Tauri). Say "copy."
 Switch to VS Code. Ctrl+V. Transcript is there. Same test with Ctrl+Shift+Y hotkey. Verify browser

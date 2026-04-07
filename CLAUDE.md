@@ -96,7 +96,7 @@ These patterns are non-negotiable in this codebase:
 
 **CORS** — Must allowlist `http://localhost:5173`, `http://127.0.0.1:5173`, `https://tauri.localhost`, and `tauri://localhost`.
 
-**MediaRecorder** — Must explicitly request `audio/webm;codecs=opus` and check `isTypeSupported()` before recording. Show clear error if unsupported.
+**MediaRecorder** — Must negotiate a supported audio MIME type from a prioritized list (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/webm`, `audio/ogg`) via `isTypeSupported()` before recording. When no format is supported, fall back to `ScriptProcessorNode` PCM capture with `encodeWav()`. Show clear error if neither path works.
 
 **Request limits** — 60s max audio, 10MB max upload, one file per request.
 

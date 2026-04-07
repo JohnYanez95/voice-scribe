@@ -1,18 +1,20 @@
 # Voice Scribe v3 — Progress Report
 
-**Date:** April 5, 2026
+**Date:** April 7, 2026
 **Author:** Johnraymond Yanez
-**Status:** v3.0 and v3.1 gate-passed (2026-04-05)
+**Status:** v3.0 and v3.1 gate-passed (2026-04-05). WebKitGTK recording fix applied (2026-04-07).
 
 ---
 
 ## Current State
 
-The Tauri desktop application launches, spawns the Python API as a sidecar, waits for health, and transitions the UI from "Starting backend..." to an active Record button. Push-to-talk recording through the desktop webview produces GPU-accelerated transcription at sub-second inference latency (0.8–1.0s on large-v3).
+The Tauri desktop application launches, spawns the Python API as a sidecar, waits for health, and transitions the UI from "Starting backend..." to an active Record button. Push-to-talk and continuous recording through the desktop webview produce GPU-accelerated transcription at sub-second inference latency (0.8–1.0s on large-v3).
+
+Push-to-talk recording on WebKitGTK was broken at v3.1 gate time — `MediaRecorder` silently produced zero bytes due to a GStreamer version mismatch in the encoding pipeline. A three-layer fix (2026-04-07) added server-side and client-side empty-audio guards, and a `ScriptProcessorNode` PCM fallback in `useRecorder.ts` that captures raw audio and encodes to WAV in JavaScript when `MediaRecorder` has no working encoder. The fallback uses the same `encodeWav()` function that continuous mode already uses. The hook's external interface is unchanged. See Triage #8.
 
 v3.1 adds the platform abstraction layer (`platform.ts`) and native clipboard support. The `copy` voice command and `Ctrl+Shift+Y` hotkey route through `platform.writeClipboard()`, which POSTs to a Rust-side HTTP clipboard server (`tiny_http` on port 8001 + `arboard`) in desktop context — no window focus required. The Tauri clipboard plugin was tested and confirmed to crash WebKitGTK when called without user activation (see Triage #6). Browser behavior is unchanged. Auto-scroll was added to continuous mode in a prior session.
 
-125 automated tests pass (84 frontend, 41 backend). Rust compiles clean with zero warnings. TypeScript compiles clean.
+135 automated tests pass (91 frontend, 44 backend). Rust compiles clean with zero warnings. TypeScript compiles clean.
 
 | Deliverable | Status |
 |---|---|
@@ -32,6 +34,10 @@ v3.1 adds the platform abstraction layer (`platform.ts`) and native clipboard su
 | v3.1 — Clipboard call site routing | Complete (2 of 3 call sites — see backlog) |
 | v3.1 — Desktop clipboard routing test | Complete |
 | Auto-scroll in continuous mode | Complete |
+| v3.1 — WebKitGTK recording fallback (Triage #8) | Complete |
+| v3.1 — Backend 0-byte audio guard | Complete |
+| v3.1 — Frontend empty-blob guard | Complete |
+| Port standardization (8084/5174) for desktop | Complete |
 
 ---
 
@@ -183,17 +189,30 @@ Five issues surfaced during the first successful `make desktop` runs. Each was e
 **Fix:** `wsl --shutdown` from PowerShell on the Windows side restarts WSLg and re-initializes the audio device passthrough. This is the standard recovery for WSL2 audio loss.
 **Impact on gate:** Blocks all manual gate validation (recording requires a microphone). Not a code issue — environment-only. All automated tests pass without audio hardware.
 
+### 8. Push-to-talk recording produces empty audio on WebKitGTK
+
+**Symptom:** Push-to-talk recording in the Tauri desktop app produced silence — the backend received 0 bytes of audio and crashed with an ffmpeg error. The web app (browser) was unaffected. Continuous mode in the desktop app was also unaffected.
+**Root cause:** WebKitGTK delegates audio encoding to GStreamer. The installed GStreamer version didn't match what WebKitGTK expected — a missing API (`automatic-eos` on `GstAppSrc`) prevented the encoding pipeline from initializing. `getUserMedia` succeeded (mic access was fine), but `MediaRecorder` silently produced zero bytes because it had no working encoder. This is not WSL2-specific — it would affect any Linux deployment with stale or misconfigured GStreamer packages.
+**Why continuous mode wasn't affected:** VAD/continuous recording captures raw PCM samples via `AudioWorklet` and encodes to WAV in JavaScript. It never touches `MediaRecorder` or GStreamer.
+**Fix:** Three layers.
+1. **Backend guard.** `transcribe_ws.py` rejects 0-byte audio with `{"type": "error", "detail": "No audio data received."}` instead of passing empty data to ffmpeg. New `audio_format` query parameter tells the server which container the client used (e.g., `audio/ogg`); temp file suffix selection uses a `_MIME_TO_SUFFIX` map. ffmpeg probes magic bytes regardless, but the correct suffix improves log clarity.
+2. **Frontend guard.** `api.ts` catches empty blobs before sending on both the WebSocket (`streamTranscribeAudio`) and HTTP (`transcribeAudio`) paths. Clear error message: "No audio data was captured. Recording may not be supported in this environment."
+3. **Recording fallback.** `useRecorder.ts` now negotiates the MIME type from a prioritized list (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/webm`, `audio/ogg`) via `negotiateMimeType()`. When the result is `null` (no supported format — the GStreamer failure case), the hook falls back to `ScriptProcessorNode` raw PCM capture → `encodeWav()` → WAV blob. This is the same `encodeWav()` function continuous mode already uses. The hook's external interface is unchanged; downstream code does not know which capture path ran.
+**Impact:** Push-to-talk works on the desktop shell regardless of GStreamer state. The fix is resilient to the entire class of GStreamer-version mismatches on Linux. The `NeedDebuggerBreak` trap and `GstAppSrc automatic-eos` warning (Runtime Warnings #2 and #3) were symptoms of the same root cause — both are now explained.
+**Scope:** v3.1 completion item. Push-to-talk on the desktop shell was a v3.1 deliverable that wasn't working on the target platform.
+**Tests added:** 7 frontend (4 MIME negotiation, 3 PCM fallback lifecycle) in `useRecorder.test.ts`. 3 backend (audio_format suffix ×2, empty payload rejection) in `test_transcribe_ws.py`.
+
 ---
 
 ## Runtime Warnings (Non-Blocking)
 
-Three WebKitGTK warnings or traps observed during desktop operation. None affect functionality.
+Three WebKitGTK warnings or traps observed during desktop operation. One (D-Bus) is cosmetic. The other two were symptoms of the GStreamer version mismatch diagnosed in Triage #8 — the recording fallback resolves their functional impact.
 
 | Warning | Cause | Impact |
 |---|---|---|
 | `Unable to connect to D-Bus session bus` | WSL2 does not provide a D-Bus session bus by default | None — WebKitGTK falls back gracefully |
-| `g_object_set_is_valid_property: object class 'GstAppSrc' has no property named 'automatic-eos'` | GStreamer version mismatch between WebKitGTK's expectation and the installed GStreamer 1.20 | None — recording and playback work |
-| `VM 0x... received NeedDebuggerBreak trap` | Observed once during continuous-mode dictation (not during clipboard operations). Two candidate causes: (1) Tauri IPC user-activation enforcement on a non-clipboard code path, (2) GStreamer `automatic-eos` property mismatch surfacing as a transient media pipeline fault | None — app survived without crash or state loss, subsequent WebSocket connections succeeded. No investigation unless recurrence with a pattern |
+| `g_object_set_is_valid_property: object class 'GstAppSrc' has no property named 'automatic-eos'` | GStreamer version mismatch — the installed GStreamer lacks the `automatic-eos` API that WebKitGTK expects. Root cause of Triage #8 (empty `MediaRecorder` output) | **Resolved** — `useRecorder.ts` PCM fallback bypasses GStreamer entirely when `MediaRecorder` has no working encoder |
+| `VM 0x... received NeedDebuggerBreak trap` | GStreamer `automatic-eos` property mismatch surfacing as a transient media pipeline fault (same root cause as above). Originally two candidate causes; Triage #8 diagnosis confirms GStreamer, not Tauri IPC | **Resolved** — same fallback path. No recurrence expected when `MediaRecorder` is bypassed |
 
 ---
 
@@ -201,11 +220,11 @@ Three WebKitGTK warnings or traps observed during desktop operation. None affect
 
 | Suite | Count | Status |
 |---|---|---|
-| Frontend (vitest) | 84 | All pass |
-| Backend (pytest) | 41 | All pass |
+| Frontend (vitest) | 91 | All pass |
+| Backend (pytest) | 44 | All pass |
 | Rust (cargo check) | — | Clean, zero warnings |
 | TypeScript (tsc --noEmit) | — | Clean |
-| **Total** | **125** | **Green** |
+| **Total** | **135** | **Green** |
 
 New tests by phase:
 
@@ -221,6 +240,16 @@ New tests by phase:
 | v3.1 | Error handling | `platform.test.ts` | Graceful failure on clipboard API rejection |
 | v3.1 | Desktop voice command clipboard routing | `App.test.tsx` | `__TAURI__` set, "copy" routes through HTTP server, not `navigator.clipboard` |
 | v3.1 | Auto-scroll pin/release/re-engage (×5) | `Transcript.test.tsx` | Scroll behavior in continuous mode |
+| v3.1 | `negotiateMimeType()` — prefers webm/opus | `useRecorder.test.ts` | Returns first supported format from priority list |
+| v3.1 | `negotiateMimeType()` — ogg fallback | `useRecorder.test.ts` | Falls back to ogg when webm unsupported |
+| v3.1 | `negotiateMimeType()` — bare ogg | `useRecorder.test.ts` | Returns bare ogg when only that is supported |
+| v3.1 | `negotiateMimeType()` — null when none | `useRecorder.test.ts` | Returns null when no format supported (triggers PCM fallback) |
+| v3.1 | ScriptProcessorNode fallback activates | `useRecorder.test.ts` | Creates AudioContext + ScriptProcessor when MIME negotiation returns null |
+| v3.1 | PCM fallback produces WAV blob | `useRecorder.test.ts` | Accumulated samples → `encodeWav()` → correct WAV size and type |
+| v3.1 | PCM fallback cleanup | `useRecorder.test.ts` | AudioContext closed, ScriptProcessor disconnected, stream tracks stopped |
+| v3.1 | `audio_format` → .ogg suffix | `test_transcribe_ws.py` | Server uses correct temp file extension for ogg audio |
+| v3.1 | Unknown format → no extension | `test_transcribe_ws.py` | Server omits extension for unrecognized format, lets ffmpeg probe |
+| v3.1 | 0-byte audio rejected | `test_transcribe_ws.py` | Server returns error JSON instead of crashing ffmpeg |
 
 ---
 
@@ -247,6 +276,8 @@ Both gates passed on 2026-04-05 at the physical desktop.
 
 **v3.1 scope held.** Three of four roadmap scope items delivered: platform abstraction layer, native clipboard (HTTP server, not plugin — see Triage #6), and clipboard call site routing. `voiceCommands.ts` unchanged per plan — `submit` is v3.2. One call site (`Transcript.tsx` "Copy to Clipboard" button) not routed through the platform layer; tracked as v3.2 cleanup.
 
+**WebKitGTK recording fix (2026-04-07).** Push-to-talk on the desktop shell — a v3.1 deliverable — was not functional at gate time. `MediaRecorder` silently produced 0-byte audio due to a GStreamer encoding pipeline failure. Three-layer fix: backend 0-byte rejection, frontend empty-blob guard, and `ScriptProcessorNode` PCM fallback in `useRecorder.ts`. The fallback reuses the `encodeWav()` path that continuous mode already exercises. 10 new tests (7 frontend, 3 backend). This is a v3.1 completion item, not new v3.2 work.
+
 **Auto-scroll** was not in v3.1 roadmap scope. It shipped in the same session as a UX improvement discovered during field testing — continuous mode without it required manual scrolling to track incoming segments. Scope expansion is small (one behavior, five tests) and does not affect any other milestone.
 
 ### For Principal
@@ -257,10 +288,10 @@ Both gates passed on 2026-04-05 at the physical desktop.
 
 **`resource_dir()` vs `CARGO_MANIFEST_DIR`.** The API directory resolution was simplified to `CARGO_MANIFEST_DIR` only. `resource_dir()` is the correct approach for production bundles but returned `target/debug/` in dev mode, producing a wrong relative path. Mixing both in an `or_else` chain masked the dev-mode failure because `resource_dir()` succeeded (returned a path) but the path was wrong. The compile-time constant is correct for all dev builds and makes the failure mode obvious if the directory doesn't exist (panic with path in message). Production bundling is post-v3.0. `CARGO_MANIFEST_DIR` bakes the build machine's absolute path into the binary — the moment distribution packaging produces a `.deb` or `.msi`, the API directory resolution must switch to `resource_dir()` or `app.path().resolve()`.
 
-**Outstanding non-blocking items.** D-Bus and GStreamer warnings in WSL2 are cosmetic. `navigator.clipboard` denial in the Tauri webview is resolved by v3.1's HTTP clipboard server — the two `App.tsx` call sites now route through `platform.writeClipboard()`. One call site remains on `navigator.clipboard` (`Transcript.tsx` button); functions via `execCommand("copy")` fallback. WebSocket smoke test gap from v2 delivery report remains open.
+**Outstanding non-blocking items.** D-Bus warning in WSL2 is cosmetic. The GStreamer `automatic-eos` and `NeedDebuggerBreak` warnings are now explained — both are symptoms of the GStreamer version mismatch diagnosed in Triage #8. The recording fallback bypasses GStreamer entirely, so the warnings have no functional impact. `navigator.clipboard` denial in the Tauri webview is resolved by v3.1's HTTP clipboard server — the two `App.tsx` call sites now route through `platform.writeClipboard()`. One call site remains on `navigator.clipboard` (`Transcript.tsx` button); functions via `execCommand("copy")` fallback. WebSocket smoke test gap from v2 delivery report remains open.
 
 **Clipboard plugin crash.** The Tauri clipboard plugin (`tauri-plugin-clipboard-manager`) was the original v3.1 plan. It crashes WebKitGTK with a `NeedDebuggerBreak` trap when called from a WebSocket callback (no user activation). This was confirmed by restoring the plugin with correct `isDesktop()` routing (`withGlobalTauri: true` verified) and observing the crash on a "copy" voice command. The HTTP server bypass (Triage #6) is the permanent architecture. The plugin should not be retested — this is a closed decision.
 
-**WSL2 audio loss.** The plugin crash (Triage #6) orphaned the WSL2 audio pipeline. `arecord -l` sees no soundcards, PipeWire sees only Dummy-Driver. Fix is `wsl --shutdown` from PowerShell. This blocks manual gate validation but is environment-only — all 125 automated tests pass without audio hardware.
+**WSL2 audio loss.** The plugin crash (Triage #6) orphaned the WSL2 audio pipeline. `arecord -l` sees no soundcards, PipeWire sees only Dummy-Driver. Fix is `wsl --shutdown` from PowerShell. This blocks manual gate validation but is environment-only — all 135 automated tests pass without audio hardware.
 
-**Triage as operational reference.** `docs/v3/host-setup.md` should include a troubleshooting section referencing triage items #2 (CUDA runtime — `libcublas.so.12` not found, resolved by `nvidia-cublas-cu12` pip package + `cuda_ld_library_path()` injection), #4 (WebKitGTK permissions — silent `getUserMedia` denial, resolved by `enable-media-stream` feature gate + `connect_permission_request` signal handler), and #6 (clipboard plugin crash — resolved by HTTP server on 8001). These are the exact problems someone will hit on a new machine.
+**Triage as operational reference.** `docs/v3/host-setup.md` should include a troubleshooting section referencing triage items #2 (CUDA runtime — `libcublas.so.12` not found, resolved by `nvidia-cublas-cu12` pip package + `cuda_ld_library_path()` injection), #4 (WebKitGTK permissions — silent `getUserMedia` denial, resolved by `enable-media-stream` feature gate + `connect_permission_request` signal handler), #6 (clipboard plugin crash — resolved by HTTP server on 8001), and #8 (GStreamer recording failure — resolved by `ScriptProcessorNode` PCM fallback). These are the exact problems someone will hit on a new machine.
