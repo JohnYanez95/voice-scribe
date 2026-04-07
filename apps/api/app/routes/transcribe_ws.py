@@ -17,23 +17,35 @@ log = structlog.get_logger()
 
 router = APIRouter()
 
+_MIME_TO_SUFFIX: dict[str, str] = {
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+}
+
 
 @router.websocket("/ws/transcribe")
-async def ws_transcribe(websocket: WebSocket, language: str | None = None) -> None:
+async def ws_transcribe(
+    websocket: WebSocket,
+    language: str | None = None,
+    audio_format: str | None = None,
+) -> None:
     """Stream transcription segments over WebSocket.
 
     Protocol:
-      Client → Server: binary audio blob (audio/webm — recorder codec constraint)
+      Client → Server: binary audio blob (format negotiated by MediaRecorder)
       Server → Client: JSON messages
         {"type": "segment", "text": "..."}     — one per faster-whisper segment
         {"type": "complete", "raw": "...", "cleaned": "...", "language": "...",
          "duration": ..., "model_name": "...", "processing_mode": "..."}
         {"type": "error", "detail": "..."}     — on any failure
 
-    Format constraint: this endpoint only accepts audio/webm. There is no
-    Content-Type header on binary WebSocket messages. The format is known by
-    construction — the recorder always produces audio/webm;codecs=opus,
-    enforced by MediaRecorder.isTypeSupported() in useRecorder.ts.
+    The audio_format query parameter tells the server which container the
+    client used (e.g. "audio/ogg"). Defaults to "audio/webm" for backward
+    compatibility. ffmpeg probes magic bytes regardless, but the correct
+    suffix improves log clarity and debugging.
     """
     # Origin enforcement — FastAPI CORSMiddleware does not cover WebSocket.
     origin = websocket.headers.get("origin", "")
@@ -59,9 +71,11 @@ async def ws_transcribe(websocket: WebSocket, language: str | None = None) -> No
             })
             return
 
-        # Write to temp input file
+        # Write to temp input file (no extension when format unknown — lets
+        # ffmpeg probe content instead of being misled by a wrong suffix)
+        suffix = _MIME_TO_SUFFIX.get(audio_format, "") if audio_format else ""
         tmp_input = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".webm", dir=settings.TEMP_DIR
+            delete=False, suffix=suffix, dir=settings.TEMP_DIR
         )
         tmp_input.write(audio_data)
         tmp_input.flush()
@@ -73,7 +87,7 @@ async def ws_transcribe(websocket: WebSocket, language: str | None = None) -> No
         )
         tmp_wav.close()
 
-        log.info("ws transcode started", input_format="audio/webm")
+        log.info("ws transcode started", input_format=audio_format or "audio/webm")
         transcode_start = time.monotonic()
 
         try:

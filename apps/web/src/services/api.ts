@@ -11,6 +11,18 @@ const API_PORT = import.meta.env.VITE_API_PORT || "8084";
 const BASE_URL = `http://localhost:${API_PORT}`;
 const WS_BASE_URL = `ws://localhost:${API_PORT}`;
 
+function blobFilename(blob: Blob): string {
+  const base = blob.type.split(";")[0].trim();
+  const EXT: Record<string, string> = {
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+  };
+  return `recording${EXT[base] || ".webm"}`;
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE_URL}/health`);
   if (!res.ok) {
@@ -24,7 +36,7 @@ export async function transcribeAudio(
   language?: string
 ): Promise<TranscribeResponse> {
   const formData = new FormData();
-  formData.append("file", blob, "recording.webm");
+  formData.append("file", blob, blobFilename(blob));
   if (language) {
     formData.append("language", language);
   }
@@ -64,6 +76,9 @@ export function streamTranscribeAudio(
 ): () => void {
   const url = new URL(`${WS_BASE_URL}/ws/transcribe`);
   if (language) url.searchParams.set("language", language);
+  if (blob.type) {
+    url.searchParams.set("audio_format", blob.type.split(";")[0].trim());
+  }
 
   const ws = new WebSocket(url.toString());
   ws.binaryType = "blob";

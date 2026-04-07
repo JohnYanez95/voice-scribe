@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const MIME_TYPE = "audio/webm;codecs=opus";
+const PREFERRED_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/ogg;codecs=opus",
+  "audio/webm",
+  "audio/ogg",
+] as const;
+
+export function negotiateMimeType(): string | null {
+  for (const mime of PREFERRED_MIME_TYPES) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  return null;
+}
 
 interface UseRecorderResult {
   startRecording: () => Promise<void>;
@@ -18,6 +30,7 @@ export function useRecorder(): UseRecorderResult {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const mimeTypeRef = useRef<string>("");
 
   // Clean up media stream on unmount
   useEffect(() => {
@@ -32,18 +45,20 @@ export function useRecorder(): UseRecorderResult {
     setError(null);
     setAudioBlob(null);
 
-    if (!MediaRecorder.isTypeSupported(MIME_TYPE)) {
-      setError(
-        "Your environment does not support audio/webm;codecs=opus recording."
-      );
-      return;
-    }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      const recorder = new MediaRecorder(stream, { mimeType: MIME_TYPE });
+      // Negotiate a MIME type, falling back to browser default
+      const mimeType = negotiateMimeType();
+      let recorder: MediaRecorder;
+      if (mimeType) {
+        recorder = new MediaRecorder(stream, { mimeType });
+      } else {
+        recorder = new MediaRecorder(stream);
+      }
+      mimeTypeRef.current = recorder.mimeType;
+
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
 
@@ -54,7 +69,7 @@ export function useRecorder(): UseRecorderResult {
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: MIME_TYPE });
+        const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
         setAudioBlob(blob);
         setIsRecording(false);
 
@@ -75,6 +90,10 @@ export function useRecorder(): UseRecorderResult {
     } catch (err) {
       if (err instanceof DOMException && err.name === "NotAllowedError") {
         setError("Microphone access denied. Please allow microphone access and try again.");
+      } else if (err instanceof DOMException && err.name === "NotSupportedError") {
+        setError(
+          "No supported audio encoder found. On Linux, install gstreamer1.0-plugins-bad and restart."
+        );
       } else {
         setError("Could not start recording. Check microphone permissions.");
       }

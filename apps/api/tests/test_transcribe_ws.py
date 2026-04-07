@@ -140,6 +140,71 @@ def test_ws_inference_failure(mock_settings, mock_subprocess, mock_get_model):
 
 
 # ---------------------------------------------------------------------------
+# audio_format query parameter — correct temp file suffix
+# ---------------------------------------------------------------------------
+
+@patch("app.routes.transcribe_ws.get_current_model_name", return_value="small")
+@patch("app.routes.transcribe_ws.get_model")
+@patch("app.routes.transcribe_ws.subprocess.run")
+@patch("app.routes.transcribe_ws.settings")
+def test_ws_ogg_format_uses_ogg_suffix(mock_settings, mock_subprocess, mock_get_model, mock_get_name):
+    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5174"]
+    mock_settings.max_upload_bytes = 10 * 1024 * 1024
+    mock_settings.MAX_UPLOAD_MB = 10
+    mock_settings.TEMP_DIR = "/tmp"
+    mock_settings.DEVICE = "cpu"
+    mock_subprocess.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+    mock_get_model.return_value = _model()
+
+    with client.websocket_connect(
+        "/ws/transcribe?audio_format=audio/ogg", headers=ALLOWED_HEADERS
+    ) as ws:
+        ws.send_bytes(b"fake audio data")
+        messages = []
+        while True:
+            msg = ws.receive_json()
+            messages.append(msg)
+            if msg["type"] in ("complete", "error"):
+                break
+
+    # The ffmpeg -i arg should reference a .ogg temp file
+    call_args = mock_subprocess.call_args[0][0]
+    input_path = call_args[call_args.index("-i") + 1]
+    assert input_path.endswith(".ogg"), f"Expected .ogg suffix, got: {input_path}"
+    assert messages[-1]["type"] == "complete"
+
+
+@patch("app.routes.transcribe_ws.get_current_model_name", return_value="small")
+@patch("app.routes.transcribe_ws.get_model")
+@patch("app.routes.transcribe_ws.subprocess.run")
+@patch("app.routes.transcribe_ws.settings")
+def test_ws_unknown_format_uses_no_extension(mock_settings, mock_subprocess, mock_get_model, mock_get_name):
+    mock_settings.cors_origins = [ALLOWED_ORIGIN, "http://127.0.0.1:5174"]
+    mock_settings.max_upload_bytes = 10 * 1024 * 1024
+    mock_settings.MAX_UPLOAD_MB = 10
+    mock_settings.TEMP_DIR = "/tmp"
+    mock_settings.DEVICE = "cpu"
+    mock_subprocess.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+    mock_get_model.return_value = _model()
+
+    with client.websocket_connect(
+        "/ws/transcribe?audio_format=audio/unknown", headers=ALLOWED_HEADERS
+    ) as ws:
+        ws.send_bytes(b"fake audio data")
+        messages = []
+        while True:
+            msg = ws.receive_json()
+            messages.append(msg)
+            if msg["type"] in ("complete", "error"):
+                break
+
+    call_args = mock_subprocess.call_args[0][0]
+    input_path = call_args[call_args.index("-i") + 1]
+    assert not input_path.endswith((".webm", ".ogg", ".wav", ".mp4", ".mp3")), \
+        f"Expected no audio extension for unknown format, got: {input_path}"
+
+
+# ---------------------------------------------------------------------------
 # Concurrency contract — swap_model() during active streaming inference
 #
 # The inference thread holds a strong local reference to the model via
