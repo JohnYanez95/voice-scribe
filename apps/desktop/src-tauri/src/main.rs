@@ -98,7 +98,7 @@ fn spawn_sidecar(api_dir: &std::path::Path) -> Result<Child, String> {
     let ld_path = cuda_ld_library_path(api_dir);
 
     let child = Command::new(&uvicorn)
-        .args(["app.main:app", "--host", "127.0.0.1", "--port", "8000"])
+        .args(["app.main:app", "--host", "127.0.0.1", "--port", "8084"])
         .current_dir(api_dir)
         .env("LD_LIBRARY_PATH", &ld_path)
         .spawn()
@@ -126,7 +126,7 @@ fn wait_for_health(child: &mut Child, timeout: Duration) -> Result<(), String> {
             Ok(Some(status)) => {
                 return Err(format!(
                     "Sidecar exited during startup with status: {}. \
-                     Port 8000 may be in use by another process.",
+                     Port 8084 may be in use by another process.",
                     status
                 ));
             }
@@ -135,7 +135,7 @@ fn wait_for_health(child: &mut Child, timeout: Duration) -> Result<(), String> {
         }
 
         // Try health endpoint
-        if let Ok(resp) = client.get("http://127.0.0.1:8000/health").send() {
+        if let Ok(resp) = client.get("http://127.0.0.1:8084/health").send() {
             if resp.status().is_success() {
                 return Ok(());
             }
@@ -260,7 +260,7 @@ fn main() {
                 for mut request in server.incoming_requests() {
                     let cors = tiny_http::Header::from_bytes(
                         &b"Access-Control-Allow-Origin"[..],
-                        &b"http://localhost:5173"[..],
+                        &b"http://localhost:5174"[..],
                     )
                     .unwrap();
 

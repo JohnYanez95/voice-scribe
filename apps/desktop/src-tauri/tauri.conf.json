@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.voice-scribe.app",
   "build": {
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5174",
     "frontendDist": "../../web/dist/"
   },
   "app": {
@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:8000 ws://localhost:8000 http://127.0.0.1:8001; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8084 ws://localhost:8084 http://127.0.0.1:8001; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:"
     }
   },
   "plugins": {

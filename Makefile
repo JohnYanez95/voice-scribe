@@ -45,9 +45,9 @@ desktop:
 	trap cleanup EXIT INT TERM; \
 	cleanup; sleep 1; \
 	if ! command -v ss >/dev/null 2>&1; then \
-		echo "WARNING: ss not found — cannot verify port 8000 is free. Proceeding."; \
-	elif ss -tln sport = :8000 2>/dev/null | grep -q LISTEN; then \
-		echo "ERROR: Port 8000 is already in use (Docker container or another process)."; \
+		echo "WARNING: ss not found — cannot verify port 8084 is free. Proceeding."; \
+	elif ss -tln sport = :8084 2>/dev/null | grep -q LISTEN; then \
+		echo "ERROR: Port 8084 is already in use (Docker container or another process)."; \
 		echo "  Run: docker compose -f ops/docker/compose.dev.yml down"; \
 		exit 1; \
 	fi; \
