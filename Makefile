@@ -1,4 +1,4 @@
-.PHONY: dev dev-cpu build test gpu-check api web desktop
+.PHONY: dev dev-cpu build test gpu-check api web desktop desktop-cpu
 
 COMPOSE := docker compose -f ops/docker/compose.dev.yml
 export PATH := $(HOME)/.cargo/bin:$(PATH)
@@ -33,7 +33,10 @@ api:
 web:
 	cd apps/web && VITE_API_PORT=$(API_PORT) VITE_PORT=$(WEB_PORT) npm run dev
 
-desktop:
+desktop: SIDECAR_ENV =
+desktop-cpu: SIDECAR_ENV = DEVICE=cpu WHISPER_MODEL=small WHISPER_AVAILABLE_MODELS=small
+
+desktop desktop-cpu:
 	@cleanup() { \
 		for pidfile in /tmp/voice-scribe-vite.pid /tmp/voice-scribe-sidecar.pid; do \
 			if [ -f "$$pidfile" ]; then \
@@ -52,5 +55,5 @@ desktop:
 		exit 1; \
 	fi; \
 	cd apps/web && node_modules/.bin/vite & echo $$! > /tmp/voice-scribe-vite.pid; \
-	cd apps/desktop && cargo tauri dev; \
+	cd apps/desktop && $(SIDECAR_ENV) cargo tauri dev; \
 	cleanup

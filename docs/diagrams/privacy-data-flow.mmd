@@ -28,7 +28,9 @@ flowchart TD
     resp --> area["Editable textarea"]
     wsOut --> area
 
-    area --> clip["Clipboard"]
+    area -- "browser" --> browserClip["navigator.clipboard<br/>.writeText()"]
+    area -- "desktop" --> httpPost["HTTP POST :8001/clipboard"]
+    httpPost --> rustClip["Rust (arboard)<br/>system clipboard"]
 
     classDef sensitive fill:#ffdddd,stroke:#cc4444
     classDef ephemeral fill:#fffacc,stroke:#b8900a
@@ -36,6 +38,6 @@ flowchart TD
     classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
 
     class mic,blob sensitive
-    class vad,http,wsIn,tmp1,tmp2 ephemeral
-    class txt,resp,wsOut,area,clip output
+    class vad,http,wsIn,tmp1,tmp2,httpPost ephemeral
+    class txt,resp,wsOut,area,browserClip,rustClip output
     class del deleted

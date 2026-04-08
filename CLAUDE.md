@@ -9,14 +9,14 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 **Current milestone:** v3.1 Complete — v3.2 next.
 
 **Key context:**
-- Two-service system: React frontend (host, port 5173) + FastAPI backend (port 8000) over localhost. Backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode)
+- Two-service system: React frontend (host, port 5174) + FastAPI backend (port 8084) over localhost. Backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode)
 - `platform.ts` is the single routing surface for platform-conditional behavior: `isDesktop()`, `writeClipboard()`, `submitText()`. Components call `platform.*` and are unaware of runtime context
 - Desktop clipboard: HTTP server (`tiny_http` on port 8001 + `arboard`) in the Rust process. The webview POSTs transcript text; Rust writes to the system clipboard. Bypasses WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- 125 tests (84 frontend, 41 backend), TypeScript clean, Rust clean
+- 135 tests (91 frontend, 44 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
-- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → v3.2 (submit injection, Windows) → v3.3 (system tray + global hotkeys)
+- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → v3.2 (audio feedback, clipboard cleanup) → v3.3 (system tray + global hotkeys)
 
 **Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
 
@@ -26,8 +26,9 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 # Development
 make dev          # Start API container (GPU) + frontend dev server
 make api          # Start API container only
-make web          # Start frontend dev server only (port 5173)
+make web          # Start frontend dev server only (port 5174)
 make desktop      # Start Tauri desktop app (Vite + cargo tauri dev)
+make desktop-cpu  # Desktop app with CPU fallback (small model, no CUDA)
 make gpu-check    # Verify GPU/Docker readiness (run before first dev)
 make build        # Build the API Docker image
 
@@ -53,8 +54,8 @@ Backend tests run on the host (the test suite mocks model loading and does not r
 
 Two-service system over localhost. WebSocket (default, v2.1+) and HTTP (fallback). No proxy, no queue.
 
-- **Frontend** (`apps/web/`, port 5173): React + TypeScript + Vite. Records audio via MediaRecorder, streams to API via WebSocket, displays editable transcript. `platform.ts` routes clipboard/submit calls by runtime context. One Vite build serves both browser and Tauri webview.
-- **Backend** (`apps/api/`, port 8000): FastAPI with GPU. Validates upload, transcodes via ffmpeg to 16kHz mono WAV, runs faster-whisper inference, returns transcript. Runs in Docker (browser mode) or as bare-host Python process (desktop mode) — same code, different process boundary.
+- **Frontend** (`apps/web/`, port 5174): React + TypeScript + Vite. Records audio via MediaRecorder, streams to API via WebSocket, displays editable transcript. `platform.ts` routes clipboard/submit calls by runtime context. One Vite build serves both browser and Tauri webview.
+- **Backend** (`apps/api/`, port 8084): FastAPI with GPU. Validates upload, transcodes via ffmpeg to 16kHz mono WAV, runs faster-whisper inference, returns transcript. Runs in Docker (browser mode) or as bare-host Python process (desktop mode) — same code, different process boundary.
 - **Desktop shell** (`apps/desktop/src-tauri/`): Tauri v2. Spawns the Python API as a sidecar, polls health, emits `backend-ready` event. HTTP clipboard server on port 8001 (`tiny_http` + `arboard`). WebKitGTK media permissions granted programmatically. CUDA runtime discovery via `cuda_ld_library_path()`.
 
 Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MIME validation` → `ffmpeg transcode` → `faster-whisper inference` → `streaming transcript JSON` → `editable textarea`
@@ -71,13 +72,13 @@ Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MI
 - `src/hooks/useRecorder.ts` — MediaRecorder with explicit webm/opus codec request
 - `src/hooks/useHotkeys.ts` — Ctrl+Shift keyboard shortcuts at App level (v2.0)
 - `src/features/settings/Settings.tsx` — Settings panel with model selection (v2.0)
-- `src/services/api.ts` — Typed fetch calls to localhost:8000
+- `src/services/api.ts` — Typed fetch calls to localhost:8084
 - `src/services/platform.ts` — Platform detection (`isDesktop`), clipboard routing, submit stub (v3.1)
 - `src/services/voiceCommands.ts` — Command detection: copy, clear (v2.3)
 
 ### Key desktop files
 - `apps/desktop/src-tauri/src/main.rs` — Sidecar lifecycle, HTTP clipboard server, WebKitGTK permissions, CUDA discovery, shutdown handler
-- `apps/desktop/src-tauri/tauri.conf.json` — CSP (ports 8000, 8001), devUrl, `withGlobalTauri`
+- `apps/desktop/src-tauri/tauri.conf.json` — CSP (ports 8084, 8001), devUrl, `withGlobalTauri`
 
 ### Ops
 - `ops/docker/compose.dev.yml` — GPU passthrough, volume mounts for model cache and temp
@@ -94,7 +95,7 @@ These patterns are non-negotiable in this codebase:
 
 **MIME validation** — Separate function (`validate_mime_type`) so magic-byte checking can be added as a one-line change. Allowed: `audio/webm`, `audio/ogg`, `audio/wav`, `audio/x-wav`, `audio/mp4`, `audio/mpeg`.
 
-**CORS** — Must allowlist `http://localhost:5173`, `http://127.0.0.1:5173`, `https://tauri.localhost`, and `tauri://localhost`.
+**CORS** — Must allowlist `http://localhost:5174`, `http://127.0.0.1:5174`, `https://tauri.localhost`, and `tauri://localhost`.
 
 **MediaRecorder** — Must negotiate a supported audio MIME type from a prioritized list (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/webm`, `audio/ogg`) via `isTypeSupported()` before recording. When no format is supported, fall back to `ScriptProcessorNode` PCM capture with `encodeWav()`. Show clear error if neither path works.
 

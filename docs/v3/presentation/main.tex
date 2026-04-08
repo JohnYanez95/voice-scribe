@@ -263,8 +263,8 @@
             \texttt{fetch()} POST to \texttt{:8001} ---
             Rust writes via \texttt{arboard} \\[4pt]
         \texttt{submitText()} &
-            Calls \texttt{writeClipboard()} (safe fallback) &
-            IPC $\to$ Rust $\to$ \texttt{SendInput} $\to$ focused app \\
+            Calls \texttt{writeClipboard()} &
+            Calls \texttt{writeClipboard()} (direct injection deferred) \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -342,30 +342,28 @@
 \end{frame}
 
 
-\begin{frame}{v3.2 --- Direct Injection (\texttt{submit})}
+\begin{frame}{v3.2 --- Audio Feedback + Clipboard Cleanup}
     \small
-    \textbf{Deliverable:} saying ``submit'' types the transcript into the focused
-    application. No clipboard. Windows-only for this milestone.
-
-    \vspace{0.3em}
-    \textbf{Key scope:}
-    \begin{itemize}\setlength{\itemsep}{1pt}
-        \item Rust: \texttt{SendInput} via Windows API (\texttt{enigo} or equivalent),
-              exposed as a Tauri IPC command
-        \item Hard requirement: restore focus to the previous window before injecting
-        \item \texttt{voiceCommands.ts}: \texttt{submit} added to \texttt{COMMAND\_MAP};
-              \texttt{App.tsx} gains \texttt{case "submit"} $\to$
-              \texttt{platform.submitText()}
-        \item Browser fallback: \texttt{submitText()} calls \texttt{writeClipboard()}
-    \end{itemize}
+    \textbf{Deliverable:} audible confirmation when voice commands fire. All clipboard
+    call sites consistent through the platform layer.
 
     \vspace{0.2em}
-    \textbf{Gate:} focus VS Code, say ``submit'', transcript appears at cursor --- no
-    clipboard. 10 false-positive sentences with ``submit'' as a non-command word, zero
-    fires. One-week soak period required before marking complete.
+    \textbf{Key scope:}
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item \texttt{copy}: chime after \texttt{writeClipboard()} resolves.
+              No chime on failure (hard requirement)
+        \item \texttt{clear}: sweep plays immediately (synchronous state setter)
+        \item Web Audio API or bundled assets --- same sound in both contexts
+        \item \texttt{Transcript.tsx} clipboard button through
+              \texttt{platform.writeClipboard()} (v3.1 cleanup)
+    \end{itemize}
 
     \vspace{0.1em}
-    \textbf{Deferred:} Linux/macOS injection.
+    \textbf{Gate:} copy $\to$ chime $\to$ paste works. clear $\to$ sweep $\to$ empty.
+    Silence on clipboard failure. Three call sites through platform layer. Browser build clean.
+
+    \vspace{0.1em}
+    \textbf{Not in scope:} \texttt{submit} --- deferred until Windows-native build.
 \end{frame}
 
 
