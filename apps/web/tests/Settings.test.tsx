@@ -21,6 +21,8 @@ const defaultProps = {
   onShowRawComparisonChange: vi.fn(),
   recordingMode: "push-to-talk" as const,
   onRecordingModeChange: vi.fn(),
+  audioMuted: false,
+  onAudioMutedChange: vi.fn(),
   isActive: false,
 };
 
@@ -176,7 +178,7 @@ describe("Settings", () => {
       render(<Settings {...defaultProps} showRawComparison={false} />);
     });
 
-    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    const checkbox = screen.getByRole("checkbox", { name: /raw.*cleaned/i }) as HTMLInputElement;
     expect(checkbox.checked).toBe(false);
   });
 
@@ -192,7 +194,7 @@ describe("Settings", () => {
       );
     });
 
-    const checkbox = screen.getByRole("checkbox");
+    const checkbox = screen.getByRole("checkbox", { name: /raw.*cleaned/i });
     fireEvent.click(checkbox);
     expect(onShowRawComparisonChange).toHaveBeenCalledWith(true);
   });
@@ -209,7 +211,7 @@ describe("Settings", () => {
       );
     });
 
-    const checkbox = screen.getByRole("checkbox");
+    const checkbox = screen.getByRole("checkbox", { name: /raw.*cleaned/i });
     fireEvent.click(checkbox);
     expect(onShowRawComparisonChange).toHaveBeenCalledWith(false);
   });
@@ -251,5 +253,48 @@ describe("Settings", () => {
     const contRadio = screen.getByRole("radio", { name: "Continuous" }) as HTMLInputElement;
     expect(pttRadio.disabled).toBe(true);
     expect(contRadio.disabled).toBe(true);
+  });
+
+  it("mute toggle renders unchecked by default", async () => {
+    await act(async () => {
+      render(<Settings {...defaultProps} audioMuted={false} />);
+    });
+
+    const checkbox = screen.getByRole("checkbox", { name: /mute/i }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+  });
+
+  it("checking mute toggle calls onAudioMutedChange(true)", async () => {
+    const onAudioMutedChange = vi.fn();
+    await act(async () => {
+      render(
+        <Settings
+          {...defaultProps}
+          audioMuted={false}
+          onAudioMutedChange={onAudioMutedChange}
+        />
+      );
+    });
+
+    const checkbox = screen.getByRole("checkbox", { name: /mute/i });
+    fireEvent.click(checkbox);
+    expect(onAudioMutedChange).toHaveBeenCalledWith(true);
+  });
+
+  it("unchecking mute toggle calls onAudioMutedChange(false)", async () => {
+    const onAudioMutedChange = vi.fn();
+    await act(async () => {
+      render(
+        <Settings
+          {...defaultProps}
+          audioMuted={true}
+          onAudioMutedChange={onAudioMutedChange}
+        />
+      );
+    });
+
+    const checkbox = screen.getByRole("checkbox", { name: /mute/i });
+    fireEvent.click(checkbox);
+    expect(onAudioMutedChange).toHaveBeenCalledWith(false);
   });
 });

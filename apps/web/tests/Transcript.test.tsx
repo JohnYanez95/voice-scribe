@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { Transcript } from "../src/features/transcript/Transcript";
+
+// Mock platform module — writeClipboard is the clipboard routing surface
+const mockWriteClipboard = vi.fn().mockResolvedValue(undefined);
+vi.mock("../src/services/platform", () => ({
+  writeClipboard: (...args: unknown[]) => mockWriteClipboard(...args),
+  isDesktop: () => false,
+}));
 
 const defaultProps = {
   text: "",
@@ -12,6 +19,11 @@ const defaultProps = {
 };
 
 describe("Transcript", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWriteClipboard.mockResolvedValue(undefined);
+  });
+
   it("renders nothing when text is empty", () => {
     const { container } = render(<Transcript {...defaultProps} />);
     expect(container.querySelector(".transcript")).toBeNull();
@@ -36,10 +48,33 @@ describe("Transcript", () => {
     expect(onChange).toHaveBeenCalledWith("Hello world");
   });
 
-  it("copies text to clipboard on button click", async () => {
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+  it("copies text to clipboard via platform.writeClipboard on button click", async () => {
+    render(<Transcript {...defaultProps} text="Copy me" />);
+    const btn = screen.getByText("Copy to Clipboard");
+    await act(async () => {
+      fireEvent.click(btn);
     });
+
+    await waitFor(() => {
+      expect(mockWriteClipboard).toHaveBeenCalledWith("Copy me");
+    });
+  });
+
+  it("shows 'Copied!' feedback after successful clipboard write", async () => {
+    render(<Transcript {...defaultProps} text="Copy me" />);
+    const btn = screen.getByText("Copy to Clipboard");
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Copied!")).toBeTruthy();
+    });
+  });
+
+  it("handles clipboard write failure without crashing", async () => {
+    mockWriteClipboard.mockRejectedValueOnce(new Error("Clipboard denied"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     render(<Transcript {...defaultProps} text="Copy me" />);
     const btn = screen.getByText("Copy to Clipboard");
@@ -47,7 +82,16 @@ describe("Transcript", () => {
       fireEvent.click(btn);
     });
 
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Copy me");
+    await waitFor(() => {
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[Transcript] clipboard write failed:",
+        expect.any(Error)
+      );
+    });
+
+    // Button should NOT show "Copied!" on failure
+    expect(screen.getByText("Copy to Clipboard")).toBeTruthy();
+    consoleSpy.mockRestore();
   });
 });
 

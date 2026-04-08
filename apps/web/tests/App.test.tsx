@@ -88,6 +88,21 @@ vi.mock("../src/utils/audio", () => ({
   encodeWavBuffer: vi.fn(),
 }));
 
+// ---------------------------------------------------------------------------
+// Audio cue mock — tracks playCopySound / playClearSound calls
+// ---------------------------------------------------------------------------
+
+const mockPlayCopySound = vi.fn().mockResolvedValue(undefined);
+const mockPlayClearSound = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../src/services/audio", () => ({
+  playCopySound: (...args: unknown[]) => mockPlayCopySound(...args),
+  playClearSound: (...args: unknown[]) => mockPlayClearSound(...args),
+  initAudio: vi.fn().mockResolvedValue(undefined),
+  setAudioMuted: vi.fn(),
+  isAudioMuted: vi.fn(() => false),
+}));
+
 import { encodeWav } from "../src/utils/audio";
 import { streamTranscribeAudio } from "../src/services/api";
 
@@ -152,7 +167,7 @@ describe("App — voice commands (continuous mode)", () => {
     });
   });
 
-  it('"copy" writes accumulated transcript to clipboard, transcript remains', async () => {
+  it('"copy" writes accumulated transcript to clipboard and plays chime', async () => {
     render(<App />);
 
     // Accumulate a transcript via a normal segment first
@@ -168,12 +183,47 @@ describe("App — voice commands (continuous mode)", () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
     });
 
+    // Chime plays after clipboard write succeeds
+    await waitFor(() => {
+      expect(mockPlayCopySound).toHaveBeenCalledOnce();
+    });
+
     // Transcript is not cleared by copy — still present
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     expect(textarea.value).toContain("hello");
   });
 
-  it('"clear" clears transcript, VAD stays active (no stopListening)', async () => {
+  it('"copy" does not play chime when clipboard write fails', async () => {
+    // Make clipboard write fail
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(<App />);
+
+    // Accumulate transcript
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(COMPLETE_RESULT); });
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+
+    // Fire "copy"
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(commandResult("Copy.")); });
+
+    await waitFor(() => {
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[copy command] clipboard write failed:",
+        expect.any(Error)
+      );
+    });
+
+    // No chime on failure — hard requirement
+    expect(mockPlayCopySound).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it('"clear" clears transcript, plays sweep, VAD stays active', async () => {
     render(<App />);
 
     // Accumulate transcript
@@ -188,6 +238,9 @@ describe("App — voice commands (continuous mode)", () => {
     await waitFor(() => {
       expect(screen.queryByText("Transcribing...")).toBeNull();
     });
+
+    // Sweep plays on clear
+    expect(mockPlayClearSound).toHaveBeenCalledOnce();
 
     // Transcript cleared — textarea absent (nothing to show)
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -208,6 +261,9 @@ describe("App — voice commands (continuous mode)", () => {
 
     expect(mockStopListening).not.toHaveBeenCalled();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    // No audio cues on normal segments
+    expect(mockPlayCopySound).not.toHaveBeenCalled();
+    expect(mockPlayClearSound).not.toHaveBeenCalled();
   });
 });
 
@@ -321,6 +377,107 @@ describe("App — continuous mode orchestration", () => {
 
     // stopListening called once (on explicit stop — not called again on complete)
     expect(mockStopListening).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Segment join / separator tests
+// ---------------------------------------------------------------------------
+
+describe("App — continuous mode segmentation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedOnSpeechEnd = undefined;
+    capturedOnSegment = undefined;
+    capturedOnComplete = undefined;
+    streamCalls.length = 0;
+    mockIsListening = true;
+    localStorage.clear();
+    localStorage.setItem("voice-scribe-recording-mode", "continuous");
+
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it("first segment has no prefix — appears as-is", async () => {
+    render(<App />);
+
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => { capturedOnComplete!(COMPLETE_RESULT); }); // cleaned: "hello"
+
+    await waitFor(() => {
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+      expect(textarea.value).toBe("hello");
+    });
+  });
+
+  it("two segments with short gap get single space separator", async () => {
+    const dateNow = vi.spyOn(Date, "now");
+
+    render(<App />);
+
+    // First segment — speechEndTime captured via Date.now() in onSpeechEnd
+    dateNow.mockReturnValue(1000);
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => {
+      capturedOnComplete!({
+        ...COMPLETE_RESULT,
+        cleaned: "hello",
+      });
+    });
+
+    // Second segment at t=2000 (1s gap — below PARAGRAPH_BREAK_MS of 3s)
+    dateNow.mockReturnValue(2000);
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => {
+      capturedOnComplete!({
+        ...COMPLETE_RESULT,
+        cleaned: "world",
+        raw: "world raw",
+      });
+    });
+
+    await waitFor(() => {
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+      expect(textarea.value).toBe("hello world");
+    });
+
+    dateNow.mockRestore();
+  });
+
+  it("two segments with long gap get paragraph break separator", async () => {
+    const dateNow = vi.spyOn(Date, "now");
+
+    render(<App />);
+
+    // First segment at t=1000
+    dateNow.mockReturnValue(1000);
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => {
+      capturedOnComplete!({
+        ...COMPLETE_RESULT,
+        cleaned: "first thought",
+      });
+    });
+
+    // Second segment at t=5000 (4s gap — above PARAGRAPH_BREAK_MS of 3s)
+    dateNow.mockReturnValue(5000);
+    act(() => { capturedOnSpeechEnd!(new Float32Array([0.1])); });
+    act(() => {
+      capturedOnComplete!({
+        ...COMPLETE_RESULT,
+        cleaned: "second thought",
+        raw: "second thought raw",
+      });
+    });
+
+    await waitFor(() => {
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+      expect(textarea.value).toBe("first thought\n\nsecond thought");
+    });
+
+    dateNow.mockRestore();
   });
 });
 

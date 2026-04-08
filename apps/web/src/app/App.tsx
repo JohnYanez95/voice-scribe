@@ -8,6 +8,7 @@ import { useVAD } from "../hooks/useVAD";
 import { encodeWav } from "../utils/audio";
 import { detectVoiceCommand } from "../utils/voiceCommands";
 import { streamTranscribeAudio, transcribeAudio } from "../services/api";
+import { initAudio, playCopySound, playClearSound, setAudioMuted } from "../services/audio";
 import { isDesktop, writeClipboard } from "../services/platform";
 import type { RecordingMode, RecordingState } from "../types";
 
@@ -32,6 +33,9 @@ export function App() {
       (localStorage.getItem("voice-scribe-recording-mode") as RecordingMode) ??
       "push-to-talk"
   );
+  const [audioMuted, setAudioMutedState] = useState<boolean>(
+    () => localStorage.getItem("voice-scribe-audio-muted") === "true"
+  );
 
   const wsCleanupSetRef = useRef<Set<() => void>>(new Set());
   const stopRequestedRef = useRef(false);
@@ -50,6 +54,20 @@ export function App() {
   const handleSetRecordingMode = useCallback((mode: RecordingMode) => {
     localStorage.setItem("voice-scribe-recording-mode", mode);
     setRecordingMode(mode);
+  }, []);
+
+  const handleSetAudioMuted = useCallback((muted: boolean) => {
+    localStorage.setItem("voice-scribe-audio-muted", String(muted));
+    setAudioMuted(muted);
+    setAudioMutedState(muted);
+  }, []);
+
+  // Initialize audio: sync mute state then preload buffers.
+  // Order matters — set mute before preload so module state is consistent.
+  useEffect(() => {
+    const stored = localStorage.getItem("voice-scribe-audio-muted") === "true";
+    setAudioMuted(stored);
+    initAudio();
   }, []);
 
   const {
@@ -138,15 +156,21 @@ export function App() {
             switch (command) {
               case "copy":
                 if (transcriptRef.current) {
-                  writeClipboard(transcriptRef.current).catch((err) => {
-                    console.error("[copy command] clipboard write failed:", err);
-                  });
+                  writeClipboard(transcriptRef.current)
+                    .then(() => playCopySound())
+                    .catch((err) => {
+                      console.error("[copy command] clipboard write failed:", err);
+                      // No sound on failure — hard requirement
+                    });
                 }
                 break;
               case "clear":
                 // Clear buffer directly — do NOT call handleClearTranscript (sets idle).
                 // The transition block below owns RecordingState; mixing setState calls
                 // within the same callback risks non-deterministic ordering in React batching.
+                playClearSound().catch((err) => {
+                  console.error("[clear command] audio playback failed:", err);
+                });
                 setTranscript("");
                 setRawTranscript("");
                 break;
@@ -161,10 +185,11 @@ export function App() {
               const segmentTime = speechEndTime ?? Date.now();
               const elapsed = segmentTime - lastSegmentTimestampRef.current;
               const separator =
-                lastSegmentTimestampRef.current > 0 &&
-                elapsed > PARAGRAPH_BREAK_MS
-                  ? "\n\n"
-                  : "";
+                lastSegmentTimestampRef.current === 0
+                  ? ""                        // first segment — no prefix
+                  : elapsed > PARAGRAPH_BREAK_MS
+                    ? "\n\n"                  // long pause — paragraph break
+                    : " ";                    // short pause — space
               setTranscript((prev) =>
                 prev ? prev + separator + result.cleaned : result.cleaned
               );
@@ -310,9 +335,11 @@ export function App() {
 
   const handleCopyTranscript = useCallback(() => {
     if (transcript) {
-      writeClipboard(transcript).catch((err) => {
-        console.error("[hotkey] clipboard write failed:", err);
-      });
+      writeClipboard(transcript)
+        .then(() => playCopySound())
+        .catch((err) => {
+          console.error("[hotkey] clipboard write failed:", err);
+        });
     }
   }, [transcript]);
 
@@ -391,6 +418,8 @@ export function App() {
         onShowRawComparisonChange={handleSetShowRawComparison}
         recordingMode={recordingMode}
         onRecordingModeChange={handleSetRecordingMode}
+        audioMuted={audioMuted}
+        onAudioMutedChange={handleSetAudioMuted}
         isActive={isActiveSession}
       />
       <div className="hotkey-hints">

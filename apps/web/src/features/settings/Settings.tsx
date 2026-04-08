@@ -10,6 +10,8 @@ interface SettingsProps {
   onShowRawComparisonChange: (show: boolean) => void;
   recordingMode: RecordingMode;
   onRecordingModeChange: (mode: RecordingMode) => void;
+  audioMuted: boolean;
+  onAudioMutedChange: (muted: boolean) => void;
   /** True while recording, listening, or processing — disables mode toggle. */
   isActive: boolean;
 }
@@ -24,6 +26,8 @@ export function Settings({
   onShowRawComparisonChange,
   recordingMode,
   onRecordingModeChange,
+  audioMuted,
+  onAudioMutedChange,
   isActive,
 }: SettingsProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -192,6 +196,21 @@ export function Settings({
           <p className="settings-note">
             Push-to-talk: hold to record, release to transcribe. Continuous: mic stays
             open, VAD detects speech automatically.
+          </p>
+        </div>
+
+        <div className="settings-section">
+          <h3>Audio</h3>
+          <label className="settings-model-option">
+            <input
+              type="checkbox"
+              checked={audioMuted}
+              onChange={(e) => onAudioMutedChange(e.target.checked)}
+            />
+            <span>Mute audio cues</span>
+          </label>
+          <p className="settings-note">
+            Silence copy and clear sound effects.
           </p>
         </div>
       </div>
