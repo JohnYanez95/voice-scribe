@@ -5,7 +5,7 @@
  *   isDesktop()      — true when running inside the Tauri webview
  *   writeClipboard() — HTTP POST to Rust clipboard server in desktop,
  *                       navigator.clipboard in browser
- *   submitText()     — stub: calls writeClipboard() in both environments (v3.2 fills this)
+ *   submitText()     — stub: calls writeClipboard() in both environments (submit deferred)
  *
  * Desktop clipboard writes POST to 127.0.0.1:8001/clipboard (plain text body).
  * The Rust process (main.rs) runs a tiny_http listener that writes to the
@@ -45,8 +45,8 @@ export async function writeClipboard(text: string): Promise<void> {
   }
 }
 
-// Stub — both environments route through writeClipboard until v3.2 adds
-// direct text injection in the Tauri context.
+// Stub — both environments route through writeClipboard. Direct text
+// injection deferred indefinitely from Voice Scribe (see roadmap).
 export async function submitText(text: string): Promise<void> {
   await writeClipboard(text);
 }

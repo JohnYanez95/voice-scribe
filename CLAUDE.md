@@ -56,7 +56,7 @@ Two-service system over localhost. WebSocket (default, v2.1+) and HTTP (fallback
 
 - **Frontend** (`apps/web/`, port 5174): React + TypeScript + Vite. Records audio via MediaRecorder, streams to API via WebSocket, displays editable transcript. `platform.ts` routes clipboard/submit calls by runtime context. One Vite build serves both browser and Tauri webview.
 - **Backend** (`apps/api/`, port 8084): FastAPI with GPU. Validates upload, transcodes via ffmpeg to 16kHz mono WAV, runs faster-whisper inference, returns transcript. Runs in Docker (browser mode) or as bare-host Python process (desktop mode) — same code, different process boundary.
-- **Desktop shell** (`apps/desktop/src-tauri/`): Tauri v2. Spawns the Python API as a sidecar, polls health, emits `backend-ready` event. HTTP clipboard server on port 8001 (`tiny_http` + `arboard`). WebKitGTK media permissions granted programmatically. CUDA runtime discovery via `cuda_ld_library_path()`.
+- **Desktop shell** (`apps/desktop/src-tauri/`): Tauri v2. Spawns the Python API as a sidecar, polls health, emits `backend-ready` event. HTTP clipboard + audio server on port 8001 (`tiny_http` + `arboard` + `rodio`). WebKitGTK media permissions granted programmatically. CUDA runtime discovery via `cuda_ld_library_path()`.
 
 Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MIME validation` → `ffmpeg transcode` → `faster-whisper inference` → `streaming transcript JSON` → `editable textarea`
 
@@ -73,7 +73,7 @@ Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MI
 - `src/hooks/useHotkeys.ts` — Ctrl+Shift keyboard shortcuts at App level (v2.0)
 - `src/features/settings/Settings.tsx` — Settings panel with model selection (v2.0)
 - `src/services/api.ts` — Typed fetch calls to localhost:8084
-- `src/services/platform.ts` — Platform detection (`isDesktop`), clipboard routing, submit stub (v3.1)
+- `src/services/platform.ts` — Platform detection (`isDesktop`), clipboard routing, submit stub (deferred)
 - `src/services/audio.ts` — Audio cue playback: browser (HTMLAudioElement) or desktop (POST to Rust rodio server) (v3.2)
 - `src/services/voiceCommands.ts` — Command detection: copy, clear (v2.3)
 
@@ -113,4 +113,4 @@ Diagram sources are versioned by milestone: `docs/diagrams/*.mmd` (living), `doc
 
 ## Scope
 
-v1/v1.1 is intentionally narrow: record one utterance, transcribe locally, display in editable textarea, copy to clipboard. v2 adds streaming, continuous dictation, hotkeys, and voice commands. v3 adds the Tauri desktop shell, platform abstraction, and native OS access (clipboard, planned: direct injection). Do not add async queues, background workers, or reverse proxy. The roadmap (`roadmap.md`) is the source of truth for scope decisions.
+v1/v1.1 is intentionally narrow: record one utterance, transcribe locally, display in editable textarea, copy to clipboard. v2 adds streaming, continuous dictation, hotkeys, and voice commands. v3 adds the Tauri desktop shell, platform abstraction, native OS access (clipboard, audio playback), and audio feedback for voice commands. Direct text injection is deferred indefinitely — downstream products use command draft/staging instead. Do not add async queues, background workers, or reverse proxy. The roadmap (`roadmap.md`) is the source of truth for scope decisions.
