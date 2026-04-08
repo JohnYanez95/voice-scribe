@@ -1,8 +1,8 @@
 # Voice Scribe v3 — Progress Report
 
-**Date:** April 7, 2026
+**Date:** April 8, 2026
 **Author:** Johnraymond Yanez
-**Status:** v3.0 and v3.1 gate-passed (2026-04-05). WebKitGTK recording fix applied (2026-04-07).
+**Status:** v3.0–v3.2 gate-passed. v3.2 complete (2026-04-08).
 
 ---
 
@@ -10,11 +10,11 @@
 
 The Tauri desktop application launches, spawns the Python API as a sidecar, waits for health, and transitions the UI from "Starting backend..." to an active Record button. Push-to-talk and continuous recording through the desktop webview produce GPU-accelerated transcription at sub-second inference latency (0.8–1.0s on large-v3).
 
-Push-to-talk recording on WebKitGTK was broken at v3.1 gate time — `MediaRecorder` silently produced zero bytes due to a GStreamer version mismatch in the encoding pipeline. A three-layer fix (2026-04-07) added server-side and client-side empty-audio guards, and a `ScriptProcessorNode` PCM fallback in `useRecorder.ts` that captures raw audio and encodes to WAV in JavaScript when `MediaRecorder` has no working encoder. The fallback uses the same `encodeWav()` function that continuous mode already uses. The hook's external interface is unchanged. See Triage #8.
+Voice commands produce audible confirmation. Saying "copy" writes the transcript to the system clipboard and plays an ascending chime. Saying "clear" empties the transcript and plays a descending sweep. Audio cues play through the OS audio system in both runtime contexts — browser uses `HTMLAudioElement`, desktop uses a Rust-side `rodio` endpoint on port 8001 (same `tiny_http` server as the clipboard). A mute toggle in Settings silences all cues. Continuous-mode transcript segments join with correct whitespace. All three clipboard call sites route through `platform.writeClipboard()`.
 
-v3.1 adds the platform abstraction layer (`platform.ts`) and native clipboard support. The `copy` voice command and `Ctrl+Shift+Y` hotkey route through `platform.writeClipboard()`, which POSTs to a Rust-side HTTP clipboard server (`tiny_http` on port 8001 + `arboard`) in desktop context — no window focus required. The Tauri clipboard plugin was tested and confirmed to crash WebKitGTK when called without user activation (see Triage #6). Browser behavior is unchanged. Auto-scroll was added to continuous mode in a prior session.
+The platform abstraction layer (`platform.ts`) routes clipboard writes and audio playback by runtime context. In desktop context, both operations POST to the Rust HTTP server on port 8001, bypassing WebKitGTK entirely. Browser behavior is unchanged. Auto-scroll pins to the bottom in continuous mode.
 
-135 automated tests pass (91 frontend, 44 backend). Rust compiles clean with zero warnings. TypeScript compiles clean.
+159 automated tests pass (115 frontend, 44 backend). Rust compiles clean with zero warnings. TypeScript compiles clean.
 
 | Deliverable | Status |
 |---|---|
@@ -31,13 +31,19 @@ v3.1 adds the platform abstraction layer (`platform.ts`) and native clipboard su
 | `docs/v3/host-setup.md` | Complete (`69457d0`) |
 | v3.1 — `platform.ts` abstraction | Complete |
 | v3.1 — Native clipboard (HTTP server + arboard) | Complete |
-| v3.1 — Clipboard call site routing | Complete (2 of 3 call sites — see backlog) |
+| v3.1 — Clipboard call site routing | Complete (3 of 3 — final site routed in v3.2) |
 | v3.1 — Desktop clipboard routing test | Complete |
 | Auto-scroll in continuous mode | Complete |
 | v3.1 — WebKitGTK recording fallback (Triage #8) | Complete |
 | v3.1 — Backend 0-byte audio guard | Complete |
 | v3.1 — Frontend empty-blob guard | Complete |
 | Port standardization (8084/5174) for desktop | Complete |
+| v3.2 — Audio feedback for `copy` (chime after clipboard success) | Complete |
+| v3.2 — Audio feedback for `clear` (sweep on state clear) | Complete |
+| v3.2 — Rust-side audio playback (`rodio` on port 8001) | Complete |
+| v3.2 — Mute toggle in Settings | Complete |
+| v3.2 — Transcript.tsx clipboard routing (3rd call site) | Complete |
+| v3.2 — Transcript segmentation fix | Complete |
 
 ---
 
@@ -99,7 +105,7 @@ Covered in detail in the prior progress report revision. Summary:
 |---|---|---|
 | `isDesktop()` | Returns `false` | Returns `true` (`window.__TAURI__`) |
 | `writeClipboard(text)` | `navigator.clipboard.writeText()` | `fetch()` POST to `http://127.0.0.1:8001/clipboard` |
-| `submitText(text)` | Calls `writeClipboard()` (stub) | Calls `writeClipboard()` (filled in v3.2) |
+| `submitText(text)` | Calls `writeClipboard()` (stub) | Calls `writeClipboard()` (stub — submit deferred) |
 
 Desktop clipboard writes use `fetch()` POST to a Rust-side HTTP listener (`tiny_http` on port 8001). The Rust process reads the request body and writes to the system clipboard via `arboard`. This bypasses WebKitGTK entirely — the browser's Fetch API has no user-activation requirement for POST requests, so voice commands (which fire from WebSocket callbacks with no user gesture) work. See Triage #6 for why the Tauri clipboard plugin is not used.
 
@@ -137,6 +143,56 @@ Transcript textarea pins to the bottom as new segments arrive during continuous 
 Five new tests in `apps/web/tests/Transcript.test.tsx` verify pin/release/re-engage behavior.
 
 This was not in the v3.1 roadmap scope — it's a UX improvement that shipped in the same session. Continuous mode without auto-scroll required manual scrolling to see incoming segments, which was a practical friction point during field testing.
+
+---
+
+## v3.2 — Audio Feedback + Clipboard Cleanup + Segmentation Fix (Complete)
+
+Six scope items delivered across `264cc6b` and `aee2787`. Gate passed 2026-04-08.
+
+### Audio Cues
+
+Voice commands produce audible confirmation. Copy: ascending chime after `writeClipboard()` resolves (no sound on failure). Clear: descending sweep on state clear. Cues are distinct without visual context.
+
+Two playback paths selected at runtime via `isDesktop()` in `audio.ts`:
+
+| Context | Path | Mechanism |
+|---|---|---|
+| Browser | `HTMLAudioElement` with preloaded WAV files (`/sounds/copy.wav`, `/sounds/clear.wav`) | Standard browser audio |
+| Desktop (Tauri) | POST to `http://127.0.0.1:8001/audio/play` → Rust `rodio` playback | `include_bytes!` WAV embedding, fire-and-forget thread with `Sink::sleep_until_end()`, 204 response |
+
+**Scope expansion.** The v3.2 scope said "Web Audio API or bundled audio files... no new dependencies beyond the sound assets themselves." WebKitGTK's audio subsystem proved unreliable in the Tauri webview — three failure modes: (1) devtools interaction kills audio output, (2) Bluetooth device switching loses the audio path, (3) codec ramp-up truncates short transients. `rodio` added as a Rust dependency. Same WebKitGTK bypass pattern as the v3.1 clipboard server — two OS-level operations now route through the Rust HTTP server on port 8001. This was the pre-identified fallback path in the implementation plan.
+
+### Mute Toggle
+
+Settings panel toggle silences all audio cues. `localStorage` persistence (same pattern as recording mode toggle). Module-scoped state in `audio.ts` — `setAudioMuted()` / `isAudioMuted()`.
+
+### Clipboard Routing Consolidation
+
+The `Transcript.tsx` "Copy to Clipboard" button now routes through `platform.writeClipboard()`. All three clipboard call sites use the platform layer:
+
+1. `App.tsx` — `copy` voice command
+2. `App.tsx` — `handleCopyTranscript`
+3. `Transcript.tsx` — "Copy to Clipboard" button
+
+Completes the v3.1 backlog item (previously 2 of 3).
+
+### Transcript Segmentation Fix
+
+Continuous-mode segment joins produce correct whitespace: space on short pause, paragraph break on long pause, no prefix on first segment. Root cause: `clean_transcript` in `cleanup.py` calls `.strip()`, so every `result.cleaned` is trimmed on both ends. The separator logic in `App.tsx` produced `""` when below `PARAGRAPH_BREAK_MS` — two consecutive segments concatenated with no space at the join.
+
+### Gate-Time Fix
+
+The `Transcript.tsx` copy button was missing the audio chime — `writeClipboard()` was routed correctly through the platform layer, but `playCopySound()` was never wired. One import, one line. The chime is fire-and-forget (not `await`) — audio playback failure must not block the "Copied!" visual feedback.
+
+### New Artifacts
+
+| File | Purpose |
+|---|---|
+| `apps/web/src/services/audio.ts` | Audio cue playback — platform branching, mute state, preload |
+| `apps/web/public/sounds/copy.wav` | Ascending chime |
+| `apps/web/public/sounds/clear.wav` | Descending sweep |
+| `ops/scripts/generate_sounds.py` | Deterministic WAV asset generation |
 
 ---
 
@@ -220,11 +276,11 @@ Three WebKitGTK warnings or traps observed during desktop operation. One (D-Bus)
 
 | Suite | Count | Status |
 |---|---|---|
-| Frontend (vitest) | 91 | All pass |
+| Frontend (vitest) | 115 | All pass |
 | Backend (pytest) | 44 | All pass |
 | Rust (cargo check) | — | Clean, zero warnings |
 | TypeScript (tsc --noEmit) | — | Clean |
-| **Total** | **135** | **Green** |
+| **Total** | **159** | **Green** |
 
 New tests by phase:
 
@@ -250,12 +306,39 @@ New tests by phase:
 | v3.1 | `audio_format` → .ogg suffix | `test_transcribe_ws.py` | Server uses correct temp file extension for ogg audio |
 | v3.1 | Unknown format → no extension | `test_transcribe_ws.py` | Server omits extension for unrecognized format, lets ffmpeg probe |
 | v3.1 | 0-byte audio rejected | `test_transcribe_ws.py` | Server returns error JSON instead of crashing ffmpeg |
+| v3.2 | `initAudio` creates both Audio elements | `audioService.test.ts` | Preload creates copy + clear elements |
+| v3.2 | `initAudio` sets preload to auto | `audioService.test.ts` | Elements configured for eager loading |
+| v3.2 | `playCopySound` calls play() | `audioService.test.ts` | Browser-path copy playback |
+| v3.2 | `playCopySound` resets currentTime | `audioService.test.ts` | Rapid repeats don't skip |
+| v3.2 | `playCopySound` no-op when not initialized | `audioService.test.ts` | Graceful degradation |
+| v3.2 | `playCopySound` skips when muted | `audioService.test.ts` | Mute gates playback |
+| v3.2 | `playClearSound` calls play() | `audioService.test.ts` | Browser-path clear playback |
+| v3.2 | `playClearSound` skips when muted | `audioService.test.ts` | Mute gates playback |
+| v3.2 | Mute default state | `audioService.test.ts` | Defaults to not muted |
+| v3.2 | `setAudioMuted(true)` | `audioService.test.ts` | Enables mute |
+| v3.2 | `setAudioMuted(false)` | `audioService.test.ts` | Disables mute |
+| v3.2 | Desktop: copy posts to audio server | `audioService.test.ts` | Tauri-path fetch to rodio endpoint |
+| v3.2 | Desktop: clear posts to audio server | `audioService.test.ts` | Tauri-path fetch to rodio endpoint |
+| v3.2 | Desktop: muted skips fetch | `audioService.test.ts` | No server call when muted |
+| v3.2 | Desktop: throws on non-OK response | `audioService.test.ts` | Error surfaces from rodio endpoint |
+| v3.2 | Copy command plays chime | `App.test.tsx` | Chime fires after clipboard write |
+| v3.2 | Copy command: no chime on clipboard failure | `App.test.tsx` | Silence on `writeClipboard()` rejection |
+| v3.2 | Clear command plays sweep | `App.test.tsx` | Sweep fires on state clear |
+| v3.2 | First segment: no prefix | `App.test.tsx` | Segmentation — initial segment appears as-is |
+| v3.2 | Short-gap segments: space separator | `App.test.tsx` | Segmentation — space between quick segments |
+| v3.2 | Long-gap segments: paragraph break | `App.test.tsx` | Segmentation — line break on long pause |
+| v3.2 | Mute toggle renders unchecked | `Settings.test.tsx` | Default UI state |
+| v3.2 | Mute toggle → onAudioMutedChange(true) | `Settings.test.tsx` | Check fires callback |
+| v3.2 | Mute toggle → onAudioMutedChange(false) | `Settings.test.tsx` | Uncheck fires callback |
+| v3.2 | Transcript button → `platform.writeClipboard()` | `Transcript.test.tsx` | Platform-routed clipboard write |
+| v3.2 | Transcript button → "Copied!" feedback | `Transcript.test.tsx` | Visual feedback after write |
+| v3.2 | Transcript button → handles failure | `Transcript.test.tsx` | Graceful degradation on clipboard error |
 
 ---
 
 ## Gate Validation — Complete
 
-Both gates passed on 2026-04-05 at the physical desktop.
+v3.0 and v3.1 gates passed 2026-04-05. v3.2 gate passed 2026-04-08.
 
 **v3.0 gate (roadmap line 732–734):** App launched, sidecar started and passed health check, continuous-mode recording worked through Tauri webview, model loaded (large-v3, CUDA) with sub-second inference latency (0.4–1.0s). Voice commands and settings panel exercised during v3.1 gate session.
 
@@ -266,6 +349,17 @@ Both gates passed on 2026-04-05 at the physical desktop.
 
 **Fix applied at gate:** `tauri.conf.json` CSP `connect-src` was missing `http://127.0.0.1:8001` (clipboard server origin). Entry had been added in a prior session, reverted during unrelated debugging, never restored. One-line fix, no other code changes.
 
+**v3.2 gate (roadmap lines 872–879):**
+1. Dictate → say "copy" → chime plays → switch app → Ctrl+V → transcript is there ✓
+2. Dictate → say "clear" → sweep plays → textarea is empty ✓
+3. Silence test: clipboard server not running → "copy" → no chime ✓
+4. Mute toggle: enable mute → copy and clear → no sounds play ✓
+5. All three clipboard call sites through `platform.writeClipboard()` ✓
+6. Segmentation: continuous dictation with varied pause lengths — correct whitespace ✓
+7. Browser build: `npm run build` zero errors, `npx vitest run` 115/115 ✓
+
+**Gate-time fix:** `Transcript.tsx` copy button missing `playCopySound()` call. One import, one line. Chime wired as fire-and-forget — audio failure does not block "Copied!" feedback.
+
 ---
 
 ## Reviewer Notes
@@ -274,7 +368,9 @@ Both gates passed on 2026-04-05 at the physical desktop.
 
 **v3.0 scope held.** Phase B delivered the five planned deliverables plus two triage fixes that were direct consequences of the bare-host transition (CUDA runtime, WebKitGTK permissions). No scope additions — both fixes address runtime requirements that were always implicit in "desktop app records audio with GPU inference" but only became visible at integration time. The `useRecorder.ts` error message update was flagged by the Principal during triage review. `docs/v3/host-setup.md` delivered at `69457d0`.
 
-**v3.1 scope held.** Three of four roadmap scope items delivered: platform abstraction layer, native clipboard (HTTP server, not plugin — see Triage #6), and clipboard call site routing. `voiceCommands.ts` unchanged per plan — `submit` is v3.2. One call site (`Transcript.tsx` "Copy to Clipboard" button) not routed through the platform layer; tracked as v3.2 cleanup.
+**v3.1 scope held.** Three of four roadmap scope items delivered: platform abstraction layer, native clipboard (HTTP server, not plugin — see Triage #6), and clipboard call site routing. `voiceCommands.ts` unchanged per plan — `submit` deferred indefinitely from Voice Scribe. One call site (`Transcript.tsx` "Copy to Clipboard" button) was deferred to v3.2 cleanup and is now routed.
+
+**v3.2 scope held.** Six scope items delivered. Scope item 3 (audio implementation) expanded — `rodio` added as a Rust dependency after WebKitGTK audio proved unreliable. Same bypass pattern as v3.1 clipboard server. Pre-identified fallback path. No speculative features entered: "scribble" sound and per-cue toggle configuration proposed during implementation and rejected as scope creep. All three clipboard call sites now route through `platform.writeClipboard()`. Segmentation fix verified with continuous dictation.
 
 **WebKitGTK recording fix (2026-04-07).** Push-to-talk on the desktop shell — a v3.1 deliverable — was not functional at gate time. `MediaRecorder` silently produced 0-byte audio due to a GStreamer encoding pipeline failure. Three-layer fix: backend 0-byte rejection, frontend empty-blob guard, and `ScriptProcessorNode` PCM fallback in `useRecorder.ts`. The fallback reuses the `encodeWav()` path that continuous mode already exercises. 10 new tests (7 frontend, 3 backend). This is a v3.1 completion item, not new v3.2 work.
 
@@ -288,10 +384,10 @@ Both gates passed on 2026-04-05 at the physical desktop.
 
 **`resource_dir()` vs `CARGO_MANIFEST_DIR`.** The API directory resolution was simplified to `CARGO_MANIFEST_DIR` only. `resource_dir()` is the correct approach for production bundles but returned `target/debug/` in dev mode, producing a wrong relative path. Mixing both in an `or_else` chain masked the dev-mode failure because `resource_dir()` succeeded (returned a path) but the path was wrong. The compile-time constant is correct for all dev builds and makes the failure mode obvious if the directory doesn't exist (panic with path in message). Production bundling is post-v3.0. `CARGO_MANIFEST_DIR` bakes the build machine's absolute path into the binary — the moment distribution packaging produces a `.deb` or `.msi`, the API directory resolution must switch to `resource_dir()` or `app.path().resolve()`.
 
-**Outstanding non-blocking items.** D-Bus warning in WSL2 is cosmetic. The GStreamer `automatic-eos` and `NeedDebuggerBreak` warnings are now explained — both are symptoms of the GStreamer version mismatch diagnosed in Triage #8. The recording fallback bypasses GStreamer entirely, so the warnings have no functional impact. `navigator.clipboard` denial in the Tauri webview is resolved by v3.1's HTTP clipboard server — the two `App.tsx` call sites now route through `platform.writeClipboard()`. One call site remains on `navigator.clipboard` (`Transcript.tsx` button); functions via `execCommand("copy")` fallback. WebSocket smoke test gap from v2 delivery report remains open.
+**Outstanding non-blocking items.** D-Bus warning in WSL2 is cosmetic. The GStreamer `automatic-eos` and `NeedDebuggerBreak` warnings are now explained — both are symptoms of the GStreamer version mismatch diagnosed in Triage #8. The recording fallback bypasses GStreamer entirely, so the warnings have no functional impact. All three clipboard call sites now route through `platform.writeClipboard()` (the `Transcript.tsx` button was the last, routed in v3.2). WebSocket smoke test gap from v2 delivery report remains open.
 
 **Clipboard plugin crash.** The Tauri clipboard plugin (`tauri-plugin-clipboard-manager`) was the original v3.1 plan. It crashes WebKitGTK with a `NeedDebuggerBreak` trap when called from a WebSocket callback (no user activation). This was confirmed by restoring the plugin with correct `isDesktop()` routing (`withGlobalTauri: true` verified) and observing the crash on a "copy" voice command. The HTTP server bypass (Triage #6) is the permanent architecture. The plugin should not be retested — this is a closed decision.
 
-**WSL2 audio loss.** The plugin crash (Triage #6) orphaned the WSL2 audio pipeline. `arecord -l` sees no soundcards, PipeWire sees only Dummy-Driver. Fix is `wsl --shutdown` from PowerShell. This blocks manual gate validation but is environment-only — all 135 automated tests pass without audio hardware.
+**WSL2 audio loss.** The plugin crash (Triage #6) orphaned the WSL2 audio pipeline. `arecord -l` sees no soundcards, PipeWire sees only Dummy-Driver. Fix is `wsl --shutdown` from PowerShell. This blocks manual gate validation but is environment-only — all 159 automated tests pass without audio hardware.
 
 **Triage as operational reference.** `docs/v3/host-setup.md` should include a troubleshooting section referencing triage items #2 (CUDA runtime — `libcublas.so.12` not found, resolved by `nvidia-cublas-cu12` pip package + `cuda_ld_library_path()` injection), #4 (WebKitGTK permissions — silent `getUserMedia` denial, resolved by `enable-media-stream` feature gate + `connect_permission_request` signal handler), #6 (clipboard plugin crash — resolved by HTTP server on 8001), and #8 (GStreamer recording failure — resolved by `ScriptProcessorNode` PCM fallback). These are the exact problems someone will hit on a new machine.

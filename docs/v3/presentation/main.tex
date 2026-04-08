@@ -330,9 +330,8 @@
               \texttt{platform.writeClipboard()}
         \item HTTP clipboard server (\texttt{tiny\_http} + \texttt{arboard}
               on port 8001) --- bypasses WebKitGTK user-activation requirement
-        \item \texttt{voiceCommands.ts} unchanged; \texttt{submit} lands in v3.2
-        \item Continuous mode auto-scroll: pins to bottom, releases on user
-              interaction
+        \item \texttt{voiceCommands.ts} unchanged; \texttt{submit} deferred
+        \item Auto-scroll in continuous mode: pins to bottom on new segments
     \end{itemize}
 
     \vspace{0.1em}
@@ -342,28 +341,28 @@
 \end{frame}
 
 
-\begin{frame}{v3.2 --- Audio Feedback + Clipboard Cleanup}
+\begin{frame}{v3.2 --- Audio Feedback + Clipboard + Segmentation (2026-04-08)}
     \small
-    \textbf{Deliverable:} audible confirmation when voice commands fire. All clipboard
-    call sites consistent through the platform layer.
+    \textbf{Deliverable:} audible voice command confirmation. Clipboard consolidation.
+    Clean continuous-mode segment joins.
 
     \vspace{0.2em}
-    \textbf{Key scope:}
+    \textbf{What shipped:}
     \begin{itemize}\setlength{\itemsep}{0pt}
-        \item \texttt{copy}: chime after \texttt{writeClipboard()} resolves.
-              No chime on failure (hard requirement)
-        \item \texttt{clear}: sweep plays immediately (synchronous state setter)
-        \item Web Audio API or bundled assets --- same sound in both contexts
-        \item \texttt{Transcript.tsx} clipboard button through
-              \texttt{platform.writeClipboard()} (v3.1 cleanup)
+        \item \texttt{copy}: ascending chime after \texttt{writeClipboard()} succeeds;
+              silence on failure. \texttt{clear}: descending sweep on state clear
+        \item Browser: \texttt{HTMLAudioElement}. Desktop: \texttt{rodio} via Rust
+              HTTP server on port 8001 (same WebKitGTK bypass as clipboard)
+        \item Mute toggle in Settings; all three clipboard call sites through
+              \texttt{platform.writeClipboard()}
+        \item Segment joins: space on short pause, paragraph break on long pause
     \end{itemize}
 
     \vspace{0.1em}
-    \textbf{Gate:} copy $\to$ chime $\to$ paste works. clear $\to$ sweep $\to$ empty.
-    Silence on clipboard failure. Three call sites through platform layer. Browser build clean.
-
-    \vspace{0.1em}
-    \textbf{Not in scope:} \texttt{submit} --- deferred until Windows-native build.
+    {\footnotesize\textbf{Pattern:} \texttt{rodio} added after WebKitGTK audio proved
+    unreliable. Two OS-level operations (clipboard, audio) now bypass the webview
+    via the Rust HTTP server --- an established architectural pattern, not two
+    individual workarounds.}
 \end{frame}
 
 
@@ -523,24 +522,21 @@
 
 \begin{frame}{What Is Deferred (Named, Not Forgotten)}
     \small
-    \begin{itemize}\setlength{\itemsep}{4pt}
-        \item \textbf{Model management UI} --- download progress, cache management
-              without editing config files. The existing settings panel handles
-              runtime model swap; that is sufficient for v3.0--v3.3. Deferred to v3.x.
+    \begin{itemize}\setlength{\itemsep}{2pt}
+        \item \textbf{Model management UI} --- download progress, cache management.
+              Settings panel handles runtime swap; sufficient for v3.0--v3.3.
 
-        \item \textbf{Linux/macOS \texttt{submit} injection} --- different APIs
-              (\texttt{xdotool}, \texttt{CGEvent}), different failure modes.
-              Windows-only is pragmatic scope discipline. Deferred to v3.x.
+        \item \textbf{\texttt{submit} (direct injection)} --- deferred indefinitely.
+              Downstream products use command draft/staging, not keystroke injection.
+              \texttt{submitText()} stub remains as an architectural placeholder.
 
-        \item \textbf{Hotkey configurability} --- registration failure is handled and
-              surfaced; the specific keys are not user-configurable in v3.3.
-              Deferred to v3.x.
+        \item \textbf{Hotkey configurability} --- conditional hard requirement for
+              v3.3 on Linux (GNOME/KDE/i3/VS Code claim shortcut space). If no
+              conflict-free default exists, user-configurable bindings required.
 
-        \item \textbf{Auto-update} --- Tauri has built-in support.
-              Not in scope for any v3 sub-milestone.
+        \item \textbf{Auto-update} --- Tauri built-in. Not in scope for v3.
 
-        \item \textbf{Rust-native inference} --- single-binary distribution.
-              Trigger condition stated above. Named future milestone.
+        \item \textbf{Rust-native inference} --- single-binary distribution trigger.
     \end{itemize}
 \end{frame}
 

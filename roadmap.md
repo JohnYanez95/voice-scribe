@@ -760,7 +760,8 @@ requirement). Web version unchanged.
      `http://127.0.0.1:8001/clipboard` (plain text body); browser:
      `navigator.clipboard.writeText()`
    - `submitText(text: string): Promise<void>` — stub in v3.1, calls `writeClipboard()` in both
-     environments. Filled in v3.2 for Tauri.
+     environments. Remains a stub — submit deferred indefinitely from Voice Scribe (see Deferred
+     from v3).
 
 2. **HTTP clipboard server.** `main.rs` spawns a `tiny_http` listener on `127.0.0.1:8001` during
    Tauri `setup()`. Accepts `POST /clipboard` with plain text body, writes to system clipboard via
@@ -778,8 +779,8 @@ requirement). Web version unchanged.
      `navigator.clipboard.writeText()` directly. Functions via `execCommand("copy")` fallback in
      the Tauri webview. Deferred to v3.2 scope item 6 for platform layer consistency.
 
-4. **`voiceCommands.ts` unchanged.** Still two commands (`copy`, `clear`). The `submit` entry lands
-   in v3.2.
+4. **`voiceCommands.ts` unchanged.** Still two commands (`copy`, `clear`). `submit` was originally
+   planned for v3.2 but was deferred indefinitely from Voice Scribe (see Deferred from v3).
 
 5. **WebKitGTK recording fallback (triage completion, 2026-04-07).** Push-to-talk recording in the
    Tauri desktop app produced empty audio on WebKitGTK. `getUserMedia` succeeded (mic access was
