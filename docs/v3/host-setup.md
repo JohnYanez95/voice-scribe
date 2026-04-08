@@ -15,7 +15,7 @@ Verify: `cargo --version` and `rustc --version`.
 
 ### System Dependencies (Linux / WSL2)
 
-WebKitGTK and GStreamer are required by Tauri v2 on Linux:
+WebKitGTK, GStreamer, and ALSA libraries are required by Tauri v2 on Linux:
 
 ```bash
 sudo apt update && sudo apt install -y \
@@ -24,8 +24,31 @@ sudo apt update && sudo apt install -y \
   libgstreamer1.0-dev \
   libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-good \
-  gstreamer1.0-plugins-bad
+  gstreamer1.0-plugins-bad \
+  libasound2-dev \
+  libasound2-plugins
 ```
+
+`libasound2-dev` is a build dependency for `rodio` (Rust audio playback).
+`libasound2-plugins` is a runtime dependency that provides the ALSA PulseAudio
+plugin — required on systems where audio routes through PulseAudio or PipeWire
+rather than raw ALSA (including WSL2 with WSLg).
+
+**WSL2 only:** Create `~/.asoundrc` to route ALSA output through WSLg's
+PulseAudio server:
+
+```
+pcm.!default {
+    type pulse
+}
+ctl.!default {
+    type pulse
+}
+```
+
+Without this file, `rodio` cannot find an audio output device and voice command
+chimes will fail silently. Native Linux systems with PulseAudio or PipeWire
+typically auto-configure this.
 
 ### Python 3.10+ Virtual Environment
 
