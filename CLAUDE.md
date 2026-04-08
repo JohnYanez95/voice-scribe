@@ -16,7 +16,7 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 - `roadmap.md` is the single source of truth for scope decisions
 - 135 tests (91 frontend, 44 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
-- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → v3.2 (audio feedback, clipboard cleanup) → v3.3 (system tray + global hotkeys)
+- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → v3.2 (audio feedback, clipboard cleanup, segmentation fix) → v3.3 (system tray + global hotkeys). v3.3 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
 
 **Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
 

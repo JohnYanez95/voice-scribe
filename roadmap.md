@@ -1,6 +1,6 @@
 # Voice Scribe — Roadmap
 
-**Last Updated:** April 7, 2026
+**Last Updated:** April 8, 2026
 **Status:** v3.1 Complete — v3.2 next
 
 ---
@@ -24,6 +24,8 @@ Both use cases demand the same underlying capabilities: accurate multilingual tr
 
 **v1 scope was intentionally narrow:** record one utterance, send to a local transcription API, return transcript text, show in an editable text area, copy to clipboard. That scope has been delivered and validated.
 
+**Voice Scribe is the capture layer.** It does raw speech capture, transcription, and immediate delivery well — and stops there. Transformation, structuring, audience routing, and performance instrumentation are separate products that compose with Voice Scribe, not extensions of it. This boundary is compliance-driven: Voice Scribe's security and privacy posture is built around zero persistence and zero metadata collection. Products that need to collect timing data, route artifacts, or store derived content bear their own compliance cost. See Adjacent Projects for the downstream product landscape.
+
 ---
 
 ## Design Principles
@@ -39,6 +41,10 @@ Both use cases demand the same underlying capabilities: accurate multilingual tr
 **Public-safe defaults.** The repo and runtime assume eventual public distribution and default toward safe behavior.
 
 **Close-mic audio source assumed.** VAD accuracy and inference quality degrade with distant or ambient-noise-contaminated input. A headset or USB microphone is recommended in any environment with background noise. Laptop microphone is viable in quiet single-speaker conditions only.
+
+**Raw transcript is first-class.** The raw transcript pane is the primary product surface — a scratchpad, an editing surface, and a staging area for downstream tools. Voice Scribe does not transform, summarize, or route text. It captures and presents. (Distinct from "audio is transient" — audio is the short-lived input; the raw transcript is the durable, editable output.)
+
+**Auditory confirmation is an interaction primitive.** Sound cues communicate action success without requiring visual focus. Part of the recording/command interaction loop, not a notification system.
 
 ---
 
@@ -410,7 +416,7 @@ Record audio, send to local API, transcode, transcribe, return transcript, displ
 
 **Evaluation tooling retained intentionally:** The comparison view in `Transcript.tsx` (lines 43–58) was built for the cleanup evaluation. It is gated on `rawText !== text`, which is true only when whitespace normalization or first-letter cap actually fires. Low render frequency, lightweight code. Retained because it will be useful if the cleanup function grows later. Not orphaned code.
 
-**A second GPU-backed model for cleanup** is deferred — evaluated and found unnecessary for this use case. Revisit only if Whisper output quality degrades on longer recordings or non-English dictation.
+**A second GPU-backed model for cleanup** is deferred — evaluated and found unnecessary for this use case. This idea is now subsumed by the Voice Workspace product's second-stage cleanup model (see Adjacent Projects). Revisit within Voice Scribe only if Whisper output quality degrades on longer recordings or non-English dictation.
 
 ### v2 — Interaction Model
 
@@ -812,30 +818,47 @@ Neither blocks v3.2 — engineer runs both at the next `make desktop` session an
 the progress report. `CARGO_MANIFEST_DIR` rework trigger already documented in progress report
 (line 258) — no separate tracking entry needed.
 
-#### v3.2 — Audio Feedback + Clipboard Cleanup
+#### v3.2 — Audio Feedback + Clipboard Cleanup + Segmentation Fix
 
 **Deliverable:** Audible confirmation when voice commands fire. All clipboard call sites consistent
-through the platform layer.
+through the platform layer. Continuous-mode transcript segmentation produces clean segment joins.
 
 **Scope:**
 
 1. **Audio feedback for `copy`.** Short chime plays after `writeClipboard()` resolves successfully.
    Hard requirement: the chime must play after the clipboard write succeeds, not on command
    detection. A chime followed by a silent clipboard failure is worse than no chime at all. If
-   `writeClipboard()` rejects, no sound plays.
+   `writeClipboard()` rejects, no sound plays. Cue must be low-latency — perceptibly instantaneous
+   relative to the action.
 
 2. **Audio feedback for `clear`.** Whoosh/sweep plays immediately when `clear` fires. `clear` is a
-   synchronous React state setter — no async timing concern.
+   synchronous React state setter — no async timing concern. Cue must be immediately distinguishable
+   from the copy chime without visual context.
 
 3. **Audio implementation.** Web Audio API or bundled audio files in `App.tsx` voice command dispatch.
    No backend changes, no new dependencies beyond the sound assets themselves. Both browser and
    desktop contexts should produce the same sounds.
 
-4. **Transcript.tsx clipboard routing (cleanup from v3.1).** The "Copy to Clipboard" button in
+4. **Mute/disable toggle.** Settings panel toggle to silence all audio cues. Users need to disable
+   cues without removing the feature. Preference stored locally (same pattern as recording mode
+   toggle).
+
+5. **Transcript.tsx clipboard routing (cleanup from v3.1).** The "Copy to Clipboard" button in
    `Transcript.tsx` calls `navigator.clipboard.writeText()` directly instead of routing through
    `platform.writeClipboard()`. It functions via its `execCommand("copy")` fallback in the Tauri
    webview, but is inconsistent with the two call sites migrated in v3.1. Route through the platform
    layer so all three clipboard call sites use the same path.
+
+6. **Transcript segmentation fix.** Continuous-mode segment joins produce no whitespace when below
+   the paragraph break threshold. Root cause: `clean_transcript` in `cleanup.py` does `.strip()`,
+   so every `result.cleaned` is trimmed on both ends. The separator logic in `App.tsx` line 163–167
+   produces `""` when below `PARAGRAPH_BREAK_MS`. Two consecutive segments concatenate with no space
+   at the join. Fix the separator and verify:
+   - `result.cleaned` whitespace behavior from backend (`cleanup.py` `.strip()`)
+   - Partial vs. final transcript merge under concurrent segment completions
+   - Paragraph break logic (v2.3.3 fix) still functions correctly
+   If investigation reveals deeper issues (ordering bugs under concurrent completions, partial merge
+   timing), split into a separate milestone at that point.
 
 **Dependency:** v3.1's `platform.ts` and HTTP clipboard server.
 
@@ -848,9 +871,12 @@ remains — it costs nothing and the routing surface is tested.
 
 **Gate:** Dictate → say "copy" → chime plays → switch app → Ctrl+V → transcript is there. Dictate →
 say "clear" → sweep plays → textarea is empty. Silence test: force `writeClipboard()` failure (e.g.,
-clipboard server not running in desktop mode) → no chime plays. All three clipboard call sites
-(`App.tsx` copy command, `App.tsx` handleCopyTranscript, `Transcript.tsx` button) route through
-`platform.writeClipboard()`. Browser build: `npm run build` zero errors, `npx vitest run` passes.
+clipboard server not running in desktop mode) → no chime plays. Mute toggle: enable mute → repeat
+copy and clear → no sounds play. All three clipboard call sites (`App.tsx` copy command, `App.tsx`
+handleCopyTranscript, `Transcript.tsx` button) route through `platform.writeClipboard()`.
+Segmentation: three-minute continuous dictation session with varied pause lengths — inspect raw
+output for missing spaces between segments, missing line breaks at pause boundaries, double spaces,
+unexpected paragraph breaks. Browser build: `npm run build` zero errors, `npx vitest run` passes.
 
 #### v3.3 — System Tray + Global Hotkeys
 
@@ -866,7 +892,12 @@ application. System tray provides status and quick access.
    bindings when running as desktop app. Browser bindings (`useHotkeys.ts`) remain for web mode.
    Key conflict risk: global hotkeys can collide with other applications. Must fail gracefully with a
    user-visible error if registration fails. The error message and UX for registration failure must
-   be implemented (not just handled silently) and verified in the gate. Configurability deferred.
+   be implemented (not just handled silently) and verified in the gate. **Configurability is a
+   conditional hard requirement:** on Linux, GNOME, KDE, i3/sway, and VS Code all claim keyboard
+   shortcut space aggressively — no default binding is reliably conflict-free across common
+   environments. If investigation during implementation reveals that no default binding works across
+   the target environments, user-configurable bindings become a hard requirement for this milestone,
+   not a deferral.
 
 3. **Window management.** Recording triggered via global hotkey while the window is hidden. React
    state updates work regardless of window visibility — needs explicit verification, not assumption.
@@ -881,14 +912,22 @@ Transcript is in clipboard. Ctrl+V in VS Code. Voice Scribe window never appeare
 Failure path: with a conflicting hotkey registered in another application, confirm Voice Scribe
 surfaces a user-visible error dialog and does not crash. Tray "Quit": confirm sidecar is gone.
 
+**v3.3 is the last mainline milestone.** After v3.3, Voice Scribe is feature-complete as a capture
+primitive. Further capability expansion (transformation, routing, instrumentation) belongs to
+downstream products that compose with Voice Scribe — see Adjacent Projects.
+
 #### Deferred from v3 (named, not forgotten)
 
 - **`submit` voice command (direct injection)** — types the transcript directly into the focused
   application without clipboard. Requires `SendInput` (Win32). The development environment runs
-  inside WSL2 (Linux/WebKitGTK) — no path to Win32 APIs. Trigger: Windows-native Tauri build
-  (WebView2, distribution packaging). The `submitText()` stub in `platform.ts` and the
-  copy/submit separation architecture are in place. When re-evaluated, Linux/macOS injection
-  (`xdotool`, `CGEvent`) remains a separate deferral — different APIs, different failure modes.
+  inside WSL2 (Linux/WebKitGTK) — no path to Win32 APIs. Direct injection into WSL is too brittle
+  and environment-specific to be the next primitive. The near-term direction for downstream products
+  is command draft/staging — generating routeable artifacts the user can inspect, edit, and copy —
+  rather than direct keystroke injection. Direct execution is deferred pending validation by a
+  downstream product that it is the right primitive at all, not just pending a Windows-native build.
+  The `submitText()` stub in `platform.ts` and the copy/submit separation architecture remain as
+  architectural placeholders. When re-evaluated, Linux/macOS injection (`xdotool`, `CGEvent`)
+  remains a separate concern — different APIs, different failure modes.
 - **Model management UI enhancements** — download progress, cache management without config files.
   Deferred to v3.x. The settings panel already handles runtime model swap.
 - **Auto-update** — Tauri has built-in update support. Not in scope for v3.0–v3.3.
@@ -904,6 +943,35 @@ These compose with Voice Scribe but are **not part of its roadmap**. They are se
 **Text-to-Speech (TTS)** — the output half of the voice conversation loop. Voice Scribe handles input (speech → text); TTS handles output (text → speech). Together they enable a hands-free conversational interface. Same local-first constraint — no cloud APIs. Models to evaluate when the time comes: Coqui TTS, Bark, VITS, Piper.
 
 **Language Tutor Agent** — a conversational agent for foreign language pronunciation and speaking practice. Primary target: Japanese. Listens to the user speak (via Voice Scribe STT), compares against expected pronunciation, provides corrective feedback, converses in the target language. Integrates with existing Anki flashcard resources. Dependencies: Voice Scribe, TTS project, and a language-aware evaluation model.
+
+**Voice Workspace** (working title) — a multi-pane voice workspace that layers cleanup, structuring, audience routing, and artifact rendering on top of raw speech capture. Voice Scribe provides the capture layer (Speech Capture in the pipeline below). This product owns everything beyond raw capture:
+
+Pipeline architecture: Speech Capture (Voice Scribe) → Transcript Cleanup / Normalization → Intent & Audience Routing → Artifact Rendering → Execution / Export / Handoff.
+
+Owned scope:
+- Second-stage local cleanup model (candidates: Gemma 4 E4B, Qwen 4B-class, Phi-4-mini) powering all non-raw panes
+- Multi-pane UI: Raw (from Voice Scribe), Clean, Structured, Directed/Actionable
+- Transformation modes: Clean (punctuation, sentence boundaries, minor repairs), Structured (summary, action items, open questions, decisions), Directed (rewritten for a chosen audience), optional future Compressed (token-efficient downstream representation)
+- Audience/role routing: PM, Principal Engineer, Senior Engineer, General — with explicit routing commands (`refine principal`, `scope principal`, `handoff senior`, `summarize PM`) and structured audience metadata
+- Intent decomposition: routing layer extracting target audience, action type, artifact type, subject, constraints
+- Opt-in performance instrumentation and benchmarking
+- Recording control redesign (demote stop button, workspace as visual center of gravity)
+- Copy-vs-route action model reconsideration (observed usage suggests Clear > Copy frequency; clipboard may be secondary to route/send/transform actions)
+- Command draft/staging as the near-term delivery primitive (routeable artifacts the user inspects/edits/copies, not direct keystroke injection)
+
+Separate repo. Separate compliance posture — introducing metadata collection (even opt-in, even local-only) requires its own security and privacy review independent of Voice Scribe's zero-persistence contract.
+
+Product principles (govern this product, not Voice Scribe):
+- Raw transcript remains editable and first-class
+- Refinement is opt-in, not forced
+- UI privileges workspace over controls
+- Routing and transformation should be fast and obvious
+- Performance instrumentation is opt-in only, default off
+- Content privacy preserved by default
+- Second-stage model powers all derived panes except raw
+- Schema-agnostic public contract — no private upstream schema leakage
+
+**Integration contract (named, not designed).** Voice Scribe's current output is unstructured text in a textarea, delivered via clipboard. The workspace product will be the first downstream consumer that needs to consume transcripts programmatically — and will likely want richer data than flat text (segment boundaries, timestamps, possibly confidence scores). Voice Scribe currently has no structured output contract. When the workspace product reaches the point of needing one, the decision is whether Voice Scribe exposes a local API, a file-based contract, or IPC — each with different implications for the zero-persistence guarantee. This is a known future concern, not current scope.
 
 ---
 
@@ -943,7 +1011,7 @@ Do not publish with: permissive network exposure, transcript or audio logging en
 
 ## Summary
 
-Ship small. Earn the right to make it bigger. Build the primitive, then build on top of it.
+Ship small. Earn the right to make it bigger. Build the primitive, then build on top of it. Voice Scribe is the capture layer. Products that transform, route, or render voice output compose with it — they don't extend it.
 
 ---
 
