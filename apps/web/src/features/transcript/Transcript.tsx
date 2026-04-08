@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { playCopySound } from "../../services/audio";
 import { writeClipboard } from "../../services/platform";
 
 interface TranscriptProps {
@@ -67,6 +68,9 @@ export function Transcript({
       await writeClipboard(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      playCopySound().catch((err) => {
+        console.error("[Transcript] audio playback failed:", err);
+      });
     } catch (err) {
       console.error("[Transcript] clipboard write failed:", err);
     }

@@ -5,9 +5,12 @@
  *   - Copy: ascending chime after clipboard write succeeds
  *   - Clear: descending sweep when transcript is cleared
  *
- * Uses HTMLAudioElement instead of Web Audio API. Simpler, and critically:
- * routes through the OS audio system directly, so it survives audio device
- * changes (headphone disconnect/reconnect) without losing the output path.
+ * Two playback paths:
+ *   - Browser: HTMLAudioElement (routes through OS audio, survives device
+ *     changes better than AudioContext)
+ *   - Desktop (Tauri): POST to Rust audio server on port 8001. The Rust
+ *     process plays WAV files via rodio, bypassing WebKitGTK's audio
+ *     subsystem entirely. Same pattern as the clipboard server.
  *
  * Audio elements are preloaded on App mount via initAudio(). If preload
  * fails, playback is a no-op — the cue is feedback, not functionality.
@@ -15,9 +18,13 @@
  * localStorage by App.tsx.
  */
 
+import { isDesktop } from "./platform";
+
 let copyAudio: HTMLAudioElement | null = null;
 let clearAudio: HTMLAudioElement | null = null;
 let muted = false;
+
+const AUDIO_URL = "http://127.0.0.1:8001/audio/play";
 
 function createAudio(url: string): HTMLAudioElement {
   const audio = new Audio(url);
@@ -35,21 +42,41 @@ export async function initAudio(): Promise<void> {
   }
 }
 
-async function play(audio: HTMLAudioElement | null): Promise<void> {
+/** Browser path: play via HTMLAudioElement. */
+async function playLocal(audio: HTMLAudioElement | null): Promise<void> {
   if (!audio) return;
   // Reset to start so rapid repeated plays don't skip
   audio.currentTime = 0;
   await audio.play();
 }
 
+/** Desktop path: POST sound name to Rust audio server (rodio). */
+async function playViaServer(name: string): Promise<void> {
+  const resp = await fetch(AUDIO_URL, {
+    method: "POST",
+    body: name,
+  });
+  if (!resp.ok) {
+    throw new Error(`Audio playback failed (${resp.status})`);
+  }
+}
+
 export async function playCopySound(): Promise<void> {
   if (muted) return;
-  await play(copyAudio);
+  if (isDesktop()) {
+    await playViaServer("copy");
+  } else {
+    await playLocal(copyAudio);
+  }
 }
 
 export async function playClearSound(): Promise<void> {
   if (muted) return;
-  await play(clearAudio);
+  if (isDesktop()) {
+    await playViaServer("clear");
+  } else {
+    await playLocal(clearAudio);
+  }
 }
 
 export function setAudioMuted(value: boolean): void {

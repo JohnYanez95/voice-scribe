@@ -8,6 +8,12 @@ use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager};
 
+/// Embedded audio cue WAV files — compiled into the binary from the shared
+/// source in apps/web/public/sounds/. Same files the browser path serves
+/// via Vite. Generator script: ops/scripts/generate_sounds.py.
+const COPY_WAV: &[u8] = include_bytes!("../../../../apps/web/public/sounds/copy.wav");
+const CLEAR_WAV: &[u8] = include_bytes!("../../../../apps/web/public/sounds/clear.wav");
+
 /// Managed state: holds the sidecar child process handle so shutdown can
 /// reach it from any context (window close, app exit).
 struct Sidecar(Mutex<Option<Child>>);
@@ -186,6 +192,22 @@ fn kill_sidecar(child: &mut Child) {
     }
 }
 
+/// Play a WAV file from an in-memory buffer via the default audio output.
+/// Blocks until playback finishes (Sink::sleep_until_end), so callers should
+/// run this in a spawned thread to avoid blocking the HTTP server.
+fn play_wav(data: &'static [u8]) -> Result<(), String> {
+    let cursor = std::io::Cursor::new(data);
+    let source = rodio::Decoder::new(cursor)
+        .map_err(|e| format!("WAV decode failed: {}", e))?;
+    let (_stream, handle) = rodio::OutputStream::try_default()
+        .map_err(|e| format!("Audio output failed: {}", e))?;
+    let sink = rodio::Sink::try_new(&handle)
+        .map_err(|e| format!("Sink creation failed: {}", e))?;
+    sink.append(source);
+    sink.sleep_until_end();
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -264,56 +286,100 @@ fn main() {
                     )
                     .unwrap();
 
-                    if request.method() != &tiny_http::Method::Post
-                        || request.url() != "/clipboard"
-                    {
-                        let resp = tiny_http::Response::from_string("Not Found")
-                            .with_status_code(404)
-                            .with_header(cors);
-                        let _ = request.respond(resp);
-                        continue;
-                    }
+                    let is_post = request.method() == &tiny_http::Method::Post;
 
-                    let mut body = String::new();
-                    if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                        eprintln!("Clipboard request read failed: {}", e);
-                        let resp = tiny_http::Response::from_string(format!("Read error: {}", e))
-                            .with_status_code(500)
-                            .with_header(cors);
-                        let _ = request.respond(resp);
-                        continue;
-                    }
+                    // Route: POST /clipboard — write text to system clipboard via arboard
+                    if is_post && request.url() == "/clipboard" {
+                        let mut body = String::new();
+                        if let Err(e) = request.as_reader().read_to_string(&mut body) {
+                            eprintln!("Clipboard request read failed: {}", e);
+                            let resp = tiny_http::Response::from_string(format!("Read error: {}", e))
+                                .with_status_code(500)
+                                .with_header(cors);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
 
-                    match arboard::Clipboard::new() {
-                        Ok(mut clipboard) => match clipboard.set_text(&body) {
-                            Ok(()) => {
-                                let resp = tiny_http::Response::from_string("")
-                                    .with_status_code(204)
+                        match arboard::Clipboard::new() {
+                            Ok(mut clipboard) => match clipboard.set_text(&body) {
+                                Ok(()) => {
+                                    let resp = tiny_http::Response::from_string("")
+                                        .with_status_code(204)
+                                        .with_header(cors);
+                                    let _ = request.respond(resp);
+                                }
+                                Err(e) => {
+                                    eprintln!("Clipboard set_text failed: {}", e);
+                                    let resp = tiny_http::Response::from_string(format!(
+                                        "Clipboard write failed: {}",
+                                        e
+                                    ))
+                                    .with_status_code(500)
                                     .with_header(cors);
-                                let _ = request.respond(resp);
-                            }
+                                    let _ = request.respond(resp);
+                                }
+                            },
                             Err(e) => {
-                                eprintln!("Clipboard set_text failed: {}", e);
+                                eprintln!("Clipboard init failed: {}", e);
                                 let resp = tiny_http::Response::from_string(format!(
-                                    "Clipboard write failed: {}",
+                                    "Clipboard init failed: {}",
                                     e
                                 ))
                                 .with_status_code(500)
                                 .with_header(cors);
                                 let _ = request.respond(resp);
                             }
-                        },
-                        Err(e) => {
-                            eprintln!("Clipboard init failed: {}", e);
-                            let resp = tiny_http::Response::from_string(format!(
-                                "Clipboard init failed: {}",
-                                e
-                            ))
-                            .with_status_code(500)
-                            .with_header(cors);
-                            let _ = request.respond(resp);
                         }
+                        continue;
                     }
+
+                    // Route: POST /audio/play — play embedded WAV via rodio
+                    // Body is the sound name: "copy" or "clear".
+                    // Returns 204 immediately; playback runs in a spawned thread.
+                    if is_post && request.url() == "/audio/play" {
+                        let mut body = String::new();
+                        if let Err(e) = request.as_reader().read_to_string(&mut body) {
+                            eprintln!("Audio request read failed: {}", e);
+                            let resp = tiny_http::Response::from_string(format!("Read error: {}", e))
+                                .with_status_code(500)
+                                .with_header(cors);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
+
+                        let wav_data: Option<&'static [u8]> = match body.trim() {
+                            "copy" => Some(COPY_WAV),
+                            "clear" => Some(CLEAR_WAV),
+                            _ => None,
+                        };
+
+                        match wav_data {
+                            Some(data) => {
+                                thread::spawn(move || {
+                                    if let Err(e) = play_wav(data) {
+                                        eprintln!("Audio playback failed: {}", e);
+                                    }
+                                });
+                                let resp = tiny_http::Response::from_string("")
+                                    .with_status_code(204)
+                                    .with_header(cors);
+                                let _ = request.respond(resp);
+                            }
+                            None => {
+                                let resp = tiny_http::Response::from_string("Unknown sound")
+                                    .with_status_code(400)
+                                    .with_header(cors);
+                                let _ = request.respond(resp);
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Fallback: 404
+                    let resp = tiny_http::Response::from_string("Not Found")
+                        .with_status_code(404)
+                        .with_header(cors);
+                    let _ = request.respond(resp);
                 }
             });
 

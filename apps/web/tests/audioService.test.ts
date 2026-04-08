@@ -146,3 +146,79 @@ describe("setAudioMuted / isAudioMuted", () => {
     expect(isAudioMuted()).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Desktop context — Rust audio server via fetch
+// ---------------------------------------------------------------------------
+
+describe("desktop context (Tauri)", () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__TAURI__ = {};
+    mockFetch.mockResolvedValue({ ok: true, status: 204 });
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  afterEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).__TAURI__;
+    vi.unstubAllGlobals();
+    // Re-stub Audio since unstubAllGlobals removes it
+    vi.stubGlobal("Audio", vi.fn((src: string) => {
+      const instance = {
+        src,
+        preload: "",
+        currentTime: 0,
+        play: mockPlay,
+      };
+      audioInstances.push(instance);
+      return instance;
+    }));
+  });
+
+  it("playCopySound posts 'copy' to audio server", async () => {
+    const { initAudio, playCopySound } = await importAudio();
+    await initAudio();
+
+    await playCopySound();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8001/audio/play",
+      { method: "POST", body: "copy" },
+    );
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it("playClearSound posts 'clear' to audio server", async () => {
+    const { initAudio, playClearSound } = await importAudio();
+    await initAudio();
+
+    await playClearSound();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:8001/audio/play",
+      { method: "POST", body: "clear" },
+    );
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it("does not call fetch when muted", async () => {
+    const { initAudio, playCopySound, setAudioMuted } = await importAudio();
+    await initAudio();
+    setAudioMuted(true);
+
+    await playCopySound();
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("throws on non-OK response", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+    const { initAudio, playCopySound } = await importAudio();
+    await initAudio();
+
+    await expect(playCopySound()).rejects.toThrow("Audio playback failed (500)");
+  });
+});

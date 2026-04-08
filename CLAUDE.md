@@ -6,17 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech, a GPU-accelerated backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and delivery. Two runtime contexts: browser (React UI + Docker backend) and desktop (Tauri webview + bare-host Python sidecar). No cloud services are involved.
 
-**Current milestone:** v3.1 Complete — v3.2 next.
+**Current milestone:** v3.2 Complete — v3.3 next.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5174) + FastAPI backend (port 8084) over localhost. Backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode)
 - `platform.ts` is the single routing surface for platform-conditional behavior: `isDesktop()`, `writeClipboard()`, `submitText()`. Components call `platform.*` and are unaware of runtime context
-- Desktop clipboard: HTTP server (`tiny_http` on port 8001 + `arboard`) in the Rust process. The webview POSTs transcript text; Rust writes to the system clipboard. Bypasses WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
+- Desktop clipboard + audio: HTTP server (`tiny_http` on port 8001) in the Rust process. POST `/clipboard` writes to system clipboard via `arboard`. POST `/audio/play` plays embedded WAV cues via `rodio`, bypassing WebKitGTK's unreliable audio subsystem. Both bypass WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- 135 tests (91 frontend, 44 backend), TypeScript clean, Rust clean
+- 159 tests (115 frontend, 44 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
-- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → v3.2 (audio feedback, clipboard cleanup, segmentation fix) → v3.3 (system tray + global hotkeys). v3.3 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
+- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → ~~v3.2 (audio feedback, clipboard cleanup, segmentation fix)~~ → v3.3 (system tray + global hotkeys). v3.3 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
 
 **Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
 
@@ -74,10 +74,11 @@ Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MI
 - `src/features/settings/Settings.tsx` — Settings panel with model selection (v2.0)
 - `src/services/api.ts` — Typed fetch calls to localhost:8084
 - `src/services/platform.ts` — Platform detection (`isDesktop`), clipboard routing, submit stub (v3.1)
+- `src/services/audio.ts` — Audio cue playback: browser (HTMLAudioElement) or desktop (POST to Rust rodio server) (v3.2)
 - `src/services/voiceCommands.ts` — Command detection: copy, clear (v2.3)
 
 ### Key desktop files
-- `apps/desktop/src-tauri/src/main.rs` — Sidecar lifecycle, HTTP clipboard server, WebKitGTK permissions, CUDA discovery, shutdown handler
+- `apps/desktop/src-tauri/src/main.rs` — Sidecar lifecycle, HTTP clipboard + audio server, WebKitGTK permissions, CUDA discovery, shutdown handler
 - `apps/desktop/src-tauri/tauri.conf.json` — CSP (ports 8084, 8001), devUrl, `withGlobalTauri`
 
 ### Ops

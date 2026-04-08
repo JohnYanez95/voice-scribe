@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
 **Last Updated:** April 8, 2026
-**Status:** v3.1 Complete — v3.2 next
+**Status:** v3.2 Complete — v3.3 next
 
 ---
 
@@ -877,6 +877,17 @@ handleCopyTranscript, `Transcript.tsx` button) route through `platform.writeClip
 Segmentation: three-minute continuous dictation session with varied pause lengths — inspect raw
 output for missing spaces between segments, missing line breaks at pause boundaries, double spaces,
 unexpected paragraph breaks. Browser build: `npm run build` zero errors, `npx vitest run` passes.
+
+**Gate result (2026-04-08).** Seven gate items pass. All six scope items delivered at `264cc6b`.
+Rust-side audio playback added as a completion task after WebKitGTK audio proved unreliable
+(devtools kills playback, Bluetooth device switching loses audio path). `rodio` on port 8001,
+same `tiny_http` pattern as the clipboard server — `include_bytes!` WAV embedding, fire-and-forget
+thread with `Sink::sleep_until_end()`, 204 response. `audio.ts` branches on `isDesktop()`:
+browser uses `HTMLAudioElement`, desktop POSTs sound name to Rust. One gate fix: `Transcript.tsx`
+copy button was missing the chime — `playCopySound()` added as fire-and-forget after clipboard
+write (not `await` — audio failure must not block "Copied!" feedback). WSL2 runtime requires
+`libasound2-plugins` + `~/.asoundrc` PulseAudio config for ALSA→WSLg audio bridge. 119 tests
+(115 frontend + 4 new desktop audio), TypeScript clean, Rust clean.
 
 #### v3.3 — System Tray + Global Hotkeys
 
