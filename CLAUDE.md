@@ -14,7 +14,7 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 - Desktop clipboard + audio: HTTP server (`tiny_http` on port 8001) in the Rust process. POST `/clipboard` writes to system clipboard via `arboard`. POST `/audio/play` plays embedded WAV cues via `rodio`, bypassing WebKitGTK's unreliable audio subsystem. Both bypass WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- 175 tests (131 frontend, 44 backend), TypeScript clean, Rust clean
+- 178 tests (134 frontend, 44 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
 - v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → ~~v3.2 (audio feedback, clipboard cleanup, segmentation fix)~~ → ~~v3.3 (system tray + window management)~~ → ~~v3.4 (design system + theme toggle + model selector extraction)~~. v3.4 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
 

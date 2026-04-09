@@ -982,7 +982,7 @@ model selection extracted from the settings panel into the primary toolbar.
 
 No backend changes. No new API surface. No new Tauri plugins.
 
-**Gate:** Frontend type-check clean. 175 tests pass (131 frontend + 44 backend). Light theme
+**Gate:** Frontend type-check clean. 178 tests pass (134 frontend + 44 backend). Light theme
 contrast verified against WCAG 4.5:1 for `--accent`. Flash-prevention script confirmed: reload
 with `voice-scribe-theme=light` in localStorage applies light palette before first paint.
 Comparison pane copy buttons pass correct content to `writeClipboard`. Desktop hotkey hints show
@@ -993,7 +993,7 @@ disabled. Max-duration UI capped at 60 s; values above 60 s not reachable via th
 selector extraction, layout refactor, comparison panes, settings-during-recording, and max
 recording duration UI verified against the implementation. Max-duration input capped at 60 s
 (`max={60}` in Settings.tsx, `Math.min(60, ...)` in App.tsx) — matches `MAX_AUDIO_SECONDS` in
-`apps/api/app/config.py`. 175 tests (131 frontend + 44 backend), TypeScript clean, Rust clean.
+`apps/api/app/config.py`. 178 tests (134 frontend + 44 backend), TypeScript clean, Rust clean.
 
 **v3.4 is the last mainline milestone.** Voice Scribe is feature-complete as a capture primitive.
 Further capability expansion (transformation, routing, instrumentation) belongs to downstream

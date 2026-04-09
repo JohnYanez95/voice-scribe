@@ -102,7 +102,7 @@ docs/
 
 ## Current state
 
-v3.4 — feature-complete. Voice Scribe captures speech, transcribes locally, and delivers text through an editable transcript pane with clipboard integration. Both push-to-talk and continuous dictation with voice commands work in browser and desktop modes. The desktop app runs in the system tray with close-to-minimize, recording-state tooltip, and sidecar lifecycle management. The UI ships a coherent design system — self-hosted fonts, CSS custom properties, light/dark theme — with model selection in the toolbar and a raw/cleaned comparison pane. 175 tests pass (131 frontend, 44 backend), TypeScript clean, Rust clean.
+v3.4 — feature-complete. Voice Scribe captures speech, transcribes locally, and delivers text through an editable transcript pane with clipboard integration. Both push-to-talk and continuous dictation with voice commands work in browser and desktop modes. The desktop app runs in the system tray with close-to-minimize, recording-state tooltip, and sidecar lifecycle management. The UI ships a coherent design system — self-hosted fonts, CSS custom properties, light/dark theme — with model selection in the toolbar and a raw/cleaned comparison pane. 178 tests pass (134 frontend, 44 backend), TypeScript clean, Rust clean.
 
 Both browser and desktop modes share the same backend code and web UI. Desktop mode adds native OS access (clipboard via `arboard`, audio via `rodio`) through a Rust HTTP server, bypassing WebKitGTK limitations.
 
