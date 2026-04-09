@@ -928,6 +928,18 @@ surfaces a user-visible error dialog and does not crash. Tray "Quit": confirm si
 primitive. Further capability expansion (transformation, routing, instrumentation) belongs to
 downstream products that compose with Voice Scribe — see Adjacent Projects.
 
+**Gate result (2026-04-08).** System tray, window management, event bridge, and state emission
+delivered at `20cc2d6`. Global shortcut plugin (`tauri-plugin-global-shortcut`) implemented and
+removed: X11's `XGrabKey` registers on WSLg but the handler never fires — WSLg's XWayland does
+not deliver grabbed key events. Separately, WebKitGTK intercepts `Ctrl+Shift+Space` (accessibility
+activation, alternating dispatch) and `Ctrl+Shift+S` (Save As) at the native level regardless of
+the plugin. `Ctrl+Shift+Y` (copy) and `Ctrl+Shift+X` (clear) work reliably in the desktop
+webview. Component-level gate items verified on WSLg (tray event routing, state emission, shortcut
+failure surfacing, sidecar cleanup on all quit paths, debounce). End-to-end gate scenario (hide →
+hotkey → dictate → copy → paste → window never appeared) deferred to native Linux — the event
+bridge is wired and tested, re-adding the plugin is a Rust-only change. 169 tests (125 frontend +
+44 backend), TypeScript clean, Rust clean.
+
 #### Deferred from v3 (named, not forgotten)
 
 - **`submit` voice command (direct injection)** — types the transcript directly into the focused

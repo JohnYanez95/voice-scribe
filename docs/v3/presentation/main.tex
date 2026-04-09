@@ -264,7 +264,10 @@
             Rust writes via \texttt{arboard} \\[4pt]
         \texttt{submitText()} &
             Calls \texttt{writeClipboard()} &
-            Calls \texttt{writeClipboard()} (direct injection deferred) \\
+            Calls \texttt{writeClipboard()} (direct injection deferred) \\[4pt]
+        \texttt{emitRecordingState()} &
+            No-op &
+            Emits \texttt{recording-state-changed} to Rust (tray tooltip sync) \\
         \bottomrule
     \end{tabular}
     \end{table}
@@ -366,28 +369,27 @@
 \end{frame}
 
 
-\begin{frame}{v3.3 --- System Tray + Global Hotkeys}
+\begin{frame}{v3.3 --- System Tray + Window Management (2026-04-08)}
     \small
-    \textbf{Deliverable:} Voice Scribe runs in the background. A global hotkey triggers
-    recording from any application.
-
-    \vspace{0.3em}
-    \textbf{Key scope:}
-    \begin{itemize}\setlength{\itemsep}{1pt}
-        \item System tray: icon, menu (Record, Settings, Quit), status indicator
-              (idle / listening / processing)
-        \item Global hotkeys: \texttt{@tauri-apps/plugin-global-shortcut}. Registration
-              failure surfaces as a user-visible error dialog --- not a crash.
-              The error message and UX must be implemented and verified in the gate.
-        \item Window management: React state updates while the window is hidden require
-              explicit verification --- not assumed
-    \end{itemize}
+    \textbf{Deliverable:} Voice Scribe runs in the background. System tray provides
+    status and quick access. Window close minimizes; sidecar stays alive.
 
     \vspace{0.2em}
-    \textbf{Gate:} hide to tray $\to$ focus VS Code $\to$ press global hotkey $\to$
-    dictate $\to$ say ``copy'' or ``submit'' $\to$ delivered. Window never appeared.
-    Failure path: conflicting hotkey $\to$ user-visible error, no crash.
-    Tray Quit: sidecar gone.
+    \textbf{What shipped:}
+    \begin{itemize}\setlength{\itemsep}{0pt}
+        \item System tray: icon, context menu (Toggle Recording, Settings, Quit),
+              recording-state tooltip, left-click window toggle
+        \item Close-to-minimize with second-close quit; three sidecar cleanup paths
+        \item Frontend event bridge: tray events route through the same
+              \texttt{handleToggleRecording} as the UI button
+        \item \texttt{emitRecordingState()} in \texttt{platform.ts} syncs tray
+              tooltip on every state transition
+    \end{itemize}
+
+    {\footnotesize\textbf{Scope reduction:} Global shortcut plugin implemented and removed ---
+    \texttt{XGrabKey} does not deliver events on WSLg. Event bridge retained;
+    re-adding the plugin on native Linux is a Rust-only change.
+    \texttt{Ctrl+Shift+Y}/\texttt{X} work in the desktop webview via \texttt{useHotkeys}.}
 \end{frame}
 
 
@@ -447,13 +449,15 @@
               Absent in the browser. \texttt{platform.ts} reads this at call time, not
               at bundle time.
 
-        \item \textbf{No Tauri imports in the clipboard path} --- desktop clipboard
-              uses \texttt{fetch()} to a Rust HTTP server, not a Tauri plugin.
-              No \texttt{@tauri-apps/} imports needed for v3.1.
+        \item \textbf{No Tauri imports in the clipboard or audio path} --- desktop
+              clipboard and audio use \texttt{fetch()} to a Rust HTTP server, not
+              Tauri plugins. No \texttt{@tauri-apps/} imports in the production build.
 
-        \item \textbf{Dynamic \texttt{import()} for future plugins} --- v3.3 will use
-              \texttt{@tauri-apps/plugin-global-shortcut}. Loaded via dynamic
-              \texttt{import()}, excluded from \texttt{optimizeDeps}.
+        \item \textbf{Event bridge uses \texttt{window.\_\_TAURI\_\_}} --- tray menu
+              actions and recording state sync use the global Tauri object
+              (\texttt{emit}/\texttt{listen}), not plugin crates. Available at
+              runtime in the webview, absent in the browser --- same detection
+              pattern as \texttt{isDesktop()}.
     \end{itemize}
 
     \vspace{0.3em}
@@ -530,9 +534,10 @@
               Downstream products use command draft/staging, not keystroke injection.
               \texttt{submitText()} stub remains as an architectural placeholder.
 
-        \item \textbf{Hotkey configurability} --- conditional hard requirement for
-              v3.3 on Linux (GNOME/KDE/i3/VS Code claim shortcut space). If no
-              conflict-free default exists, user-configurable bindings required.
+        \item \textbf{Global shortcut (OS-level hotkey)} --- implemented and removed
+              in v3.3. \texttt{XGrabKey} does not deliver events on WSLg's XWayland.
+              Event bridge wired and tested; re-addition is a Rust-only change when
+              validated on native Linux.
 
         \item \textbf{Auto-update} --- Tauri built-in. Not in scope for v3.
 
