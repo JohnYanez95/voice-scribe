@@ -14,6 +14,7 @@ stateDiagram-v2
 
     idle --> recording : record<br/>(push-to-talk)
     idle --> listening : start continuous
+    note left of idle : Window visibility (visible / hidden / tray)<br/>is orthogonal to recording state.<br/>Global hotkey and tray Record trigger<br/>the same transitions as the UI button.
 
     recording --> processing : stop<br/>(hotkey / button)
 

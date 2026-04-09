@@ -15,6 +15,8 @@ flowchart TB
 
     subgraph Services ["Services"]
         api["api.ts"]
+        platform["platform.ts"]
+        audio["audio.ts"]
     end
 
     App --> useRecorder
@@ -24,10 +26,14 @@ flowchart TB
     App --> Settings
     App -->|"text, onChange"| Transcript
     App --> api
+    App --> platform
+    App --> audio
 
     useRecorder -.->|"MediaRecorder API"| mic(["Browser"])
     useVAD -.->|"VAD / MediaStream"| mic
-    api -.->|"localhost:8000"| backend(["Backend"])
+    api -.->|"localhost:8084"| backend(["Backend\n(Python API)"])
+    platform -.->|"clipboard write\n(desktop: :8001)"| rustSrv(["Rust HTTP\n(desktop only)"])
+    audio -.->|"audio playback\n(desktop: :8001)"| rustSrv
 
     style App         fill:#ddeeff,stroke:#5588bb,color:#333
     style useRecorder fill:#ffdddd,stroke:#cc4444,color:#333
@@ -37,5 +43,8 @@ flowchart TB
     style Settings    fill:#ede8ff,stroke:#7755aa,color:#333
     style Transcript  fill:#ddf5dd,stroke:#448844,color:#333
     style api         fill:#fffacc,stroke:#b8900a,color:#333
+    style platform    fill:#fffacc,stroke:#b8900a,color:#333
+    style audio       fill:#fffacc,stroke:#b8900a,color:#333
     style mic         fill:#e0e0e0,stroke:#999999,color:#777
     style backend     fill:#e0e0e0,stroke:#999999,color:#777
+    style rustSrv    fill:#ede8ff,stroke:#7755aa,color:#333
