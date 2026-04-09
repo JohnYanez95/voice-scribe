@@ -8,6 +8,7 @@ A local voice input system for developer workflows. Runs [faster-whisper](https:
 - **Continuous dictation** — mic stays open, client-side VAD ([Silero v4](https://github.com/snakers4/silero-vad), ONNX/WASM) gates speech, transcripts accumulate with automatic paragraph breaks based on speech timing.
 - **Voice commands** — say "copy" or "clear" during continuous dictation. Exact-segment detection, stripped from output.
 - **Hotkeys** — `Ctrl+Shift+Space` (record), `Ctrl+Shift+Y` (copy), `Ctrl+Shift+X` (clear), `Ctrl+Shift+S` (settings).
+- **System tray** — close-to-minimize with tray icon. Context menu (Record, Settings, Quit). Tooltip reflects recording state. Second close quits.
 - **Live model swapping** — switch between Whisper models at runtime from the settings panel. Thread-safe reload with VRAM cleanup.
 - **WebSocket streaming** — transcript segments arrive as faster-whisper produces them. HTTP POST fallback if the connection fails.
 
@@ -100,12 +101,12 @@ docs/
 
 ## Current state
 
-v3.2. The Tauri desktop application launches, spawns the Python API as a sidecar, and provides GPU-accelerated transcription with push-to-talk and continuous dictation. Voice commands ("copy", "clear") produce audible feedback and route through platform-native clipboard and audio. 159 tests pass (115 frontend, 44 backend).
+v3.3 — feature-complete. Voice Scribe captures speech, transcribes locally, and delivers text through an editable transcript pane with clipboard integration. Both push-to-talk and continuous dictation with voice commands work in browser and desktop modes. The desktop app runs in the system tray with close-to-minimize, recording-state tooltip, and sidecar lifecycle management. 169 tests pass (125 frontend, 44 backend), TypeScript clean, Rust clean.
 
 Both browser and desktop modes share the same backend code and web UI. Desktop mode adds native OS access (clipboard via `arboard`, audio via `rodio`) through a Rust HTTP server, bypassing WebKitGTK limitations.
 
-Next: v3.3 — system tray and global hotkeys. This is the last mainline milestone. See `roadmap.md` for scope and sequencing.
+Voice Scribe is the capture primitive. Transformation, routing, and instrumentation belong to downstream products. See `roadmap.md` for scope boundaries and adjacent projects.
 
 ## License
 
-Private. Not yet licensed for distribution.
+Apache License 2.0. See [LICENSE](LICENSE).
