@@ -32,6 +32,7 @@ export function Recorder({
         onClick={onToggle}
         disabled={disabled}
       >
+        <span className="record-indicator" />
         {buttonText}
       </button>
       {recorderError && <p className="error">{recorderError}</p>}

@@ -22,7 +22,7 @@ export function Transcript({
   showComparison,
   isRecordingActive,
 }: TranscriptProps) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"" | "main" | "raw" | "cleaned">("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isPinnedRef = useRef(true);
 
@@ -63,18 +63,18 @@ export function Transcript({
     [onTextChange]
   );
 
-  const handleCopy = useCallback(async () => {
+  const handleCopy = useCallback(async (content: string, source: "main" | "raw" | "cleaned") => {
     try {
-      await writeClipboard(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await writeClipboard(content);
+      setCopied(source);
+      setTimeout(() => setCopied(""), 2000);
       playCopySound().catch((err) => {
         console.error("[Transcript] audio playback failed:", err);
       });
     } catch (err) {
       console.error("[Transcript] clipboard write failed:", err);
     }
-  }, [text]);
+  }, []);
 
   if (isLoading && !text) {
     return (
@@ -88,18 +88,34 @@ export function Transcript({
     return null;
   }
 
-  const shouldShowComparison = showComparison && rawText && rawText !== text;
+  const shouldShowComparison = showComparison && text;
 
   return (
     <div className="transcript">
       {shouldShowComparison && (
         <div className="comparison">
           <div className="comparison-pane">
-            <label className="comparison-label">Raw</label>
+            <div className="comparison-header">
+              <label className="comparison-label">Raw</label>
+              <button
+                className="comparison-copy-btn"
+                onClick={() => handleCopy(rawText, "raw")}
+              >
+                {copied === "raw" ? "Copied!" : "Copy"}
+              </button>
+            </div>
             <div className="comparison-text">{rawText}</div>
           </div>
           <div className="comparison-pane">
-            <label className="comparison-label">Cleaned</label>
+            <div className="comparison-header">
+              <label className="comparison-label">Edit</label>
+              <button
+                className="comparison-copy-btn"
+                onClick={() => handleCopy(text, "cleaned")}
+              >
+                {copied === "cleaned" ? "Copied!" : "Copy"}
+              </button>
+            </div>
             <div className="comparison-text">{text}</div>
           </div>
         </div>
@@ -109,11 +125,10 @@ export function Transcript({
         value={text}
         onChange={handleChange}
         onScroll={handleScroll}
-        rows={8}
         placeholder="Transcript will appear here..."
       />
-      <button className="copy-btn" onClick={handleCopy}>
-        {copied ? "Copied!" : "Copy to Clipboard"}
+      <button className="copy-btn" onClick={() => handleCopy(text, "main")}>
+        {copied === "main" ? "Copied!" : "Copy to Clipboard"}
       </button>
     </div>
   );

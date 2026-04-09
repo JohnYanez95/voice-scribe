@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech, a GPU-accelerated backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and delivery. Two runtime contexts: browser (React UI + Docker backend) and desktop (Tauri webview + bare-host Python sidecar). No cloud services are involved.
 
-**Current milestone:** v3.3 Complete. Voice Scribe is feature-complete as a capture primitive.
+**Current milestone:** v3.4 Complete. Voice Scribe is feature-complete as a capture primitive.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5174) + FastAPI backend (port 8084) over localhost. Backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode)
@@ -14,9 +14,9 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 - Desktop clipboard + audio: HTTP server (`tiny_http` on port 8001) in the Rust process. POST `/clipboard` writes to system clipboard via `arboard`. POST `/audio/play` plays embedded WAV cues via `rodio`, bypassing WebKitGTK's unreliable audio subsystem. Both bypass WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- 169 tests (125 frontend, 44 backend), TypeScript clean, Rust clean
+- 175 tests (131 frontend, 44 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
-- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → ~~v3.2 (audio feedback, clipboard cleanup, segmentation fix)~~ → ~~v3.3 (system tray + window management)~~. v3.3 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
+- v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → ~~v3.2 (audio feedback, clipboard cleanup, segmentation fix)~~ → ~~v3.3 (system tray + window management)~~ → ~~v3.4 (design system + theme toggle + model selector extraction)~~. v3.4 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
 
 **Team review structure:** Principal (architectural standards, sign-off), PM (scope, delivery rhythm, compliance), Senior Engineer (implementation risk, integration gaps). Global agent personas in `~/.claude/agents/` reference this section for project-specific context.
 
@@ -54,7 +54,7 @@ Backend tests run on the host (the test suite mocks model loading and does not r
 
 Two-service system over localhost. WebSocket (default, v2.1+) and HTTP (fallback). No proxy, no queue.
 
-- **Frontend** (`apps/web/`, port 5174): React + TypeScript + Vite. Records audio via MediaRecorder, streams to API via WebSocket, displays editable transcript. `platform.ts` routes clipboard/submit calls by runtime context. One Vite build serves both browser and Tauri webview.
+- **Frontend** (`apps/web/`, port 5174): React + TypeScript + Vite. Records audio via MediaRecorder, streams to API via WebSocket, displays editable transcript. `platform.ts` routes clipboard/submit calls by runtime context. One Vite build serves both browser and Tauri webview. Design system: self-hosted fonts (Hanken Grotesk, Crimson Pro) loaded via `@font-face`, all colors as CSS custom properties on `:root`. Light/dark theme via `data-theme` attribute on `<html>`; flash-prevention script in `index.html` sets the attribute before React mounts.
 - **Backend** (`apps/api/`, port 8084): FastAPI with GPU. Validates upload, transcodes via ffmpeg to 16kHz mono WAV, runs faster-whisper inference, returns transcript. Runs in Docker (browser mode) or as bare-host Python process (desktop mode) — same code, different process boundary.
 - **Desktop shell** (`apps/desktop/src-tauri/`): Tauri v2. Spawns the Python API as a sidecar, polls health, emits `backend-ready` event. HTTP clipboard + audio server on port 8001 (`tiny_http` + `arboard` + `rodio`). System tray with context menu and recording-state tooltip. Close-to-minimize with second-close quit. WebKitGTK media permissions granted programmatically. CUDA runtime discovery via `cuda_ld_library_path()`. WebKitGTK intercepts `Ctrl+Shift+Space` and `Ctrl+Shift+S` at the native level — `Ctrl+Shift+Y` (copy) and `Ctrl+Shift+X` (clear) work reliably.
 
@@ -71,7 +71,8 @@ Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MI
 - `src/app/App.tsx` — State management, orchestrates recorder → API → transcript, voice command dispatch
 - `src/hooks/useRecorder.ts` — MediaRecorder with explicit webm/opus codec request
 - `src/hooks/useHotkeys.ts` — Ctrl+Shift keyboard shortcuts at App level (v2.0)
-- `src/features/settings/Settings.tsx` — Settings panel with model selection (v2.0)
+- `src/features/model-selector/ModelSelector.tsx` — Toolbar model selector; gates fetch on `backendReady`, renders swap status inline (v3.4)
+- `src/features/settings/Settings.tsx` — Settings panel: recording mode, display options, audio mute (v2.0; model selection removed in v3.4)
 - `src/services/api.ts` — Typed fetch calls to localhost:8084
 - `src/services/platform.ts` — Platform detection (`isDesktop`), clipboard routing, submit stub (deferred), recording state emission to Rust
 - `src/services/audio.ts` — Audio cue playback: browser (HTMLAudioElement) or desktop (POST to Rust rodio server) (v3.2)
@@ -113,4 +114,4 @@ Diagram sources are versioned by milestone: `docs/diagrams/*.mmd` (living), `doc
 
 ## Scope
 
-v1/v1.1 is intentionally narrow: record one utterance, transcribe locally, display in editable textarea, copy to clipboard. v2 adds streaming, continuous dictation, hotkeys, and voice commands. v3 adds the Tauri desktop shell, platform abstraction, native OS access (clipboard, audio playback), audio feedback for voice commands, system tray with background operation, and window management. Global shortcut registration was implemented and removed — XGrabKey does not deliver events on WSLg; re-addition is a Rust-only change when validated on native Linux. Direct text injection is deferred indefinitely — downstream products use command draft/staging instead. Do not add async queues, background workers, or reverse proxy. The roadmap (`roadmap.md`) is the source of truth for scope decisions.
+v1/v1.1 is intentionally narrow: record one utterance, transcribe locally, display in editable textarea, copy to clipboard. v2 adds streaming, continuous dictation, hotkeys, and voice commands. v3 adds the Tauri desktop shell, platform abstraction, native OS access (clipboard, audio playback), audio feedback for voice commands, system tray with background operation, and window management. v3.4 adds the design system (self-hosted fonts, CSS custom properties, light/dark theme), model selector extraction into the toolbar, layout refactor (three-zone toolbar + main area), and comparison panes. Global shortcut registration was implemented and removed — XGrabKey does not deliver events on WSLg; re-addition is a Rust-only change when validated on native Linux. Direct text injection is deferred indefinitely — downstream products use command draft/staging instead. Do not add async queues, background workers, or reverse proxy. The roadmap (`roadmap.md`) is the source of truth for scope decisions.

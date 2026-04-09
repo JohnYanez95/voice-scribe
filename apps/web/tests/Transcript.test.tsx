@@ -96,6 +96,70 @@ describe("Transcript", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Comparison pane copy buttons
+// ---------------------------------------------------------------------------
+
+describe("Transcript — comparison pane copy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWriteClipboard.mockResolvedValue(undefined);
+  });
+
+  it("Raw pane copy button calls writeClipboard(rawText) and shows Copied on that pane only", async () => {
+    render(
+      <Transcript
+        {...defaultProps}
+        text="accumulated editor text"
+        rawText="raw segment text"
+        showComparison={true}
+      />
+    );
+
+    // Both panes render Copy buttons — get all, Raw is the first
+    const copyBtns = screen.getAllByText("Copy");
+    expect(copyBtns).toHaveLength(2);
+
+    await act(async () => {
+      fireEvent.click(copyBtns[0]); // Raw pane
+    });
+
+    await waitFor(() => {
+      expect(mockWriteClipboard).toHaveBeenCalledWith("raw segment text");
+    });
+
+    // Raw pane shows "Copied!", Edit pane still shows "Copy"
+    expect(screen.getByText("Copied!")).toBeTruthy();
+    expect(screen.getAllByText("Copy")).toHaveLength(1); // only Edit pane
+  });
+
+  it("Edit pane copy button calls writeClipboard(text) and shows Copied on that pane only", async () => {
+    render(
+      <Transcript
+        {...defaultProps}
+        text="accumulated editor text"
+        rawText="raw segment text"
+        showComparison={true}
+      />
+    );
+
+    const copyBtns = screen.getAllByText("Copy");
+    expect(copyBtns).toHaveLength(2);
+
+    await act(async () => {
+      fireEvent.click(copyBtns[1]); // Edit pane
+    });
+
+    await waitFor(() => {
+      expect(mockWriteClipboard).toHaveBeenCalledWith("accumulated editor text");
+    });
+
+    // Edit pane shows "Copied!", Raw pane still shows "Copy"
+    expect(screen.getByText("Copied!")).toBeTruthy();
+    expect(screen.getAllByText("Copy")).toHaveLength(1); // only Raw pane
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Auto-scroll pin logic
 //
 // jsdom textareas have scrollHeight=0, clientHeight=0, scrollTop=0 by default.

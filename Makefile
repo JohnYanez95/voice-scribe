@@ -33,7 +33,7 @@ api:
 web:
 	cd apps/web && VITE_API_PORT=$(API_PORT) VITE_PORT=$(WEB_PORT) npm run dev
 
-desktop: SIDECAR_ENV =
+desktop: SIDECAR_ENV = WHISPER_MODEL=small WHISPER_AVAILABLE_MODELS=small,large-v3
 desktop-cpu: SIDECAR_ENV = DEVICE=cpu WHISPER_MODEL=small WHISPER_AVAILABLE_MODELS=small
 
 desktop desktop-cpu:

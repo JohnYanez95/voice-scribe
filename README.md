@@ -9,7 +9,8 @@ A local voice input system for developer workflows. Runs [faster-whisper](https:
 - **Voice commands** — say "copy" or "clear" during continuous dictation. Exact-segment detection, stripped from output.
 - **Hotkeys** — `Ctrl+Shift+Space` (record), `Ctrl+Shift+Y` (copy), `Ctrl+Shift+X` (clear), `Ctrl+Shift+S` (settings).
 - **System tray** — close-to-minimize with tray icon. Context menu (Record, Settings, Quit). Tooltip reflects recording state. Second close quits.
-- **Live model swapping** — switch between Whisper models at runtime from the settings panel. Thread-safe reload with VRAM cleanup.
+- **Live model swapping** — switch between Whisper models at runtime from the toolbar. Thread-safe reload with VRAM cleanup.
+- **Light/dark theme** — toggle between dark (default) and light palettes. Preference persisted to `localStorage`, applied before first paint to prevent flash.
 - **WebSocket streaming** — transcript segments arrive as faster-whisper produces them. HTTP POST fallback if the connection fails.
 
 ## Architecture
@@ -101,7 +102,7 @@ docs/
 
 ## Current state
 
-v3.3 — feature-complete. Voice Scribe captures speech, transcribes locally, and delivers text through an editable transcript pane with clipboard integration. Both push-to-talk and continuous dictation with voice commands work in browser and desktop modes. The desktop app runs in the system tray with close-to-minimize, recording-state tooltip, and sidecar lifecycle management. 169 tests pass (125 frontend, 44 backend), TypeScript clean, Rust clean.
+v3.4 — feature-complete. Voice Scribe captures speech, transcribes locally, and delivers text through an editable transcript pane with clipboard integration. Both push-to-talk and continuous dictation with voice commands work in browser and desktop modes. The desktop app runs in the system tray with close-to-minimize, recording-state tooltip, and sidecar lifecycle management. The UI ships a coherent design system — self-hosted fonts, CSS custom properties, light/dark theme — with model selection in the toolbar and a raw/cleaned comparison pane. 175 tests pass (131 frontend, 44 backend), TypeScript clean, Rust clean.
 
 Both browser and desktop modes share the same backend code and web UI. Desktop mode adds native OS access (clipboard via `arboard`, audio via `rodio`) through a Rust HTTP server, bypassing WebKitGTK limitations.
 

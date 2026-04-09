@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
-**Last Updated:** April 8, 2026
-**Status:** v3.2 Complete — v3.3 next
+**Last Updated:** April 9, 2026
+**Status:** v3.4 Complete
 
 ---
 
@@ -924,10 +924,6 @@ Transcript is in clipboard. Ctrl+V in VS Code. Voice Scribe window never appeare
 Failure path: with a conflicting hotkey registered in another application, confirm Voice Scribe
 surfaces a user-visible error dialog and does not crash. Tray "Quit": confirm sidecar is gone.
 
-**v3.3 is the last mainline milestone.** After v3.3, Voice Scribe is feature-complete as a capture
-primitive. Further capability expansion (transformation, routing, instrumentation) belongs to
-downstream products that compose with Voice Scribe — see Adjacent Projects.
-
 **Gate result (2026-04-08).** System tray, window management, event bridge, and state emission
 delivered at `20cc2d6`. Global shortcut plugin (`tauri-plugin-global-shortcut`) implemented and
 removed: X11's `XGrabKey` registers on WSLg but the handler never fires — WSLg's XWayland does
@@ -939,6 +935,66 @@ failure surfacing, sidecar cleanup on all quit paths, debounce). End-to-end gate
 hotkey → dictate → copy → paste → window never appeared) deferred to native Linux — the event
 bridge is wired and tested, re-adding the plugin is a Rust-only change. 169 tests (125 frontend +
 44 backend), TypeScript clean, Rust clean.
+
+#### v3.4 — Design System + UI Refresh
+
+**Deliverable:** The frontend has a coherent visual identity, a persistent light/dark theme, and
+model selection extracted from the settings panel into the primary toolbar.
+
+**Scope:**
+
+1. **Design system.** Self-hosted fonts — Hanken Grotesk (UI) and Crimson Pro (body text) —
+   loaded via `@font-face` from `apps/web/public/fonts/`. All colors expressed as CSS custom
+   properties (`--bg-base`, `--bg-surface`, `--accent`, etc.) on `:root`. Zero external font
+   requests.
+
+2. **Light/dark theme.** `[data-theme="light"]` block overrides all 10 color tokens plus
+   `--recording-glow`. Flash-prevention script in `index.html` reads `localStorage` and falls back
+   to `prefers-color-scheme` before React mounts — no unstyled flash on load. Toggle button in
+   toolbar; state persisted to `localStorage`. Light palette uses `--accent: #856a28`, which clears
+   the 4.5:1 WCAG contrast threshold against both surface values.
+
+3. **Model selector extraction.** `ModelSelector.tsx` extracted from Settings into its own feature
+   component (`src/features/model-selector/`). Placed in the toolbar-top alongside the title and
+   recorder. Gates fetch on `backendReady` — no spurious API calls before the Tauri sidecar is
+   up. Swap status message (duration, error) rendered inline. Settings panel no longer contains
+   model-related UI.
+
+4. **Layout refactor.** Three-zone layout: toolbar-top (model selector, title, recorder, theme
+   toggle, settings gear), main area (transcript), toolbar-bottom (hotkey hints). Recorder
+   compacted to minimal record-btn with animated indicator — no standalone panel.
+
+5. **Comparison panes.** Raw/Edit panes rendered side-by-side when "Show raw / cleaned comparison"
+   is enabled. Each pane has its own labeled copy button with source-discriminated "Copied!"
+   feedback. Pane is suppressed entirely when `rawText` is absent.
+
+6. **Settings accessible during recording.** Gear button opens settings during an active session
+   (recording mode radios stay disabled; "Stop recording to change mode." notice shown). Keyboard
+   hotkey (`Ctrl+Shift+S`) and tray `tray-toggle-settings` event retain the recording-state guard
+   — stray hotkeys during dictation do not interrupt the session.
+
+7. **Dead code removal.** Model selection UI removed from `Settings.tsx`. `maxDuration` prop
+   wiring retained in `App.tsx` for the auto-stop timer; UI not exposed (deferred).
+
+No backend changes. No new API surface. No new Tauri plugins.
+
+**Gate:** Frontend type-check clean. 175 tests pass (131 frontend + 44 backend). Light theme
+contrast verified against WCAG 4.5:1 for `--accent`. Flash-prevention script confirmed: reload
+with `voice-scribe-theme=light` in localStorage applies light palette before first paint.
+Comparison pane copy buttons pass correct content to `writeClipboard`. Desktop hotkey hints show
+Y and X only (Space/S not advertised). Settings panel accessible during recording; mode radios
+disabled.
+
+**Gate result (2026-04-09).** All scope items delivered. Design system, theme toggle, model
+selector extraction, layout refactor, comparison panes, settings-during-recording, and dead code
+removal verified against the implementation. 175 tests (131 frontend + 44 backend), TypeScript
+clean, Rust clean.
+
+**v3.4 is the last mainline milestone.** Voice Scribe is feature-complete as a capture primitive.
+Further capability expansion (transformation, routing, instrumentation) belongs to downstream
+products that compose with Voice Scribe — see Adjacent Projects.
+
+---
 
 #### Deferred from v3 (named, not forgotten)
 
@@ -954,7 +1010,7 @@ bridge is wired and tested, re-adding the plugin is a Rust-only change. 169 test
   remains a separate concern — different APIs, different failure modes.
 - **Model management UI enhancements** — download progress, cache management without config files.
   Deferred to v3.x. The settings panel already handles runtime model swap.
-- **Auto-update** — Tauri has built-in update support. Not in scope for v3.0–v3.3.
+- **Auto-update** — Tauri has built-in update support. Not in scope for v3.0–v3.4.
 - **Rust-native inference** — single-binary distribution via whisper.cpp. Trigger: "when distribution
   to non-developer users becomes a requirement." Not v3.
 

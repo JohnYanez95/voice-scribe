@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ModelSelector } from "../features/model-selector/ModelSelector";
 import { Recorder } from "../features/recorder/Recorder";
 import { Settings } from "../features/settings/Settings";
 import { Transcript } from "../features/transcript/Transcript";
@@ -15,6 +16,17 @@ import type { RecordingMode, RecordingState } from "../types";
 const PARAGRAPH_BREAK_MS = 3000;
 
 export function App() {
+  const [theme, setTheme] = useState<"dark" | "light">(
+    () => (document.documentElement.getAttribute("data-theme") as "dark" | "light") ?? "dark"
+  );
+
+  const handleToggleTheme = useCallback(() => {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("voice-scribe-theme", next);
+    setTheme(next);
+  }, [theme]);
+
   const [state, setStateRaw] = useState<RecordingState>("idle");
 
   // Wrapper that emits state to Rust for tray tooltip sync.
@@ -43,8 +55,12 @@ export function App() {
   const [audioMuted, setAudioMutedState] = useState<boolean>(
     () => localStorage.getItem("voice-scribe-audio-muted") === "true"
   );
+  const [maxDuration, setMaxDurationState] = useState<number>(
+    () => Number(localStorage.getItem("voice-scribe-max-duration")) || 60
+  );
 
   const wsCleanupSetRef = useRef<Set<() => void>>(new Set());
+  const durationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopRequestedRef = useRef(false);
   const lastSegmentTimestampRef = useRef<number>(0);
 
@@ -67,6 +83,12 @@ export function App() {
     localStorage.setItem("voice-scribe-audio-muted", String(muted));
     setAudioMuted(muted);
     setAudioMutedState(muted);
+  }, []);
+
+  const handleSetMaxDuration = useCallback((seconds: number) => {
+    const clamped = Math.max(5, Math.min(300, seconds));
+    localStorage.setItem("voice-scribe-max-duration", String(clamped));
+    setMaxDurationState(clamped);
   }, []);
 
   // Initialize audio: sync mute state then preload buffers.
@@ -138,6 +160,7 @@ export function App() {
       if (!append) {
         setTranscript("");
         setRawTranscript("");
+
       }
 
       // Deregister hook — assigned after streamTranscribeAudio returns,
@@ -180,6 +203,7 @@ export function App() {
                 });
                 setTranscript("");
                 setRawTranscript("");
+        
                 break;
             }
           } else {
@@ -297,6 +321,12 @@ export function App() {
   }, [audioBlob]);
 
   const handleToggle = useCallback(async () => {
+    // Clear any existing duration timer
+    if (durationTimerRef.current) {
+      clearTimeout(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+
     if (recordingMode === "continuous") {
       if (isListening) {
         // Stop: if a segment is in-flight, flag for drain; otherwise go to done
@@ -319,6 +349,11 @@ export function App() {
         setState("recording");
         setError("");
         await startRecording();
+        // Auto-stop after maxDuration seconds
+        durationTimerRef.current = setTimeout(() => {
+          durationTimerRef.current = null;
+          stopRecording();
+        }, maxDuration * 1000);
       }
     }
   }, [
@@ -326,6 +361,7 @@ export function App() {
     isListening,
     isRecording,
     state,
+    maxDuration,
     startListening,
     stopListening,
     startRecording,
@@ -435,52 +471,67 @@ export function App() {
 
   return (
     <div className="app">
-      <div className="app-header">
+      <div className="toolbar-top">
+        <ModelSelector
+          backendReady={backendReady}
+          onSwapStateChange={setModelSwapping}
+        />
         <h1>Voice Scribe</h1>
+        <Recorder
+          state={state}
+          isRecording={isRecording || isListening}
+          onToggle={handleToggle}
+          recorderError={recorderError}
+          disabled={isDisabled}
+          backendReady={backendReady}
+        />
+        <button
+          className="theme-btn"
+          onClick={handleToggleTheme}
+          aria-label="Toggle theme"
+        >
+          {theme === "dark" ? "\u2600" : "\u263E"}
+        </button>
         <button
           className="settings-btn"
-          onClick={handleToggleSettings}
-          disabled={isActiveSession}
+          onClick={() => setSettingsOpen((prev) => !prev)}
           aria-label="Settings"
         >
           &#9881;
         </button>
       </div>
-      <Recorder
-        state={state}
-        isRecording={isRecording || isListening}
-        onToggle={handleToggle}
-        recorderError={recorderError}
-        disabled={isDisabled}
-        backendReady={backendReady}
-      />
-      {error && <p className="error">{error}</p>}
-      <Transcript
-        text={transcript}
-        rawText={rawTranscript}
-        isLoading={state === "processing"}
-        onTextChange={setTranscript}
-        showComparison={showRawComparison}
-        isRecordingActive={isActiveSession}
-      />
+      <div className="main-area">
+        {error && <p className="error">{error}</p>}
+        <Transcript
+          text={transcript}
+          rawText={rawTranscript}
+          isLoading={state === "processing"}
+          onTextChange={setTranscript}
+          showComparison={showRawComparison}
+          isRecordingActive={isActiveSession}
+        />
+      </div>
+      <div className="toolbar-bottom">
+        <div className="hotkey-hints">
+          {isDesktop()
+            ? "Ctrl+Shift+Y: Copy \u00A0|\u00A0 Ctrl+Shift+X: Clear"
+            : "Ctrl+Shift+Space: Record \u00A0|\u00A0 Ctrl+Shift+Y: Copy \u00A0|\u00A0 Ctrl+Shift+X: Clear \u00A0|\u00A0 Ctrl+Shift+S: Settings"
+          }
+        </div>
+      </div>
       <Settings
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onSwapStateChange={setModelSwapping}
         showRawComparison={showRawComparison}
         onShowRawComparisonChange={handleSetShowRawComparison}
         recordingMode={recordingMode}
         onRecordingModeChange={handleSetRecordingMode}
         audioMuted={audioMuted}
         onAudioMutedChange={handleSetAudioMuted}
+        maxDuration={maxDuration}
+        onMaxDurationChange={handleSetMaxDuration}
         isActive={isActiveSession}
       />
-      <div className="hotkey-hints">
-        {isDesktop()
-          ? "Ctrl+Shift+Y: Copy \u00A0|\u00A0 Ctrl+Shift+X: Clear"
-          : "Ctrl+Shift+Space: Record \u00A0|\u00A0 Ctrl+Shift+Y: Copy \u00A0|\u00A0 Ctrl+Shift+X: Clear \u00A0|\u00A0 Ctrl+Shift+S: Settings"
-        }
-      </div>
     </div>
   );
 }
