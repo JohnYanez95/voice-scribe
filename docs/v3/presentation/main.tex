@@ -52,7 +52,7 @@
         \item \textbf{Context} --- v1 and v2 in brief
         \item \textbf{The Platform Ceiling} --- what the browser cannot close
         \item \textbf{v3 Architecture} --- Tauri, Python sidecar, platform layer
-        \item \textbf{Roadmap} --- four sub-milestones (v3.0--v3.3)
+        \item \textbf{Roadmap} --- five sub-milestones (v3.0--v3.4)
         \item \textbf{Key Design Decisions} --- the choices and why
         \item \textbf{Prerequisites \& Deferrals}
     \end{itemize}
@@ -393,6 +393,32 @@
 \end{frame}
 
 
+\begin{frame}{v3.4 --- Design System + UI Refresh (2026-04-09)}
+    \small
+    \textbf{Deliverable:} Coherent visual identity, persistent light/dark theme,
+    and model selection in the primary toolbar.
+
+    \vspace{0.15em}
+    \textbf{What shipped:}
+    \begin{itemize}\setlength{\itemsep}{0pt}\footnotesize
+        \item \textbf{Design system} --- self-hosted fonts (Hanken Grotesk, Crimson Pro);
+              CSS custom properties for all color tokens; warm utilitarian palette
+        \item \textbf{Light/dark theme} --- flash-prevention script in
+              \texttt{index.html}; toolbar toggle; persisted to \texttt{localStorage}
+        \item \textbf{\texttt{ModelSelector.tsx}} extracted from Settings into the
+              toolbar; gates fetch on \texttt{backendReady}; swap status inline
+        \item \textbf{Layout + comparison} --- three-zone layout; Recorder compacted
+              into toolbar; Raw/Edit comparison panes with per-pane copy buttons
+        \item \textbf{Settings + duration} --- accessible during recording; max
+              recording duration (push-to-talk, 5--60\,s; capped to backend limit)
+    \end{itemize}
+
+    \vspace{0.1em}
+    {\footnotesize\textbf{178 tests} (134 frontend + 44 backend).
+    No backend changes. v3.4 is the last mainline milestone.}
+\end{frame}
+
+
 % =========================================================================
 \section{Key Design Decisions}
 % =========================================================================
@@ -528,7 +554,7 @@
     \small
     \begin{itemize}\setlength{\itemsep}{2pt}
         \item \textbf{Model management UI} --- download progress, cache management.
-              Settings panel handles runtime swap; sufficient for v3.0--v3.3.
+              Toolbar model selector handles runtime swap; sufficient for v3.0--v3.4.
 
         \item \textbf{\texttt{submit} (direct injection)} --- deferred indefinitely.
               Downstream products use command draft/staging, not keystroke injection.
