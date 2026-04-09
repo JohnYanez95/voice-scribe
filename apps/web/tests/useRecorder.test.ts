@@ -110,7 +110,7 @@ describe("useRecorder — ScriptProcessorNode fallback", () => {
       destination: {},
     };
 
-    globalThis.AudioContext = vi.fn(() => mockAudioContext) as unknown as typeof AudioContext;
+    globalThis.AudioContext = vi.fn(function () { return mockAudioContext; }) as unknown as typeof AudioContext;
 
     return {
       fakeTrack,

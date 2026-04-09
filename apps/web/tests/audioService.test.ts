@@ -19,15 +19,12 @@ const mockPlay = vi.fn().mockResolvedValue(undefined);
 // Track all Audio instances created
 const audioInstances: Array<{ src: string; preload: string; currentTime: number; play: typeof mockPlay }> = [];
 
-vi.stubGlobal("Audio", vi.fn((src: string) => {
-  const instance = {
-    src,
-    preload: "",
-    currentTime: 0,
-    play: mockPlay,
-  };
-  audioInstances.push(instance);
-  return instance;
+vi.stubGlobal("Audio", vi.fn(function (this: Record<string, unknown>, src: string) {
+  this.src = src;
+  this.preload = "";
+  this.currentTime = 0;
+  this.play = mockPlay;
+  audioInstances.push(this as unknown as (typeof audioInstances)[number]);
 }));
 
 // ---------------------------------------------------------------------------
@@ -166,15 +163,12 @@ describe("desktop context (Tauri)", () => {
     delete (window as any).__TAURI__;
     vi.unstubAllGlobals();
     // Re-stub Audio since unstubAllGlobals removes it
-    vi.stubGlobal("Audio", vi.fn((src: string) => {
-      const instance = {
-        src,
-        preload: "",
-        currentTime: 0,
-        play: mockPlay,
-      };
-      audioInstances.push(instance);
-      return instance;
+    vi.stubGlobal("Audio", vi.fn(function (this: Record<string, unknown>, src: string) {
+      this.src = src;
+      this.preload = "";
+      this.currentTime = 0;
+      this.play = mockPlay;
+      audioInstances.push(this as unknown as (typeof audioInstances)[number]);
     }));
   });
 
