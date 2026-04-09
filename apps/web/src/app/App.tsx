@@ -86,7 +86,9 @@ export function App() {
   }, []);
 
   const handleSetMaxDuration = useCallback((seconds: number) => {
-    const clamped = Math.max(5, Math.min(300, seconds));
+    // Upper bound matches MAX_AUDIO_SECONDS in apps/api/app/config.py.
+    // Raising this requires a matching WebSocket cap on the backend.
+    const clamped = Math.max(5, Math.min(60, seconds));
     localStorage.setItem("voice-scribe-max-duration", String(clamped));
     setMaxDurationState(clamped);
   }, []);

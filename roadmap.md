@@ -973,8 +973,12 @@ model selection extracted from the settings panel into the primary toolbar.
    hotkey (`Ctrl+Shift+S`) and tray `tray-toggle-settings` event retain the recording-state guard
    — stray hotkeys during dictation do not interrupt the session.
 
-7. **Dead code removal.** Model selection UI removed from `Settings.tsx`. `maxDuration` prop
-   wiring retained in `App.tsx` for the auto-stop timer; UI not exposed (deferred).
+7. **Max recording duration.** Number input in Settings → Recording, 5–60 s range, default
+   60 s, disabled while a session is active. Push-to-talk auto-stop timer wired in `App.tsx`.
+   Value persisted to `localStorage` with clamping. Upper bound matches `MAX_AUDIO_SECONDS`
+   in `apps/api/app/config.py`.
+
+8. **Dead code removal.** Model selection UI removed from `Settings.tsx`.
 
 No backend changes. No new API surface. No new Tauri plugins.
 
@@ -983,12 +987,13 @@ contrast verified against WCAG 4.5:1 for `--accent`. Flash-prevention script con
 with `voice-scribe-theme=light` in localStorage applies light palette before first paint.
 Comparison pane copy buttons pass correct content to `writeClipboard`. Desktop hotkey hints show
 Y and X only (Space/S not advertised). Settings panel accessible during recording; mode radios
-disabled.
+disabled. Max-duration UI capped at 60 s; values above 60 s not reachable via the input.
 
 **Gate result (2026-04-09).** All scope items delivered. Design system, theme toggle, model
-selector extraction, layout refactor, comparison panes, settings-during-recording, and dead code
-removal verified against the implementation. 175 tests (131 frontend + 44 backend), TypeScript
-clean, Rust clean.
+selector extraction, layout refactor, comparison panes, settings-during-recording, and max
+recording duration UI verified against the implementation. Max-duration input capped at 60 s
+(`max={60}` in Settings.tsx, `Math.min(60, ...)` in App.tsx) — matches `MAX_AUDIO_SECONDS` in
+`apps/api/app/config.py`. 175 tests (131 frontend + 44 backend), TypeScript clean, Rust clean.
 
 **v3.4 is the last mainline milestone.** Voice Scribe is feature-complete as a capture primitive.
 Further capability expansion (transformation, routing, instrumentation) belongs to downstream

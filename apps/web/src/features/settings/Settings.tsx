@@ -128,7 +128,7 @@ export function Settings({
               id="max-duration"
               type="number"
               min={5}
-              max={300}
+              max={60}
               step={5}
               value={maxDuration}
               onChange={(e) => onMaxDurationChange(Number(e.target.value))}
@@ -136,8 +136,8 @@ export function Settings({
             />
           </div>
           <p className="settings-note">
-            Default: 60 s. Longer recordings use more memory — keep below 120 s
-            on constrained hardware.
+            Default: 60 s. Capped to match the backend upload limit —
+            raising requires a matching server change.
           </p>
           {isActive && (
             <p className="settings-note settings-locked">

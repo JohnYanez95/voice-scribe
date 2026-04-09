@@ -7,7 +7,7 @@ A local voice input system for developer workflows. Runs [faster-whisper](https:
 - **Push-to-talk** — record an utterance, get a transcript, copy it.
 - **Continuous dictation** — mic stays open, client-side VAD ([Silero v4](https://github.com/snakers4/silero-vad), ONNX/WASM) gates speech, transcripts accumulate with automatic paragraph breaks based on speech timing.
 - **Voice commands** — say "copy" or "clear" during continuous dictation. Exact-segment detection, stripped from output.
-- **Hotkeys** — `Ctrl+Shift+Space` (record), `Ctrl+Shift+Y` (copy), `Ctrl+Shift+X` (clear), `Ctrl+Shift+S` (settings).
+- **Hotkeys** — `Ctrl+Shift+Space` (record), `Ctrl+Shift+Y` (copy), `Ctrl+Shift+X` (clear), `Ctrl+Shift+S` (settings). In desktop mode, `Ctrl+Shift+Space` and `Ctrl+Shift+S` are intercepted by WebKitGTK and do not fire; Y and X work reliably.
 - **System tray** — close-to-minimize with tray icon. Context menu (Record, Settings, Quit). Tooltip reflects recording state. Second close quits.
 - **Live model swapping** — switch between Whisper models at runtime from the toolbar. Thread-safe reload with VRAM cleanup.
 - **Light/dark theme** — toggle between dark (default) and light palettes. Preference persisted to `localStorage`, applied before first paint to prevent flash.

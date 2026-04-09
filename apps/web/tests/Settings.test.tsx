@@ -193,8 +193,8 @@ describe("Settings", () => {
     });
 
     const input = screen.getByLabelText(/max recording duration/i);
-    fireEvent.change(input, { target: { value: "120" } });
-    expect(onMaxDurationChange).toHaveBeenCalledWith(120);
+    fireEvent.change(input, { target: { value: "45" } });
+    expect(onMaxDurationChange).toHaveBeenCalledWith(45);
   });
 
   it("duration input is disabled when isActive is true", async () => {

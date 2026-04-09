@@ -72,7 +72,7 @@ Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MI
 - `src/hooks/useRecorder.ts` — MediaRecorder with explicit webm/opus codec request
 - `src/hooks/useHotkeys.ts` — Ctrl+Shift keyboard shortcuts at App level (v2.0)
 - `src/features/model-selector/ModelSelector.tsx` — Toolbar model selector; gates fetch on `backendReady`, renders swap status inline (v3.4)
-- `src/features/settings/Settings.tsx` — Settings panel: recording mode, display options, audio mute (v2.0; model selection removed in v3.4)
+- `src/features/settings/Settings.tsx` — Settings panel: recording mode, display options, audio mute, max recording duration (v2.0; model selection removed in v3.4)
 - `src/services/api.ts` — Typed fetch calls to localhost:8084
 - `src/services/platform.ts` — Platform detection (`isDesktop`), clipboard routing, submit stub (deferred), recording state emission to Rust
 - `src/services/audio.ts` — Audio cue playback: browser (HTMLAudioElement) or desktop (POST to Rust rodio server) (v3.2)
@@ -101,7 +101,7 @@ These patterns are non-negotiable in this codebase:
 
 **MediaRecorder** — Must negotiate a supported audio MIME type from a prioritized list (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/webm`, `audio/ogg`) via `isTypeSupported()` before recording. When no format is supported, fall back to `ScriptProcessorNode` PCM capture with `encodeWav()`. Show clear error if neither path works.
 
-**Request limits** — 60s max audio, 10MB max upload, one file per request.
+**Request limits** — 60s max audio, 10MB max upload, one file per request. The max recording duration setting in Settings is capped at 60s to match this limit — do not raise the UI cap without also raising the backend limit.
 
 ## Presentation Maintenance
 
