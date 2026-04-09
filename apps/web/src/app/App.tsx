@@ -9,13 +9,20 @@ import { encodeWav } from "../utils/audio";
 import { detectVoiceCommand } from "../utils/voiceCommands";
 import { streamTranscribeAudio, transcribeAudio } from "../services/api";
 import { initAudio, playCopySound, playClearSound, setAudioMuted } from "../services/audio";
-import { isDesktop, writeClipboard } from "../services/platform";
+import { isDesktop, writeClipboard, emitRecordingState } from "../services/platform";
 import type { RecordingMode, RecordingState } from "../types";
 
 const PARAGRAPH_BREAK_MS = 3000;
 
 export function App() {
-  const [state, setState] = useState<RecordingState>("idle");
+  const [state, setStateRaw] = useState<RecordingState>("idle");
+
+  // Wrapper that emits state to Rust for tray tooltip sync.
+  // All state transitions go through this — not setStateRaw directly.
+  const setState = useCallback((next: RecordingState) => {
+    setStateRaw(next);
+    emitRecordingState(next);
+  }, []);
   // In Tauri, the sidecar needs time to start. Gate recording until the Rust
   // side emits "backend-ready". In the browser, the backend is already running
   // (or will surface errors at transcription time) — no gate.
@@ -325,7 +332,15 @@ export function App() {
     stopRecording,
   ]);
 
+  // Debounce ref — absorbs rapid-fire toggles from tray menu clicks or
+  // key repeats. 200ms window prevents start+immediate-stop on the same
+  // user gesture.
+  const lastToggleRef = useRef(0);
+
   const handleToggleRecording = useCallback(() => {
+    const now = Date.now();
+    if (now - lastToggleRef.current < 200) return;
+    lastToggleRef.current = now;
     if (settingsOpen) return;
     // Push-to-talk: block during processing (can't start new recording)
     // Continuous + isListening: allow during processing (drain-then-done stop)
@@ -344,6 +359,9 @@ export function App() {
   }, [transcript]);
 
   const handleClearTranscript = useCallback(() => {
+    playClearSound().catch((err) => {
+      console.error("[hotkey] clear sound failed:", err);
+    });
     setTranscript("");
     setRawTranscript("");
     setState("idle");
@@ -355,6 +373,10 @@ export function App() {
     setSettingsOpen((prev) => !prev);
   }, [state]);
 
+  // Browser hotkeys — active in both browser and desktop modes.
+  // In desktop mode (WebKitGTK), Ctrl+Shift+Space and Ctrl+Shift+S are
+  // intercepted at the native level and do not reliably reach JS. Y and X
+  // work. See useHotkeys.ts for the full list of WebKitGTK interceptions.
   const hotkeyHandlers = useMemo(
     () => ({
       onToggleRecording: handleToggleRecording,
@@ -371,6 +393,37 @@ export function App() {
   );
 
   useHotkeys(hotkeyHandlers);
+
+  // Listen for tray menu and global hotkey events from the Rust process.
+  // "tray-toggle-recording" is emitted by both the tray menu item and the
+  // global shortcut handler — single event, single handler.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tauriEvent = (window as any).__TAURI__?.event;
+    if (!tauriEvent) return;
+
+    const unlistenToggle = tauriEvent.listen(
+      "tray-toggle-recording",
+      () => handleToggleRecording()
+    );
+    const unlistenSettings = tauriEvent.listen(
+      "tray-toggle-settings",
+      () => handleToggleSettings()
+    );
+    const unlistenShortcutFail = tauriEvent.listen(
+      "shortcut-registration-failed",
+      (event: { payload: string }) => {
+        setError(event.payload);
+      }
+    );
+
+    return () => {
+      unlistenToggle.then((fn: () => void) => fn());
+      unlistenSettings.then((fn: () => void) => fn());
+      unlistenShortcutFail.then((fn: () => void) => fn());
+    };
+  }, [handleToggleRecording, handleToggleSettings]);
 
   // In continuous mode, the user can click Stop while processing (drain-then-done).
   // isListening=true means the VAD is running — Stop is a valid action.
@@ -423,8 +476,10 @@ export function App() {
         isActive={isActiveSession}
       />
       <div className="hotkey-hints">
-        Ctrl+Shift+Space: Record &nbsp;|&nbsp; Ctrl+Shift+Y: Copy &nbsp;|&nbsp;
-        Ctrl+Shift+X: Clear &nbsp;|&nbsp; Ctrl+Shift+S: Settings
+        {isDesktop()
+          ? "Ctrl+Shift+Y: Copy \u00A0|\u00A0 Ctrl+Shift+X: Clear"
+          : "Ctrl+Shift+Space: Record \u00A0|\u00A0 Ctrl+Shift+Y: Copy \u00A0|\u00A0 Ctrl+Shift+X: Clear \u00A0|\u00A0 Ctrl+Shift+S: Settings"
+        }
       </div>
     </div>
   );

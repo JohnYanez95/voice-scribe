@@ -65,7 +65,7 @@ Covered in detail in the prior progress report revision. Summary:
 | File | Purpose |
 |---|---|
 | `Cargo.toml` | Dependencies: tauri 2, tauri-plugin-shell 2, arboard 3, tiny\_http 0.12, reqwest (blocking), webkit2gtk (Linux), libc (Unix) |
-| `tauri.conf.json` | devUrl `http://localhost:5173`, CSP allowing API and WebSocket on localhost:8000, `wasm-unsafe-eval` for ONNX VAD runtime |
+| `tauri.conf.json` | devUrl `http://localhost:5173`, CSP allowing API and WebSocket on localhost:8000, `wasm-unsafe-eval` for ONNX VAD runtime (later standardized to ports 5174/8084) |
 | `capabilities/default.json` | Tauri v2 capability permissions: shell spawn/kill, events |
 | `build.rs` | Standard Tauri build script |
 | `src/main.rs` | Sidecar lifecycle, HTTP clipboard server, WebKitGTK media permissions, shutdown handler |
@@ -77,7 +77,7 @@ Covered in detail in the prior progress report revision. Summary:
 
 **Spawn.** `find_uvicorn()` resolves the Python executable — checks `apps/api/.venv/bin/uvicorn` first, falls back to system PATH. `cuda_ld_library_path()` discovers CUDA runtime libraries installed as pip packages under `site-packages/nvidia/*/lib/` and injects them via `LD_LIBRARY_PATH` on the spawned process. Without this, `ctranslate2` cannot dlopen `libcublas.so.12` on bare-host setups where CUDA toolkit is not system-installed.
 
-**Health poll.** Background thread polls `GET http://127.0.0.1:8000/health` every 500ms with a 120-second timeout. On success, emits `backend-ready` Tauri event to the webview. On timeout or sidecar crash, shows an error dialog and exits. Crash detection checks `Child::try_wait()` each poll cycle — a sidecar that exits with non-zero (port conflict) is surfaced immediately, not after the full timeout.
+**Health poll.** Background thread polls `GET http://127.0.0.1:8000/health` (later standardized to port 8084) every 500ms with a 120-second timeout. On success, emits `backend-ready` Tauri event to the webview. On timeout or sidecar crash, shows an error dialog and exits. Crash detection checks `Child::try_wait()` each poll cycle — a sidecar that exits with non-zero (port conflict) is surfaced immediately, not after the full timeout.
 
 **Shutdown.** `on_window_event` handler sends SIGTERM on `CloseRequested`. Waits up to 5 seconds for graceful exit, then SIGKILL. The `Child` handle is stored in `Mutex<Option<Child>>` as Tauri managed state, accessible from both the health poll thread and the window event handler.
 
@@ -120,7 +120,7 @@ The third call site — the "Copy to Clipboard" button in `Transcript.tsx` — s
 
 ### HTTP Clipboard Server
 
-`main.rs` spawns a `tiny_http` listener on `127.0.0.1:8001` during `setup()`. The listener accepts `POST /clipboard` with a plain text body, writes the body to the system clipboard via `arboard::Clipboard::set_text()`, and returns 204. CORS is set to allow `http://localhost:5173` (the Vite dev server origin). The server thread runs for the lifetime of the Tauri process — no explicit shutdown needed (thread is not joined; OS reclaims on process exit).
+`main.rs` spawns a `tiny_http` listener on `127.0.0.1:8001` during `setup()`. The listener accepts `POST /clipboard` with a plain text body, writes the body to the system clipboard via `arboard::Clipboard::set_text()`, and returns 204. CORS is set to allow `http://localhost:5174` (the Vite dev server origin; originally 5173, standardized to 5174 during port migration). The server thread runs for the lifetime of the Tauri process — no explicit shutdown needed (thread is not joined; OS reclaims on process exit).
 
 The Tauri clipboard plugin (`tauri-plugin-clipboard-manager`) was tested and rejected. See Triage #6.
 

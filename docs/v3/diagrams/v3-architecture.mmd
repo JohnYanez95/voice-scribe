@@ -4,29 +4,39 @@ flowchart TB
         app["App.tsx +<br/>useVAD / useRecorder"]
         pt["platform.ts"]
         apits["api.ts<br/>(WebSocket / HTTP)"]
-        app --> pt --> apits
+        audio["audio.ts"]
+        app --> pt
+        app --> apits
+        app --> audio
     end
 
-    apits -->|"IPC<br/>(Tauri commands)"| plugins
-
-    plugins["Tauri plugins:<br/>clipboard-manager<br/>global-shortcut, tray"]
+    subgraph rust ["Rust process (main.rs)"]
+        direction TB
+        sidecar_mgr["Sidecar lifecycle<br/>(spawn, health poll,<br/>shutdown)"]
+        http_srv["tiny_http server<br/>127.0.0.1:8001"]
+        clipboard["arboard<br/>(system clipboard)"]
+        rodio["rodio<br/>(audio playback)"]
+        http_srv --> clipboard
+        http_srv --> rodio
+    end
 
     subgraph sidecar ["Managed child process"]
         direction TB
-        sc["Python sidecar:<br/>FastAPI localhost:8000"]
+        sc["Python sidecar:<br/>FastAPI localhost:8084"]
         inf["ffmpeg +<br/>faster-whisper (CUDA)"]
         sc --> inf
     end
 
-    plugins --> sc
-    inf --> os["Windows OS APIs<br/>(SendInput, global hotkey,<br/>tray icon)"]
+    apits -->|"WebSocket / HTTP<br/>localhost:8084"| sc
+    pt -->|"fetch() POST<br/>:8001/clipboard"| http_srv
+    audio -->|"fetch() POST<br/>:8001/audio/play"| http_srv
+    sidecar_mgr -->|"spawn + health poll"| sc
 
     classDef webviewStyle fill:#ddeeff,stroke:#5588bb,color:#333
+    classDef rustStyle fill:#ede8ff,stroke:#7755aa,color:#333
     classDef sidecarStyle fill:#ffd6b3,stroke:#cc7700,color:#333
-    classDef pluginStyle fill:#ede8ff,stroke:#7755aa,color:#333
     classDef nativeStyle fill:#ddf5dd,stroke:#448844,color:#333
 
-    class app,pt,apits webviewStyle
+    class app,pt,apits,audio webviewStyle
+    class sidecar_mgr,http_srv,clipboard,rodio rustStyle
     class sc,inf sidecarStyle
-    class plugins pluginStyle
-    class os nativeStyle

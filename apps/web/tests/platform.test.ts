@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isDesktop, writeClipboard, submitText } from "../src/services/platform";
+import { isDesktop, writeClipboard, submitText, emitRecordingState } from "../src/services/platform";
 
 describe("isDesktop", () => {
   afterEach(() => {
@@ -92,6 +92,31 @@ describe("writeClipboard — Tauri context (HTTP clipboard server)", () => {
     await expect(writeClipboard("fail")).rejects.toThrow(
       "Clipboard write failed (500): Clipboard init failed"
     );
+  });
+});
+
+describe("emitRecordingState", () => {
+  afterEach(() => {
+    delete (window as any).__TAURI__;
+  });
+
+  it("no-ops in browser mode", () => {
+    delete (window as any).__TAURI__;
+    // Should not throw — silent no-op
+    emitRecordingState("listening");
+  });
+
+  it("calls __TAURI__.event.emit in desktop mode", () => {
+    const emitMock = vi.fn();
+    (window as any).__TAURI__ = { event: { emit: emitMock } };
+    emitRecordingState("listening");
+    expect(emitMock).toHaveBeenCalledWith("recording-state-changed", "listening");
+  });
+
+  it("no-ops when __TAURI__ exists but event is missing", () => {
+    (window as any).__TAURI__ = {};
+    // Should not throw
+    emitRecordingState("idle");
   });
 });
 

@@ -1,6 +1,6 @@
 # Voice Scribe — Docker Setup
 
-Run Voice Scribe with the backend in a Docker container. Two modes: GPU (CUDA inference) and CPU (no GPU required).
+Run Voice Scribe with the backend in a Docker container. Two modes: GPU (CUDA inference) and CPU (no GPU required). Tested on Ubuntu 22.04.5 LTS; Docker abstracts most host differences but GPU passthrough requires a compatible NVIDIA driver.
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ npm install --prefix apps/web   # once, before first run
 make dev-cpu                    # start API container (CPU) + frontend dev server
 ```
 
-Frontend: `http://localhost:5173` | API: `http://localhost:8000`
+Frontend: `http://localhost:5174` | API: `http://localhost:8084`
 
 ## What each command does
 
@@ -81,9 +81,9 @@ Then restart Docker Desktop.
 
 **Model downloads on every restart**: Check that `data/cache/` is writable and persists. Run `ls data/cache/` — you should see a `models--Systran--faster-whisper-*` directory after first run.
 
-**Port 8000 already in use**: A previous container or desktop sidecar may still be running.
+**Port 8084 already in use**: A previous container or desktop sidecar may still be running.
 ```bash
 docker compose -f ops/docker/compose.dev.yml down
 ```
 
-**Frontend can't connect to API**: Ensure the container is running (`docker ps`). The frontend expects the API at `http://localhost:8000`. CORS allows `localhost:5173` and `127.0.0.1:5173`.
+**Frontend can't connect to API**: Ensure the container is running (`docker ps`). The frontend expects the API at `http://localhost:8084`. CORS allows `localhost:5174` and `127.0.0.1:5174`.

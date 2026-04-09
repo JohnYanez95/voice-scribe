@@ -13,10 +13,10 @@ A local voice input system for developer workflows. Runs [faster-whisper](https:
 
 ## Architecture
 
-Two services over localhost. The frontend runs on the host. The backend runs in Docker with GPU passthrough.
+Two services over localhost. The frontend runs on the host (browser or Tauri webview). The backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode).
 
 ```
-Browser (localhost:5173)                API container (localhost:8000)
+Frontend (localhost:5174)               API (localhost:8084)
 ┌─────────────────────────┐             ┌──────────────────────────────┐
 │ React + Vite            │  WebSocket  │ FastAPI + faster-whisper     │
 │ MediaRecorder / VAD     │────────────>│ ffmpeg transcode             │
@@ -24,40 +24,53 @@ Browser (localhost:5173)                API container (localhost:8000)
 └─────────────────────────┘  segments   └──────────────────────────────┘
 ```
 
-Audio is transient — deleted in a `finally` block after processing. Transcripts exist only in browser state and vanish on refresh. Nothing is logged, stored, or sent off-machine.
+Desktop mode adds a Rust HTTP server on port 8001 for native clipboard writes (`arboard`) and audio cue playback (`rodio`), bypassing WebKitGTK's unreliable media subsystem.
+
+Audio is transient — deleted in a `finally` block after processing. Transcripts exist only in browser/webview state and vanish on refresh. Nothing is logged, stored, or sent off-machine.
 
 ## Quick start
 
 ```bash
-# GPU (requires NVIDIA GPU + Container Toolkit)
+# Browser mode — GPU (requires NVIDIA GPU + Container Toolkit)
 make gpu-check   # verify GPU + container readiness
 make dev         # start API container (CUDA) + frontend dev server
 
-# CPU (no GPU required)
+# Browser mode — CPU (no GPU required)
 make dev-cpu     # start API container (CPU, small model) + frontend dev server
+
+# Desktop mode — Tauri app with bare-host sidecar
+make desktop     # start Tauri desktop app (GPU)
+make desktop-cpu # start Tauri desktop app (CPU fallback)
 ```
 
-Frontend: `http://localhost:5173` | API: `http://localhost:8000`
+Frontend: `http://localhost:5174` | API: `http://localhost:8084`
+
+See [docs/docker-setup.md](docs/docker-setup.md) for browser mode setup and [docs/v3/host-setup.md](docs/v3/host-setup.md) for desktop mode setup.
 
 ## Requirements
 
+**Browser mode** (Docker):
 - Docker Engine or Docker Desktop
 - Node.js 20+
+- GPU mode: NVIDIA GPU with CUDA support and drivers on the host
 
-GPU mode additionally requires an NVIDIA GPU with CUDA support and drivers installed on the host.
-
-See [docs/docker-setup.md](docs/docker-setup.md) for full setup and troubleshooting.
+**Desktop mode** (Tauri):
+- Rust toolchain, Python 3.10+, ffmpeg, NVIDIA drivers
+- Linux system dependencies (WebKitGTK, GStreamer, ALSA)
+- Tested on Ubuntu 22.04.5 LTS
 
 ## Development
 
 ```bash
-make dev        # Start API container (GPU) + frontend dev server
-make dev-cpu    # Start API container (CPU) + frontend dev server
-make api        # API container only
-make web        # Frontend dev server only
-make build      # Build the API Docker image
-make test       # Run all tests (backend + frontend)
-make gpu-check  # Verify GPU/container readiness
+make dev          # Start API container (GPU) + frontend dev server
+make dev-cpu      # Start API container (CPU) + frontend dev server
+make desktop      # Start Tauri desktop app (GPU sidecar)
+make desktop-cpu  # Start Tauri desktop app (CPU sidecar)
+make api          # API container only
+make web          # Frontend dev server only
+make build        # Build the API Docker image
+make test         # Run all tests (backend + frontend)
+make gpu-check    # Verify GPU/container readiness
 ```
 
 ```bash
@@ -71,23 +84,27 @@ cd apps/web && npx tsc --noEmit                    # Type check
 
 ```
 apps/
-  api/          FastAPI backend (Docker, GPU inference)
-  web/          React + TypeScript frontend (Vite)
+  api/          FastAPI backend (Docker or bare-host sidecar, GPU inference)
+  web/          React + TypeScript frontend (Vite, serves browser and Tauri)
+  desktop/      Tauri v2 desktop shell (sidecar lifecycle, native clipboard/audio)
 ops/
   docker/       Compose config, GPU passthrough
   scripts/      Smoke test, GPU bootstrap check
 docs/
-  docker-setup.md  Docker setup (GPU and CPU) and troubleshooting
+  docker-setup.md  Docker/browser mode setup and troubleshooting
+  v1/           Delivery report and presentation (frozen, v1 historical)
   v2/           Presentation and delivery report (frozen, v2 complete)
-  v3/           Presentation (living, updated as v3 milestones ship)
+  v3/           Host setup, progress report, presentation (living)
   diagrams/     Mermaid source files for all diagrams
 ```
 
 ## Current state
 
-v2.3.3. Push-to-talk, continuous dictation, streaming, voice commands, hotkeys, and settings are all in the browser version.
+v3.2. The Tauri desktop application launches, spawns the Python API as a sidecar, and provides GPU-accelerated transcription with push-to-talk and continuous dictation. Voice commands ("copy", "clear") produce audible feedback and route through platform-native clipboard and audio. 159 tests pass (115 frontend, 44 backend).
 
-Next: a [Tauri v2](https://v2.tauri.app/) desktop application. Planned capabilities: native clipboard write (no focus requirement), direct text injection into the focused application, global hotkeys, system tray. See `roadmap.md` for scope and sequencing.
+Both browser and desktop modes share the same backend code and web UI. Desktop mode adds native OS access (clipboard via `arboard`, audio via `rodio`) through a Rust HTTP server, bypassing WebKitGTK limitations.
+
+Next: v3.3 — system tray and global hotkeys. This is the last mainline milestone. See `roadmap.md` for scope and sequencing.
 
 ## License
 

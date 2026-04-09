@@ -6,7 +6,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+use tauri::tray::TrayIconBuilder;
 
 /// Embedded audio cue WAV files — compiled into the binary from the shared
 /// source in apps/web/public/sounds/. Same files the browser path serves
@@ -17,6 +19,11 @@ const CLEAR_WAV: &[u8] = include_bytes!("../../../../apps/web/public/sounds/clea
 /// Managed state: holds the sidecar child process handle so shutdown can
 /// reach it from any context (window close, app exit).
 struct Sidecar(Mutex<Option<Child>>);
+
+/// Tracks whether the window is already minimized. Used by the second-close
+/// escape hatch: first close minimizes, second close quits with sidecar
+/// cleanup. This provides a quit path on WSLg where the tray is not rendered.
+struct Minimized(Mutex<bool>);
 
 /// Resolve the path to uvicorn. Tries the venv first, falls back to PATH.
 fn find_uvicorn(api_dir: &std::path::Path) -> String {
@@ -211,6 +218,25 @@ fn play_wav(data: &'static [u8]) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        // Global shortcut plugin (tauri-plugin-global-shortcut) removed.
+        //
+        // Why: XGrabKey registration succeeds on WSLg but the handler
+        // callback never fires — WSLg's XWayland does not deliver grabbed
+        // key events. The plugin provides no functionality on this platform.
+        //
+        // Separate issue: Ctrl+Shift+Space has intrinsic alternating
+        // dispatch in WebKitGTK (accessibility activation key) regardless
+        // of whether the plugin is loaded. Ctrl+Shift+S is intercepted as
+        // Save As. Both are WebKitGTK behaviors, not plugin side effects.
+        // See useHotkeys.ts for the full list.
+        //
+        // Re-addition path: on native Linux with a functional X11 server,
+        // XGrabKey should deliver events. The global shortcut handles the
+        // unfocused case (bypassing WebKitGTK entirely); useHotkeys
+        // continues to handle Y and X when focused. Re-addition is a
+        // Rust-only change — the frontend event bridge
+        // (shortcut-registration-failed listener, tray-toggle-recording)
+        // is wired and tested.
         // Clipboard write via HTTP + arboard.
         // The Tauri clipboard plugin (tauri-plugin-clipboard-manager) was tested
         // and confirmed to crash WebKitGTK with a NeedDebuggerBreak trap when
@@ -219,6 +245,7 @@ fn main() {
         // entirely: fetch() POST has no activation requirement, and arboard
         // writes to the system clipboard from the Rust process.
         .manage(Sidecar(Mutex::new(None)))
+        .manage(Minimized(Mutex::new(false)))
         .setup(|app| {
             // Resolve the API directory relative to CARGO_MANIFEST_DIR
             // (apps/desktop/src-tauri → ../../api → apps/api).
@@ -383,6 +410,93 @@ fn main() {
                 }
             });
 
+            // System tray — icon, context menu, tooltip.
+            // Tray is part of Tauri v2 core (no plugin crate needed).
+            let toggle_item = MenuItemBuilder::with_id("toggle-recording", "Toggle Recording")
+                .build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings")
+                .build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit")
+                .build(app)?;
+
+            let tray_menu = MenuBuilder::new(app)
+                .item(&toggle_item)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&settings_item)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&quit_item)
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Voice Scribe — Idle")
+                .menu(&tray_menu)
+                .on_menu_event(move |app_handle, event| {
+                    match event.id().as_ref() {
+                        "toggle-recording" => {
+                            let _ = app_handle.emit("tray-toggle-recording", ());
+                        }
+                        "settings" => {
+                            // Show the window before opening settings — settings
+                            // panel is a UI overlay, needs a visible window.
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                            let _ = app_handle.emit("tray-toggle-settings", ());
+                        }
+                        "quit" => {
+                            // Sidecar cleanup — same pattern as the former
+                            // CloseRequested handler: take Sidecar state, lock, kill.
+                            let sidecar: tauri::State<Sidecar> = app_handle.state();
+                            let mut guard = sidecar.0.lock().unwrap();
+                            if let Some(ref mut child) = *guard {
+                                eprintln!("Tray quit — shutting down sidecar");
+                                kill_sidecar(child);
+                            }
+                            std::process::exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Left-click toggles window visibility
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                // Clear minimized flag — window is restored
+                                let minimized: tauri::State<Minimized> = tray.app_handle().state();
+                                *minimized.0.lock().unwrap() = false;
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // Listen for recording state changes from the frontend to update
+            // the tray tooltip. The frontend emits "recording-state-changed"
+            // with the state string ("idle", "recording", "listening", etc.).
+            let tray_handle = _tray.clone();
+            app.listen("recording-state-changed", move |event| {
+                let state_str = event.payload()
+                    .trim_matches('"');
+                let tooltip = match state_str {
+                    "listening" => "Voice Scribe — Listening",
+                    "recording" => "Voice Scribe — Recording",
+                    "processing" => "Voice Scribe — Processing",
+                    _ => "Voice Scribe — Idle",
+                };
+                let _ = tray_handle.set_tooltip(Some(tooltip));
+            });
+
             // Spawn sidecar
             let mut child = match spawn_sidecar(&api_dir) {
                 Ok(c) => c,
@@ -425,13 +539,53 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let sidecar: tauri::State<Sidecar> = window.app_handle().state();
-                let mut guard = sidecar.0.lock().unwrap();
-                if let Some(ref mut child) = *guard {
-                    eprintln!("Window closing — shutting down sidecar");
-                    kill_sidecar(child);
+            // Minimize instead of quitting. The sidecar stays alive and the
+            // window remains accessible in the taskbar. On desktop environments
+            // with a system tray (GNOME, KDE), the tray icon provides a second
+            // access point. On WSLg, the tray is not rendered — the taskbar
+            // entry is the only way back.
+            //
+            // Minimize (not hide) is intentional: WSLg does not render the
+            // system tray and XGrabKey-based global shortcuts do not fire,
+            // so a hidden window would be completely inaccessible. On native
+            // Linux with a working tray + global hotkey, switching to
+            // window.hide() is the right behavior.
+            //
+            // TODO: native Linux builds should use window.hide() once tray
+            // rendering and global hotkey delivery are confirmed on the
+            // target desktop environment.
+            //
+            // Actual quit (sidecar cleanup + exit) is handled by the tray
+            // "Quit" menu item. On WSLg where the tray is not rendered, the
+            // Makefile PID-file cleanup (SIDECAR_PID_FILE) is the fallback.
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let minimized_state: tauri::State<Minimized> = window.app_handle().state();
+                    let mut is_minimized = minimized_state.0.lock().unwrap();
+
+                    if *is_minimized {
+                        // Second close — user means it. Clean up sidecar and exit.
+                        let sidecar: tauri::State<Sidecar> = window.app_handle().state();
+                        let mut guard = sidecar.0.lock().unwrap();
+                        if let Some(ref mut child) = *guard {
+                            eprintln!("Second close — shutting down sidecar");
+                            kill_sidecar(child);
+                        }
+                        std::process::exit(0);
+                    } else {
+                        // First close — minimize to taskbar.
+                        api.prevent_close();
+                        let _ = window.minimize();
+                        *is_minimized = true;
+                    }
                 }
+                tauri::WindowEvent::Focused(true) => {
+                    // Window regained focus (restored from taskbar) — reset
+                    // the minimized flag so the next close minimizes again.
+                    let minimized_state: tauri::State<Minimized> = window.app_handle().state();
+                    *minimized_state.0.lock().unwrap() = false;
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

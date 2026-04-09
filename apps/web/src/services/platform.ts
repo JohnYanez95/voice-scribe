@@ -50,3 +50,14 @@ export async function writeClipboard(text: string): Promise<void> {
 export async function submitText(text: string): Promise<void> {
   await writeClipboard(text);
 }
+
+/**
+ * Emit recording state to the Rust process so the tray tooltip stays
+ * in sync. No-op in browser mode. The Rust side listens for
+ * "recording-state-changed" and updates the tray tooltip accordingly.
+ */
+export function emitRecordingState(state: string): void {
+  if (!isDesktop()) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__TAURI__?.event?.emit("recording-state-changed", state);
+}

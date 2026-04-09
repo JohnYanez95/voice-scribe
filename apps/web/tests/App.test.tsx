@@ -570,14 +570,17 @@ describe("App — backend readiness gate", () => {
   });
 
   it("Tauri context: disabled with 'Starting backend...' until backend-ready event", async () => {
-    // Set up __TAURI__ before re-importing App so isDesktop evaluates to true
-    let listenCallback: (() => void) | undefined;
+    // Set up __TAURI__ before re-importing App so isDesktop evaluates to true.
+    // Route by event name — multiple listeners register (backend-ready,
+    // tray-toggle-recording, tray-toggle-settings, shortcut-registration-failed).
+    const listeners: Record<string, ((...args: unknown[]) => void)> = {};
     (window as any).__TAURI__ = {
       event: {
-        listen: vi.fn((_event: string, cb: () => void) => {
-          listenCallback = cb;
+        listen: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+          listeners[event] = cb;
           return Promise.resolve(() => {});
         }),
+        emit: vi.fn(),
       },
     };
 
@@ -593,7 +596,7 @@ describe("App — backend readiness gate", () => {
 
     // Fire backend-ready event from Rust sidecar
     act(() => {
-      listenCallback!();
+      listeners["backend-ready"]?.();
     });
 
     // Button transitions to "Record" and is enabled
@@ -629,14 +632,16 @@ describe("App — desktop voice command clipboard routing", () => {
   });
 
   it('"copy" voice command routes through HTTP clipboard server, not navigator.clipboard', async () => {
-    // Set up __TAURI__ with event.listen so backend-ready can fire
-    let listenCallback: (() => void) | undefined;
+    // Set up __TAURI__ with event.listen routed by event name — multiple
+    // listeners register in desktop mode.
+    const listeners: Record<string, ((...args: unknown[]) => void)> = {};
     (window as any).__TAURI__ = {
       event: {
-        listen: vi.fn((_event: string, cb: () => void) => {
-          listenCallback = cb;
+        listen: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+          listeners[event] = cb;
           return Promise.resolve(() => {});
         }),
+        emit: vi.fn(),
       },
     };
 
@@ -657,7 +662,7 @@ describe("App — desktop voice command clipboard routing", () => {
     expect(screen.getByText("Starting backend...")).toBeTruthy();
 
     // Fire backend-ready event — button transitions to "Record"
-    act(() => { listenCallback!(); });
+    act(() => { listeners["backend-ready"]?.(); });
     await waitFor(() => {
       expect(screen.getByText("Record")).toBeTruthy();
     });
@@ -706,5 +711,244 @@ describe("App — desktop voice command clipboard routing", () => {
 
     // Assert: navigator.clipboard.writeText was NOT called
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3.3 — Tray events, global hotkey, state emission
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: set up __TAURI__ mock with event-routed listeners.
+ * Returns the listeners map so tests can fire events by name.
+ */
+function setupTauriMock(): {
+  listeners: Record<string, ((...args: unknown[]) => void)>;
+  emitMock: ReturnType<typeof vi.fn>;
+} {
+  const listeners: Record<string, ((...args: unknown[]) => void)> = {};
+  const emitMock = vi.fn();
+  (window as any).__TAURI__ = {
+    event: {
+      listen: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+        listeners[event] = cb;
+        return Promise.resolve(() => {});
+      }),
+      emit: emitMock,
+    },
+  };
+  return { listeners, emitMock };
+}
+
+describe("App — tray and global hotkey events (v3.3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    streamCalls.length = 0;
+    localStorage.clear();
+    localStorage.setItem("voice-scribe-recording-mode", "continuous");
+    mockIsListening = false;
+  });
+
+  afterEach(() => {
+    delete (window as any).__TAURI__;
+  });
+
+  it("tray-toggle-recording starts recording when idle", async () => {
+    const { listeners } = setupTauriMock();
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+    render(<TauriApp />);
+
+    // Fire backend-ready so the app is in idle state
+    act(() => { listeners["backend-ready"]?.(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Fire tray toggle recording event
+    mockIsListening = true;
+    act(() => { listeners["tray-toggle-recording"]?.(); });
+
+    await waitFor(() => {
+      expect(mockStartListening).toHaveBeenCalled();
+    });
+  });
+
+  it("tray-toggle-recording is a no-op when settings are open", async () => {
+    const { listeners } = setupTauriMock();
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+    render(<TauriApp />);
+
+    // Fire backend-ready
+    act(() => { listeners["backend-ready"]?.(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Open settings panel
+    const settingsBtn = screen.getByLabelText("Settings");
+    fireEvent.click(settingsBtn);
+    await waitFor(() => {
+      expect(screen.getByText("Settings")).toBeTruthy();
+    });
+
+    // Fire tray toggle — should be no-op because settings are open
+    act(() => { listeners["tray-toggle-recording"]?.(); });
+
+    // startListening should NOT have been called
+    expect(mockStartListening).not.toHaveBeenCalled();
+  });
+
+  it("shortcut-registration-failed surfaces error message", async () => {
+    const { listeners } = setupTauriMock();
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+    render(<TauriApp />);
+
+    // Fire backend-ready
+    act(() => { listeners["backend-ready"]?.(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Fire shortcut failure event
+    act(() => {
+      listeners["shortcut-registration-failed"]?.({
+        payload: "Global hotkey Ctrl+Shift+Space could not be registered: already in use",
+      });
+    });
+
+    // Error message should be visible
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Global hotkey Ctrl+Shift+Space could not be registered: already in use"
+        )
+      ).toBeTruthy();
+    });
+  });
+
+  it("state emission calls __TAURI__.event.emit on state change", async () => {
+    const { listeners, emitMock } = setupTauriMock();
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+    render(<TauriApp />);
+
+    // Fire backend-ready
+    act(() => { listeners["backend-ready"]?.(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Start recording — should emit state change
+    mockIsListening = true;
+    act(() => { fireEvent.click(screen.getByText("Record")); });
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("recording-state-changed", "listening");
+    });
+  });
+
+  it("rapid tray-toggle-recording does not corrupt state", async () => {
+    const { listeners } = setupTauriMock();
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+    render(<TauriApp />);
+
+    // Fire backend-ready
+    act(() => { listeners["backend-ready"]?.(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Fire two toggle events in rapid succession
+    mockIsListening = true;
+    act(() => {
+      listeners["tray-toggle-recording"]?.();
+      listeners["tray-toggle-recording"]?.();
+    });
+
+    // startListening should have been called (first toggle starts)
+    // stopListening should also have been called (second toggle stops)
+    // The key assertion: no error state and no crash
+    await waitFor(() => {
+      expect(mockStartListening).toHaveBeenCalled();
+    });
+  });
+});
+
+describe("App — hotkey debounce in desktop mode (v3.3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    streamCalls.length = 0;
+    localStorage.clear();
+    localStorage.setItem("voice-scribe-recording-mode", "continuous");
+    mockIsListening = false;
+  });
+
+  afterEach(() => {
+    delete (window as any).__TAURI__;
+  });
+
+  it("Ctrl+Shift+Space works in desktop mode via useHotkeys", async () => {
+    const { listeners } = setupTauriMock();
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+    render(<TauriApp />);
+
+    // Fire backend-ready
+    act(() => { listeners["backend-ready"]?.(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Fire Ctrl+Shift+Space — should trigger recording
+    mockIsListening = true;
+    fireEvent.keyDown(document, {
+      key: " ",
+      ctrlKey: true,
+      shiftKey: true,
+    });
+
+    await waitFor(() => {
+      expect(mockStartListening).toHaveBeenCalled();
+    });
+  });
+
+  it("double-fire within 200ms is debounced", async () => {
+    const { listeners } = setupTauriMock();
+
+    vi.resetModules();
+    const { App: TauriApp } = await import("../src/app/App");
+    render(<TauriApp />);
+
+    // Fire backend-ready
+    act(() => { listeners["backend-ready"]?.(); });
+    await waitFor(() => {
+      expect(screen.getByText("Record")).toBeTruthy();
+    });
+
+    // Simulate double-fire: useHotkeys + tray-toggle-recording in same tick
+    mockIsListening = true;
+    act(() => {
+      fireEvent.keyDown(document, {
+        key: " ",
+        ctrlKey: true,
+        shiftKey: true,
+      });
+      listeners["tray-toggle-recording"]?.();
+    });
+
+    // startListening should be called exactly once (debounce absorbs the second)
+    await waitFor(() => {
+      expect(mockStartListening).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -2,6 +2,10 @@
 
 Bare-host setup for running Voice Scribe as a Tauri desktop application with GPU-accelerated transcription. The desktop app wraps the existing web UI in a native window and manages the Python API as a sidecar process — no Docker required.
 
+## Tested On
+
+Ubuntu 22.04.5 LTS. Package names (especially WebKitGTK and GStreamer) may differ on other Ubuntu releases or distributions.
+
 ## Prerequisites
 
 ### Rust Toolchain
@@ -107,7 +111,7 @@ On first launch:
 - The sidecar downloads the Whisper model to `~/.cache/voice-scribe/` (large-v3 is ~3GB)
 - Health poll runs at 500ms intervals with a 120-second timeout — model download fits within this window on most connections
 
-The Vite dev server starts in parallel. The webview loads `http://localhost:5173`. The record button shows "Starting backend..." until the sidecar health check passes.
+The Vite dev server starts in parallel. The webview loads `http://localhost:5174`. The record button shows "Starting backend..." until the sidecar health check passes.
 
 ## Recommended Audio Input
 
@@ -129,7 +133,7 @@ WebKitGTK has a two-layer permission model for media devices:
 The app configures both layers automatically in `main.rs`. If microphone access is still denied:
 - Verify the system dependencies above are installed (specifically `libwebkit2gtk-4.1-dev`)
 - Check that PulseAudio or PipeWire is running: `pactl info`
-- Verify the microphone works in the browser at `http://localhost:5173` (the same web UI without the Tauri wrapper)
+- Verify the microphone works in the browser at `http://localhost:5174` (the same web UI without the Tauri wrapper)
 
 ### `libcublas.so.12: cannot open shared object file`
 
@@ -145,15 +149,22 @@ The sidecar cannot find CUDA runtime libraries. Check:
 
 3. **Scope mismatch:** If the library is installed but the path is empty, the installation scope may not match what the sidecar scans. The sidecar checks both venv and user scope — but if the library is installed in a different venv or a system-wide location, it won't be found. Reinstall into `apps/api/.venv/` or at user scope.
 
-### Port 8000 already in use
+### Port 8084 already in use
 
-The `make desktop` target checks port 8000 before spawning the sidecar. If a Docker container from `make dev` is still running:
+The `make desktop` target checks port 8084 before spawning the sidecar. If a Docker container from `make dev` is still running:
 
 ```bash
 docker compose -f ops/docker/compose.dev.yml down
 ```
 
 If `ss` is not available on your system (some minimal WSL2 installations), the port check is skipped with a warning. The sidecar health poll will detect the conflict — the sidecar exits immediately and the app shows an error dialog.
+
+### Port 5174 already in use
+
+Stale `node` processes from a previous `make desktop` or `make dev` session can hold port 5174. Kill them before restarting:
+```bash
+lsof -ti :5174 | xargs kill
+```
 
 ### Sidecar process not cleaned up
 
