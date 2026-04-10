@@ -58,7 +58,11 @@ Two-service system over localhost. WebSocket (default, v2.1+) and HTTP (fallback
 - **Backend** (`apps/api/`, port 8084): FastAPI with GPU. Validates upload, transcodes via ffmpeg to 16kHz mono WAV, runs faster-whisper inference, returns transcript. Runs in Docker (browser mode) or as bare-host Python process (desktop mode) — same code, different process boundary.
 - **Desktop shell** (`apps/desktop/src-tauri/`): Tauri v2. Spawns the Python API as a sidecar, polls health, emits `backend-ready` event. HTTP clipboard + audio server on port 8001 (`tiny_http` + `arboard` + `rodio`). System tray with context menu and recording-state tooltip. Close-to-minimize with second-close quit. WebKitGTK media permissions granted programmatically. CUDA runtime discovery via `cuda_ld_library_path()`. WebKitGTK intercepts `Ctrl+Shift+Space` and `Ctrl+Shift+S` at the native level — `Ctrl+Shift+Y` (copy) and `Ctrl+Shift+X` (clear) work reliably.
 
-Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MIME validation` → `ffmpeg transcode` → `faster-whisper inference` → `streaming transcript JSON` → `editable textarea`
+Request flow (WebSocket): `MediaRecorder (webm/opus)` → `WebSocket /ws/transcribe` → `ffmpeg transcode` → `faster-whisper inference` → `streaming transcript JSON` → `editable textarea`
+
+Request flow (HTTP fallback): `MediaRecorder (webm/opus)` → `POST /transcribe` → `MIME validation` → `ffmpeg transcode` → `faster-whisper inference` → `TranscribeResponse JSON` → `editable textarea`
+
+**Backend contract:** `docs/contract/runtime-contract.md` is the stable description of request/response shapes, hard limits, and privacy guarantees for downstream consumers. Any change that touches endpoint shapes or constraints must update the contract doc and regenerate `docs/contract/runtime-contract.schema.json` (`cd apps/api && python scripts/export_contract.py`). The drift test (`tests/test_contract_export.py`) will fail if the schema file is not updated.
 
 ### Key backend files
 - `app/main.py` — FastAPI app, CORS, lifespan (model loading)

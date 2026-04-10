@@ -1056,7 +1056,7 @@ Product principles (govern this product, not Voice Scribe):
 - Second-stage model powers all derived panes except raw
 - Schema-agnostic public contract — no private upstream schema leakage
 
-**Integration contract (named, not designed).** Voice Scribe's current output is unstructured text in a textarea, delivered via clipboard. The workspace product will be the first downstream consumer that needs to consume transcripts programmatically — and will likely want richer data than flat text (segment boundaries, timestamps, possibly confidence scores). Voice Scribe currently has no structured output contract. When the workspace product reaches the point of needing one, the decision is whether Voice Scribe exposes a local API, a file-based contract, or IPC — each with different implications for the zero-persistence guarantee. This is a known future concern, not current scope.
+**Integration contract — delivered.** `docs/contract/runtime-contract.md` is the stable, versioned description of what Voice Scribe exposes to downstream consumers. The machine-readable companion `docs/contract/runtime-contract.schema.json` is generated from the Pydantic models in `apps/api/app/schemas.py` and kept in sync by `apps/api/tests/test_contract_export.py` — the test fails if schemas.py changes without a corresponding schema regeneration. Contract version equals the Voice Scribe git tag of the release that ships the file. Breaking changes bump the major component. Richer fields (segment timestamps, confidence scores, structured boundaries) are additive changes driven by a concrete workspace need; they appear in a future contract version, not this one.
 
 ---
 
@@ -1078,9 +1078,21 @@ These are deferred by design, not by oversight: OpenAPI-generated frontend contr
 
 ## Public Release Checklist (Pre-Release)
 
-Before public release, the repo must include: README, SECURITY.md, privacy docs, threat model docs, release checklist, dependency and secret scanning in CI.
+**Must include before public release:**
+- README
+- SECURITY.md
+- Privacy docs
+- Threat model docs
+- Release checklist
+- Dependency and secret scanning in CI
+- Contract export test green; `docs/contract/runtime-contract.schema.json` regenerates without diff
 
-Do not publish with: permissive network exposure, transcript or audio logging enabled by default, committed secrets, real user data, unprotected debug endpoints.
+**Must not publish with:**
+- Permissive network exposure
+- Transcript or audio logging enabled by default
+- Committed secrets
+- Real user data
+- Unprotected debug endpoints
 
 ---
 
