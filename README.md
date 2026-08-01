@@ -68,13 +68,19 @@ Measured at the v4.0 field test (2026-08-01, RTX 3090 on WSL2 — full numbers i
 peak while streaming; streaming holds a 0.64 GPU duty cycle (p95 tick occupancy 0.58 of
 the 750 ms budget) and one-shot transcription runs at roughly 12–17× real time.
 
-- **Recommended (large-v3):** RTX 3090 / 4080-class or better, ≥ 10 GB VRAM. Meets all
-  latency targets with headroom for model swaps and a desktop compositor sharing the GPU.
+- **Recommended (large-v3):** RTX 3090 / 4080-class or better, ≥ 10 GB VRAM. Measured on
+  the 3090: p95 tick occupancy 0.58 of the 750 ms streaming budget, finalization 0.30–0.34 s
+  typical (content-dependent outliers of a few seconds on dense passages), first partial
+  ~1.6 s. The ≥ 10 GB floor covers swap-time double residency — a model swap constructs the
+  new model while the old is still loaded.
 - **Minimum (large-v3):** ≥ 8 GB VRAM and roughly half a 3090's fp16 throughput
   (RTX 3060 Ti / 4060-class — estimated from relative throughput, not tested). Streaming
-  still works but sits in sustained overrun: the backpressure ladder doubles the tick
-  interval, so partials arrive at ~1.5 s cadence instead of 750 ms; one-shot latency
-  roughly doubles.
+  runs in sustained overrun at this tier: the backpressure ladder doubles the tick interval,
+  so partials arrive at ~1.5 s cadence instead of 750 ms, and one-shot latency roughly
+  doubles. Two caveats: 8 GB does not fit a large-to-large model swap (two models resident
+  during the swap — restart the backend to change large models), and the overrun/ladder
+  path has not yet been validated on live overrun audio (scheduled before the v4-overall
+  gate).
 - **Below that:** set `WHISPER_MODEL=medium` (about half the decode cost) or `small` —
   a 6 GB card runs `medium` comfortably. With no CUDA GPU, `make desktop-cpu` (or the CPU
   compose profile) runs `small` in int8: one-shot dictation is usable, streaming is not.

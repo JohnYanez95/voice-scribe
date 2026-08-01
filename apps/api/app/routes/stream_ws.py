@@ -255,8 +255,14 @@ class StreamSession:
         decode_ms = (time.monotonic() - start) * 1000.0
         self.first_tick_pending = False
         self.decode_ms_samples.append(decode_ms)
-        log.debug("stream tick decode", duration_ms=f"{decode_ms:.0f}",
-                  window_s=f"{len(audio) / self.sr:.1f}")
+        if decode_ms > settings.STREAM_DECODE_TICK_MS:
+            # Overruns are rare and each one is a ticks_skipped increment —
+            # they must explain themselves (duration + window) at warning level.
+            log.warning("stream tick overrun", duration_ms=f"{decode_ms:.0f}",
+                        window_s=f"{len(audio) / self.sr:.1f}")
+        else:
+            log.debug("stream tick decode", duration_ms=f"{decode_ms:.0f}",
+                      window_s=f"{len(audio) / self.sr:.1f}")
 
         # C7.8 rule 3: three consecutive overruns double the effective tick
         # (cap 4x, log once per escalation, counter restarts after each)
@@ -347,7 +353,11 @@ class StreamSession:
         """C3.3/C7.9: cancel the in-flight tick, decode the uncommitted buffer
         once, finalize, keep the session alive."""
         self.decode_generation += 1  # invalidate in-flight tick
+        drain_start = time.monotonic()
         async with self.decode_lock:
+            # C7.9: flush latency = cancel drain + one decode; the drain is
+            # the wait for the invalidated in-flight tick to release the lock.
+            drain_ms = (time.monotonic() - drain_start) * 1000.0
             committed_edge = max(self.policy.committed_through_sample,
                                  self.utterance_start_sample)
             # C5.2 + C7.1: the flush decodes the uncommitted buffer only, and
@@ -361,8 +371,10 @@ class StreamSession:
             audio = self._window_audio(flush_start)
             tail_words = ()
             language = self.language or ""
+            flush_decode_ms = 0.0
             if len(audio) >= int(MIN_FLUSH_DECODE_S * self.sr):
                 generation = self.decode_generation
+                decode_start = time.monotonic()
                 try:
                     result = await asyncio.to_thread(self._decode_sync, audio, generation)
                 except Exception as e:
@@ -376,6 +388,7 @@ class StreamSession:
                         fatal=False,
                     )
                     result = None
+                flush_decode_ms = (time.monotonic() - decode_start) * 1000.0
                 if result is not None:
                     raw_words, detected = result
                     if self.language is None and detected:
@@ -383,6 +396,10 @@ class StreamSession:
                         language = detected
                     tail_words = localize(raw_words, flush_start, flush_start, self.cfg)
 
+            log.info("stream flush", utterance_id=self.utterance_id,
+                     drain_ms=f"{drain_ms:.0f}",
+                     decode_ms=f"{flush_decode_ms:.0f}",
+                     window_s=f"{len(audio) / self.sr:.1f}")
             prior = committed_text(self.policy.committed_words)
             tail = committed_text(tail_words)
             raw = f"{prior} {tail}".strip() if prior and tail else (prior or tail)
@@ -636,7 +653,14 @@ async def ws_stream(websocket: WebSocket) -> None:
             round(samples[int(0.95 * (len(samples) - 1))] / settings.STREAM_DECODE_TICK_MS, 3)
             if samples else None
         )
+        # p95 is blind to the overrun tail by construction (2 of ~290 ticks sit
+        # at ~p99.3) — the max is what sees a breach.
+        occupancy_max = (
+            round(samples[-1] / settings.STREAM_DECODE_TICK_MS, 3) if samples else None
+        )
         log.info("stream session closed", session_id=session.session_id,
                  ticks=len(samples), ticks_skipped=session.ticks_skipped,
                  tick_multiplier=session.tick_multiplier,
-                 occupancy_p95=occupancy_p95)
+                 occupancy_p95=occupancy_p95, occupancy_max=occupancy_max,
+                 decode_ms_max=round(samples[-1], 1) if samples else None,
+                 decode_seconds_total=round(sum(samples) / 1000.0, 1))

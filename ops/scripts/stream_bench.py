@@ -292,7 +292,11 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
     return stats
 
 
-ONESHOT_MAX_S = 60  # one-shot path audio cap (docs/contract/runtime-contract.md)
+# One-shot path audio cap. Mirrors MAX_AUDIO_SECONDS' default (app/config.py) —
+# the value is contract prose, not in the exported schema, so it cannot be read
+# programmatically. If the server cap is lowered below this, every chunk 400s
+# and the gate fails via baseline_completed=False (never a silent exit 0).
+ONESHOT_MAX_S = 60
 
 
 def run_baseline(base_url: str, audio: np.ndarray) -> dict:
@@ -307,16 +311,20 @@ def run_baseline(base_url: str, audio: np.ndarray) -> dict:
 
     max_samples = ONESHOT_MAX_S * SR
     n_chunks = (len(audio) + max_samples - 1) // max_samples
+    chunks = np.array_split(audio, max(1, n_chunks))
+    assert max(len(c) for c in chunks) <= max_samples, \
+        "baseline chunking produced a chunk over the one-shot cap"
     boundary = "streambenchboundary"
     total_wall = 0.0
     raws = []
-    for chunk in np.array_split(audio, max(1, n_chunks)):
+    for chunk in chunks:
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
             wf.setframerate(SR)
-            wf.writeframes((chunk * 32767.0).astype(np.int16).tobytes())
+            pcm = np.clip(chunk * 32767.0, -32768, 32767).astype(np.int16)
+            wf.writeframes(pcm.tobytes())
         body = (
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
             f"filename=\"bench.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
@@ -361,6 +369,7 @@ def main() -> None:
 
     report = {"stream": stream_stats, "gpu_during_stream": gpu_stream}
 
+    baseline = None
     if args.baseline:
         sampler = GpuSampler()
         sampler.start()
@@ -370,8 +379,11 @@ def main() -> None:
             baseline = None
             print(f"baseline failed; continuing with stream stats only: {exc}",
                   file=sys.stderr)
-        report["gpu_during_oneshot"] = sampler.stop()
+        gpu_oneshot = sampler.stop()
         if baseline is not None:
+            # GPU stats from a partial baseline (mid-chunk failure) would be
+            # sampled over a truncated window — only report them on success.
+            report["gpu_during_oneshot"] = gpu_oneshot
             report["baseline"] = {k: v for k, v in baseline.items()
                                   if not k.startswith("_")}
             report["committed_vs_oneshot_wer"] = round(
@@ -392,6 +404,9 @@ def main() -> None:
     if args.utterances > 1:
         gate["partials_in_every_utterance"] = (
             stream_stats["utterances_with_nonempty_partials"] == args.utterances)
+    if args.baseline:
+        # A failed baseline must fail the gate, not silently drop its lines.
+        gate["baseline_completed"] = baseline is not None
     if "committed_vs_oneshot_wer" in report:
         gate["committed_vs_oneshot WER < 3%"] = report["committed_vs_oneshot_wer"] < 0.03
     print("\nGate:", file=sys.stderr)

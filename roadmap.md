@@ -1,6 +1,6 @@
 # Voice Scribe — Roadmap
 
-**Last Updated:** July 31, 2026
+**Last Updated:** August 1, 2026
 **Status:** v4.0 implemented, peer-reviewed, and field-tested (2026-08-01); v4.1 next
 
 ---
@@ -1193,10 +1193,45 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
   per protocol §10 with the client retaining each utterance's PCM until its `final`.
   `state-machine.mmd` updated **before** component code (new states: streaming session live,
   partial visible). Per-utterance WebSocket churn eliminated.
+  **Field-test-review additions (2026-08-01, all three reviewers concur v4.1 starts now):**
+  (1) **The < 3% WER line, re-specified as a named v4.1 deliverable** — per-utterance ≤ 60 s
+  *unchunked* one-shot reference (a > 60 s chunked baseline is invalid as a reference: cuts
+  land mid-phrase by construction and chunk decodes hit temperature fallback), with
+  stream-vs-oneshot divergence bucketed by distance to the nearest commit boundary so
+  "independent mishearings" is measured rather than asserted. `stream_bench`'s hard-coded
+  0.03 gate threshold updates together with the reference. The line's intent survives the
+  re-spec because the failure mode it guards — force-commit laundering unagreed text into
+  committed output — measured 0 in every u3 field session; the u4 re-run then showed the
+  rate is boundary-dependent (5.1% at mid-speech cuts — see the force-commit finding in the
+  field-test record), which strengthens this deliverable: forced spans are precisely where
+  the WER check must look. (2) **Idle-timeout /
+  keepalive protocol decision, before capture plumbing:** C1.5 tears down a session after
+  10 s without frames, C2.6 forbids sending silence, C3.7 makes unknown control types fatal,
+  and C10.2 makes the resulting drop to one-shot permanent for the session — so a user who
+  pauses twelve seconds to think loses streaming until restart. No replay harness can
+  surface this. Options: additive `ping` control message (C3.7 amendment), longer idle
+  timeout with slot-hygiene rationale restated, or fresh-session re-establishment on
+  `session_timeout`. Decide deliberately, record the rationale in `docs/v4/protocol.md`.
+  (3) **First-partial anchor decision:** pin whether the number is measured from server
+  receipt or user-perceived speech onset (VAD detection lag and pre-roll replay sit in front
+  of the server clock) before anyone tunes against the wrong clock. (4) **Harness
+  completion:** per-utterance first-partial/finalization p50/max (today first-partial is a
+  single sample per session) and one gate run at a VAD-representative utterance count
+  (≥ 20 over the same recording) — the 3–4-utterance runs stay too, as the only exerciser of
+  the > 24 s slide.
 - **v4.2 — Voice command fast path + tuning pass.** `detectVoiceCommand` runs on committed text
   as it lands instead of waiting for utterance completion — **`copy` only** (resolved question
   2 below: `clear` never fast-paths). Tunables adjusted against `stream_bench` numbers and
   real dictation; `redemptionMs` reduction evaluated here, gated on false-finalization rate.
+  **Carried inputs from the field test (2026-08-01; measured numbers in the field-test
+  record):** the re-specified tick-skip line (ratio ≤ 1% with `tick_multiplier == 1`, see
+  record), the first-partial floor (`STREAM_MIN_DECODE_S` 1.0 → 0.8 is the named change,
+  projected ~1.4 s first partial; the pass must measure hallucination rate at 0.8 s), the
+  utterance-1 flush-finalization carry, and the compute premium — **above the 3–5× envelope,
+  which triggers resolved question 1's beam-1 lever** (premium > 5×); that lever's WER check
+  depends on the v4.1 re-specified reference landing first. The 500 ms tick is empirically
+  closed: all three of its stated preconditions failed at the field test (p95 occupancy
+  0.57–0.59 > 0.50, ticks skipped 2 > 0, premium well above 3.3×) — do not re-litigate.
 
 **Scope guardrails (named at review so creep is visible when it knocks):**
 - `stream_bench` stays in `ops/scripts/`, manually invoked, never imported by runtime code,
@@ -1385,48 +1420,95 @@ observation still lands with the field test). Runbook: `docs/v4/field-test.md`.
 **v4.0 field test (2026-08-01, RTX 3090 / large-v3 / float16, bare-host server, WSL2; runbook
 `docs/v4/field-test.md`):** 222 s of varied live dictation against a 423-word rehearsed script,
 `--utterances 3` (≈ 74 s segments — every session exercises the post-flush path three times and
-slides the buffer far past 24 s). Three full sessions: two gate runs plus one WER diagnostic.
-One harness defect found and fixed first: `--baseline` sent the whole recording to the one-shot
-path, whose 60 s cap 400'd and the crash discarded the streaming stats — baseline now chunks at
-the cap (`oneshot_chunks`) and baseline failure degrades to a warning.
+slides the buffer far past 24 s). Five full sessions: three at `--utterances 3` (two gate runs
+plus one WER diagnostic), then — after the same-day three-persona review of this record — two
+at `--utterances 4` (boundaries 55.5/111/166.5 s) with new telemetry: the C7.9 flush
+drain/decode split the review found had never been built, per-tick overrun warnings,
+`occupancy_max`, and `decode_seconds_total`. Counters-only reports committed:
+`docs/v4/field-test-report-2026-08-01-u3.json` / `-u4.json`. One harness defect found and
+fixed first: `--baseline` sent the whole recording to the one-shot path, whose 60 s cap 400'd
+and the crash discarded the streaming stats — baseline now chunks at the cap
+(`oneshot_chunks`), a baseline failure fails the gate via `baseline_completed` (never a
+silent exit 0), and the chunk PCM conversion clips instead of wrapping.
 
 - **Correctness: pass in every session.** Retractions 0 (reference reducer), committed-prefix
-  invariant holds, `dropped_audio_ms` 0, force-commit rate 0, non-empty partials in all three
-  utterances of every session. The 74 s utterances slid the buffer well past the 24 s span with
-  commits keeping the uncommitted window small (~2 s) — no overrun trims, coordinates stable.
-  The post-flush blocker is confirmed dead on real audio.
+  invariant holds, `dropped_audio_ms` 0, non-empty partials in every utterance of every
+  session (force-commit: see its own finding below). The long utterances slid the buffer well
+  past the 24 s span with commits keeping the uncommitted window small (~2 s) — no overrun
+  trims, coordinates stable (**> 24 s buffer slide: deferred line, closed**). The post-flush
+  blocker is confirmed dead on real audio.
 - **Latency (first valid numbers on the corrected cadence — supersedes the invalidated
-  2026-07-31 figures).** First partial 1.55–1.63 s vs the ≤ 1.5 s target: the structural floor
-  (1.0 s `MIN_DECODE_S` + ~0.5 s first decode) sits at the target; the v4.2 dials stand.
-  Finalization from flush: 0.30–0.34 s on utterances 2–3 (≤ 0.5 s target met); utterance 1 took
-  2.1–3.8 s across runs — a content-dependent slow flush decode. The same audio region also
-  stalls the *one-shot* path (its 55 s chunk decodes in 12–13 s vs ~2.2 s for its neighbors):
-  Whisper temperature fallback on real varied speech — a decode-cost property, not a protocol
-  bug. Commit lag p50 1.71 s, max 3.88 s.
-- **Per-tick health (deferred lines, closed).** `occupancy_p95` 0.573–0.585 (target ≤ 0.7:
-  pass) over 289–291 ticks per session. `ticks_skipped` = 2 in every session — deterministic
-  with content (the two fallback decodes above); `tick_multiplier` never left 1. The `== 0`
-  line as written did not close; carried to v4.2 as a tuning input (beam-1 ticks is the named
-  lever), not silently accepted.
-- **Cost table (deferred line, closed — with a finding).** One-shot: 222 s decoded in
-  13.0–19.2 s wall (duty cycle 1.0, mean util 73%). Streaming: duty cycle 0.64, mean util 35%
-  across the ~227 s session. Compute premium ≈ 6–11× depending on metric (util-integral ratio
-  5.7×; duty-cycle ratio 7.6× against the fallback-slowed baseline, ~11× against a clean run) —
-  **above the 3–5× envelope**, which per the rule above is a tuning finding, not a number to
-  accept: every 750 ms tick re-encodes a 30 s-padded window, so tick interval, beam-1 ticks,
-  and `MIN_DECODE_S` are the v4.2 levers.
+  2026-07-31 figures).** First partial 1.32–1.63 s across five sessions, straddling the
+  ≤ 1.5 s target. Floor decomposition (corrected at review — the first version of this record
+  understated it): 1.0 s `MIN_DECODE_S` + first decode 0.3–0.6 s + up to ~0.15 s poll/frame
+  quantization; the target is reachable only when the first decode is warm-fast.
+  `STREAM_MIN_DECODE_S` is the v4.2 dial. Finalization from flush, now measured with the C7.9
+  drain/decode split: drain 0–110 ms and flush decode 211–241 ms on all eight u4 flushes →
+  0.22–0.35 s client-observed on every utterance, so the ≤ 0.5 s line **passes on the u4
+  sessions**; the u3 sessions did **not** close it (the instrumented line is the max across
+  flushes, and utterance 1 ran 2.1–3.8 s). The outlier is boundary-content-dependent: u4's
+  boundaries avoid the hard region near ~72–74 s and the outlier vanishes entirely. (Review
+  correction: this record originally corroborated the fallback explanation with the one-shot
+  chunk-1 stall — wrong region; chunk 1 covers 0–55.5 s, not the flush window. The u4
+  experiment is the actual evidence.) Commit lag p50 1.69–1.71 s, max 2.98–3.88 s.
+- **Per-tick health (deferred lines, closed — line re-specified).** `occupancy_p95`
+  0.552–0.585 (target ≤ 0.7: pass) over 289–292 ticks per session; `occupancy_max` 0.86–0.87
+  on the u4 sessions, now logged alongside it (p95 is blind to the overrun tail by
+  construction — the max is what sees a breach). `ticks_skipped`: 2 per u3 session, **0 in
+  both u4 sessions**. Review correction: the u3 skips were originally attributed to the flush
+  decodes, which cannot increment the counter — they were tick decodes whose windows piled
+  uncommitted tail against the hard ~74 s boundary; with u4 boundaries the same audio
+  produces zero overruns. Deterministic per boundary configuration, not a pacing defect;
+  `tick_multiplier` never left 1 in any session. The `== 0` line is re-specified — a
+  measurement-based refinement, recorded as such, since an absolute zero is content-dependent
+  on real speech: **`ticks_skipped / ticks ≤ 1%` and `tick_multiplier == 1` at session
+  close** (2-in-291 with instant recovery is the designed skip-and-continue behavior; the
+  harness gate and this line now agree).
+- **Cost table (deferred line, closed — with a finding).** Stated in the gate's own metric
+  (review correction: the first version of this record used whole-GPU duty-cycle ratios,
+  noisy on a WSL2 desktop — decode-seconds is now logged directly as `decode_seconds_total`
+  at session close). Streaming: 97.9–98.6 decode-seconds over 222.1 audio-seconds = **0.44
+  decode-s per audio-s**. One-shot: 13.0–21.3 s wall for the same audio = 0.058–0.096 (the
+  spread is temperature fallback on the chunked baseline). **Premium 4.6–7.6×, central
+  ≈ 5.9×** — above the 3–5× envelope centrally, which per the rule above is a tuning finding,
+  not a number to accept: every 750 ms tick re-encodes a 30 s-padded window, so tick
+  interval, beam-1 ticks (triggered at > 5× per resolved question 1), and `MIN_DECODE_S` are
+  the v4.2 levers. For reference: GPU duty cycle 0.63–0.64 streaming vs 0.98–1.0 one-shot,
+  peak whole-GPU VRAM 5.3–6.4 GiB. Note the measured premium is a lower bound for the v4.1
+  workload: 3–4 flushes per 222 s is far below VAD-gated dictation's 20–40, and each flush
+  is a full-window beam-5 decode — the VAD-representative run (v4.1 harness completion) is
+  the number v4.2 tunes against.
 - **WER (deferred line, measured — reference re-specified).** `committed_vs_oneshot` on the
-  full recording: 19.1% — but a > 60 s one-shot reference is not clean: the cap forces a
-  chunked baseline, arbitrary cuts land mid-phrase, and chunk 1 hit temperature fallback in
-  2 of 3 runs. Triangulated against the rehearsed script: stream 15.1% vs one-shot 15.6% —
-  **quality parity, which is the line's intent**. 36–41% of each side's script errors are
-  numeric formatting (the script spells out numbers, Whisper emits digits); the remainder
-  splits between speaker deviation from the script and independent mishearings (stream-vs-
-  oneshot divergence is only 8% numeric). The < 3% line needs a per-utterance ≤ 60 s unchunked
-  reference — re-spec at v4.1 alongside utterance-aligned capture.
-- **Zero-persistence sweep (deferred line, closed).** `TEMP_DIR` observed empty during an
-  active streaming session (the stream path creates no files); VRAM returned to the 1.0 GiB
-  system baseline after backend shutdown; the report JSON contains counters only.
+  full recording: 19.1% (u3) / 15.3% (u4) — but a > 60 s one-shot reference is not clean: the
+  cap forces a chunked baseline, arbitrary cuts land mid-phrase, and a chunk hit temperature
+  fallback in 3 of 5 runs. Triangulated against the 423-word rehearsed script with S/D/I
+  counts (review required counts, not just ratios): stream 15.1% (u3) and 14.9% (u4, S/D/I
+  34/5/24) — stable across runs; chunked one-shot 15.6% (u3) but **19.9%** (u4, S/D/I
+  23/10/51 — 51 insertions, 41 words over the script length: fallback hallucination). The
+  streaming path is the *more stable* side of the comparison, which is the strongest form of
+  the invalid-reference conclusion. Stream-vs-oneshot divergence: 14.6% (u3, only 8% of
+  errors numeric) / 18.3% (u4, S/D/I 15/46/24, dominated by one-shot insertions). 29–41% of
+  each side's script errors are numeric formatting (the script spells out numbers, Whisper
+  emits digits); the remainder splits between speaker deviation from the script and per-side
+  errors. **Quality parity holds as an aggregate claim**; word-for-word equivalence is not
+  established, and is exactly what the re-specified per-utterance ≤ 60 s unchunked reference
+  with commit-boundary bucketing (v4.1 scope) will measure.
+- **Force-commit (new finding, u4 re-run).** `force_commit_rate` was 0 in all three u3
+  sessions but **5.1% (22 of 432 words) on the u4 bench session** — the even-split
+  boundaries cut mid-speech where the u3 splits happened to land clean, and the holdback
+  valve fired as designed. Harness-boundary artifact in origin (real flushes follow VAD
+  silence), but it demotes "force-commit 0" from a session invariant to a
+  boundary-dependent observation: v4.1's VAD-aligned runs must report the rate
+  per-utterance, and any run with force-commit > 0 needs the re-specified WER check on
+  exactly the forced spans.
+- **Zero-persistence sweep (deferred line, closed — all four conjuncts, completing the
+  partial closure the review flagged).** `TEMP_DIR` observed empty during an active
+  streaming session and after session close (the stream path creates no files); log sweep
+  clean — zero hits for distinctive transcript vocabulary across the full server log
+  (operational telemetry only); post-session with the backend still live: VRAM back at the
+  idle-with-model level (~4.1 GiB service share — no per-session leak) and no stray decode
+  processes; after backend shutdown VRAM returns to the 1.0 GiB system baseline. The report
+  JSONs contain counters only.
 - **Footprint (feeds the README sizing table):** service VRAM ≈ 4.0 GiB idle with large-v3
   loaded, ≈ 5.3 GiB peak while streaming (whole-GPU reading minus the 1.0 GiB desktop
   baseline).
