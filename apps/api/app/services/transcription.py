@@ -36,6 +36,24 @@ def load_model(config: Settings) -> None:
     elapsed = time.monotonic() - start
     log.info("model download complete", duration=f"{elapsed:.1f}s", model=config.WHISPER_MODEL)
 
+    # Warm the CUDA kernels with a decode over 1 s of silence: the first real
+    # decode otherwise pays ~700 ms of one-time kernel setup, which lands on
+    # the first streaming tick (blowing the ≤1.5 s first-partial target) or on
+    # the first one-shot request. Guarded — warmup failure is not fatal.
+    try:
+        import numpy as np
+        warm_start = time.monotonic()
+        # match the streaming decode config so the alignment model (DTW for
+        # word timestamps) is also initialized, not just the main kernels
+        segments, _ = _model.transcribe(
+            np.zeros(16000, dtype=np.float32), beam_size=5, word_timestamps=True
+        )
+        for _ in segments:
+            pass
+        log.info("model warmup complete", duration=f"{time.monotonic() - warm_start:.1f}s")
+    except Exception as e:
+        log.warning("model warmup skipped", error=str(e))
+
 
 def get_model() -> WhisperModel:
     with _model_lock:

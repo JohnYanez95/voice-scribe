@@ -100,11 +100,13 @@ message whose `utterance_id` is below the current one.
   entire tentative tail** for the current utterance — never an append. Retractable by the next
   `partial`. Downstream consumers: `partial` must never be persisted, copied to the clipboard,
   fed to a transform, or used to trigger an action.
-- **C4.3** `committed` — `{type, seq, utterance_id, text, t0, t1}`. `text` is the **newly
-  committed words only** (append-only delta). `t0`/`t1` are offsets in *received-audio seconds
-  within the current utterance* — explicitly not wall clock: client VAD elides silence, so the
-  audio timeline and the wall clock diverge. Committed text is never revised by any later
-  message (C5).
+- **C4.3** `committed` — `{type, seq, utterance_id, text, t0, t1, forced}`. `text` is the
+  **newly committed words only** (append-only delta). `t0`/`t1` are offsets in *received-audio
+  seconds within the current utterance* — explicitly not wall clock: client VAD elides silence,
+  so the audio timeline and the wall clock diverge. `forced` marks a holdback force-commit —
+  a content-free flag so the gate's force-commit rate is measurable by `stream_bench` from the
+  client side (the server gains no instrumentation hooks). Committed text is never revised by
+  any later message (C5).
 - **C4.4** `final` — `{type, seq, utterance_id, raw, cleaned, language, duration, model_name,
   processing_mode, dropped_audio_ms, forced}`. Same consumer-facing fields as today's
   `complete`, plus the last two. `duration` is total received-audio seconds for the utterance,
@@ -195,7 +197,13 @@ correct claim is "bounded", not "brief".
   changed-hypothesis reset either starves or never fires).
 - **C7.6** Decode settings on this path: `word_timestamps=True`, `vad_filter=False` (server-side
   re-segmentation destabilizes agreement across ticks; the client gates at the source),
-  `condition_on_previous_text=False` for tick decodes.
+  `condition_on_previous_text=False` for tick decodes. Cost note on word timestamps:
+  faster-whisper derives them via DTW over decoder cross-attention — O(tokens × audio frames)
+  *per decode window*, measured at ~+15% per decode. The window invariant (C7.1) caps the
+  window at ≤ 30 s, so this quadratic term is bounded by a constant and never grows with
+  session length. Segment-level timestamps were rejected at review as ±0.5 s in practice —
+  too coarse for the trim/suppression arithmetic (C7.2). The commit comparison itself is a
+  linear longest-common-prefix over normalized tokens; DTW plays no part in word *matching*.
 - **C7.7** Model and language are pinned per session: the decode loop resolves `get_model()`
   once at `start` and holds that reference; language comes from `start` or the first decode
   and is passed explicitly to every subsequent decode. Per-tick auto-detect on short buffers

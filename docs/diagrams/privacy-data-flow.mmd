@@ -8,6 +8,8 @@ flowchart TD
 
     blob --> http["HTTP POST"]
     blob --> wsIn["WebSocket binary"]
+    vad --> frames["PCM frames<br/>(v4 streaming)"]
+    frames --> wsStream["WebSocket /ws/stream"]
 
     subgraph backend ["Backend (Docker container or bare-host sidecar)"]
         tmp1["Temp file — input"]
@@ -17,16 +19,25 @@ flowchart TD
         tmp1 --> tmp2
         tmp2 -- inference --> txt
         tmp2 --> del
+
+        ring["In-memory buffer<br/>bounded ≤ 27 s ≈ 1.7 MB<br/>NO temp files, never on disk"]
+        stxt["Committed + partial text"]
+        rdel["Trimmed at each commit,<br/>freed on close/error"]
+        ring -- "paced re-decode" --> stxt
+        ring --> rdel
     end
 
     http --> tmp1
     wsIn --> tmp1
+    wsStream --> ring
 
     txt --> resp["JSON response"]
     txt --> wsOut["WS segments"]
+    stxt --> wsMsgs["WS partial / committed / final"]
 
     resp --> area["Editable textarea"]
     wsOut --> area
+    wsMsgs --> area
 
     area -- "browser" --> browserClip["navigator.clipboard<br/>.writeText()"]
     area -- "desktop" --> httpPost["HTTP POST :8001/clipboard"]
@@ -37,7 +48,7 @@ flowchart TD
     classDef output fill:#ddf5dd,stroke:#448844
     classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
 
-    class mic,blob sensitive
-    class vad,http,wsIn,tmp1,tmp2,httpPost ephemeral
-    class txt,resp,wsOut,area,browserClip,rustClip output
-    class del deleted
+    class mic,blob,frames sensitive
+    class vad,http,wsIn,wsStream,tmp1,tmp2,ring,httpPost ephemeral
+    class txt,stxt,resp,wsOut,wsMsgs,area,browserClip,rustClip output
+    class del,rdel deleted

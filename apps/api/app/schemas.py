@@ -120,13 +120,16 @@ class WsStreamPartialMessage(BaseModel):
 
 class WsStreamCommittedMessage(BaseModel):
     """Append-only delta (C4.3). t0/t1 are received-audio seconds within the
-    utterance — not wall clock."""
+    utterance — not wall clock. forced=True marks a holdback force-commit
+    (content-free flag; lets the gate's force-commit rate be measured from
+    the client side without server instrumentation hooks)."""
     type: Literal["committed"]
     seq: int
     utterance_id: int
     text: str
     t0: float
     t1: float
+    forced: bool = False
 
 
 class WsStreamFinalMessage(BaseModel):

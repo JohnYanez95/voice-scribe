@@ -232,6 +232,7 @@ class StreamSession:
                 "text": committed_text(decision.newly_committed),
                 "t0": round(decision.newly_committed[0].start - u0, 3),
                 "t1": round(decision.newly_committed[-1].end - u0, 3),
+                "forced": decision.holdback_fired,
             })
             self._trim_buffer(
                 retention_start_sample(self.policy.committed_through_sample, self.cfg)
@@ -245,7 +246,13 @@ class StreamSession:
     async def decode_loop(self) -> None:
         tick_s = settings.STREAM_DECODE_TICK_MS / 1000.0
         while True:
-            await asyncio.sleep(tick_s * self.tick_multiplier)
+            # C7.10: the first tick of an utterance fires as soon as
+            # MIN_DECODE_S is buffered instead of waiting for the tick grid —
+            # this is what keeps first-partial ≤ 1.5 s at a 750 ms tick.
+            if self.policy.prev_hypothesis is None:
+                await asyncio.sleep(0.05)
+            else:
+                await asyncio.sleep(tick_s * self.tick_multiplier)
             # C7.10: skip idle ticks — near-silence decodes hallucinate
             if self.frames_since_tick == 0:
                 continue
@@ -273,7 +280,19 @@ class StreamSession:
             language = self.language or ""
             if len(audio) >= int(0.1 * self.sr):
                 generation = self.decode_generation
-                result = await asyncio.to_thread(self._decode_sync, audio, generation)
+                try:
+                    result = await asyncio.to_thread(self._decode_sync, audio, generation)
+                except Exception as e:
+                    # A flush-decode failure must not crash the session: emit
+                    # the error, finalize with committed text only (the
+                    # uncommitted tail is lost, and we say so via the error).
+                    log.error("stream flush decode failed", error=str(e))
+                    await self.send_error(
+                        "decode_failure",
+                        "Flush decode failed; finalizing committed text only.",
+                        fatal=False,
+                    )
+                    result = None
                 if result is not None:
                     raw_words, detected = result
                     if self.language is None and detected:

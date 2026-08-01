@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech, a GPU-accelerated backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and delivery. Two runtime contexts: browser (React UI + Docker backend) and desktop (Tauri webview + bare-host Python sidecar). No cloud services are involved.
 
-**Current milestone:** v3.4 Complete; v4 (real-time streaming ingestion) in planning on branch `v4-streaming` — see roadmap v4 section. Streaming ingestion is capture-layer work; the downstream-product boundary is unchanged.
+**Current milestone:** v4.0 (streaming backend) implemented on branch `v4-streaming`; design review completed 2026-07-31 — protocol locked in `docs/v4/protocol.md`, open questions resolved in the roadmap v4 section. v4.1 (frontend integration) next. Streaming ingestion is capture-layer work; the downstream-product boundary is unchanged.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5174) + FastAPI backend (port 8084) over localhost. Backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode)
@@ -14,7 +14,7 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 - Desktop clipboard + audio: HTTP server (`tiny_http` on port 8001) in the Rust process. POST `/clipboard` writes to system clipboard via `arboard`. POST `/audio/play` plays embedded WAV cues via `rodio`, bypassing WebKitGTK's unreliable audio subsystem. Both bypass WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- 180 tests (134 frontend, 46 backend), TypeScript clean, Rust clean
+- 236 tests (134 frontend, 102 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
 - v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → ~~v3.2 (audio feedback, clipboard cleanup, segmentation fix)~~ → ~~v3.3 (system tray + window management)~~ → ~~v3.4 (design system + theme toggle + model selector extraction)~~. v3.4 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
 
@@ -62,14 +62,20 @@ Request flow (WebSocket): `MediaRecorder (webm/opus)` → `WebSocket /ws/transcr
 
 Request flow (HTTP fallback): `MediaRecorder (webm/opus)` → `POST /transcribe` → `MIME validation` → `ffmpeg transcode` → `faster-whisper inference` → `TranscribeResponse JSON` → `editable textarea`
 
+Request flow (streaming session, v4.0+, backend only until v4.1): `16 kHz mono pcm_f32le frames` → `WebSocket /ws/stream` (protocol v1, `docs/v4/protocol.md`) → `in-memory buffer (no ffmpeg, no temp files)` → `paced re-decode + LocalAgreement commit` → `partial / committed / final JSON`
+
 **Backend contract:** `docs/contract/runtime-contract.md` is the stable description of request/response shapes, hard limits, and privacy guarantees for downstream consumers. Any change that touches endpoint shapes or constraints must update the contract doc and regenerate `docs/contract/runtime-contract.schema.json` (`cd apps/api && python scripts/export_contract.py`). The drift test (`tests/test_contract_export.py`) will fail if the schema file is not updated.
 
 ### Key backend files
 - `app/main.py` — FastAPI app, CORS, lifespan (model loading)
 - `app/config.py` — Settings from environment variables (incl. WHISPER_AVAILABLE_MODELS)
 - `app/routes/transcribe.py` — Upload handling, MIME validation, ffmpeg, temp cleanup
-- `app/routes/models.py` — Model list and runtime swap endpoints (v2.0)
-- `app/services/transcription.py` — Model singleton with threading lock, swap logic, inference wrapper
+- `app/routes/models.py` — Model list and runtime swap endpoints (v2.0; 409 during active stream, v4.0)
+- `app/routes/stream_ws.py` — `/ws/stream` session loop: handshake, frame validation, paced decode, flush/stop/reset (v4.0)
+- `app/services/stream_policy.py` — LocalAgreement commit policy as pure functions, absolute sample coordinates (v4.0)
+- `app/services/stream_guard.py` — single-lock session/swap mutual exclusion (v4.0)
+- `app/services/transcription.py` — Model singleton with threading lock, swap logic, inference wrapper, load-time warmup decode
+- `ops/scripts/stream_bench.py` — streaming measurement harness: latency anchors, retraction reducer, cost comparison (v4.0)
 
 ### Key frontend files
 - `src/app/App.tsx` — State management, orchestrates recorder → API → transcript, voice command dispatch
@@ -105,7 +111,7 @@ These patterns are non-negotiable in this codebase:
 
 **MediaRecorder** — Must negotiate a supported audio MIME type from a prioritized list (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/webm`, `audio/ogg`) via `isTypeSupported()` before recording. When no format is supported, fall back to `ScriptProcessorNode` PCM capture with `encodeWav()`. Show clear error if neither path works.
 
-**Request limits** — 60s max audio, 10MB max upload, one file per request. The max recording duration setting in Settings is capped at 60s to match this limit — do not raise the UI cap without also raising the backend limit.
+**Request limits** — 60s max audio, 10MB max upload, one file per request **on the one-shot paths** (`POST /transcribe`, `/ws/transcribe`). The max recording duration setting in Settings is capped at 60s to match this limit — do not raise the UI cap without also raising the backend limit. The streaming path (`/ws/stream`) is governed by its own limits table in `docs/v4/protocol.md` §6 (frame size, uncommitted-buffer cap, forced flush, session ceiling, idle timeout) — not by the 60s/10MB rule.
 
 ## Presentation Maintenance
 

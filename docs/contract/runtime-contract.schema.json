@@ -303,8 +303,13 @@
       "type": "object"
     },
     "WsStreamCommittedMessage": {
-      "description": "Append-only delta (C4.3). t0/t1 are received-audio seconds within the\nutterance \u2014 not wall clock.",
+      "description": "Append-only delta (C4.3). t0/t1 are received-audio seconds within the\nutterance \u2014 not wall clock. forced=True marks a holdback force-commit\n(content-free flag; lets the gate's force-commit rate be measured from\nthe client side without server instrumentation hooks).",
       "properties": {
+        "forced": {
+          "default": false,
+          "title": "Forced",
+          "type": "boolean"
+        },
         "seq": {
           "title": "Seq",
           "type": "integer"
