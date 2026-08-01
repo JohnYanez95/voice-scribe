@@ -230,9 +230,11 @@ Persistent streaming session: the client sends raw PCM frames while the user spe
 
 `final.duration` is computed from received frame count, not from the decoder — on this path there is no WAV header to read.
 
+**Non-space-delimited languages (protocol C7.11):** sessions pinned to `ja`, `zh`, or `th` — via `start.language` or first-decode detection — run **flush-only**: `partial` messages are emitted normally, but no `committed` messages are sent; text is delivered at `final`. Whitespace tokenization would treat an utterance as one word, so incremental word-prefix commit is scoped out for these languages until a proper segmenter lands (planned alongside the language-tutor work). Consumers must not treat the absence of `committed` messages as a stall for these languages.
+
 **One session per server.** A second connection is accepted, sent `error{code:"busy"}`, and closed with `4409` — post-accept, so the code is observable (a pre-accept close surfaces to browsers as a generic connection failure). An incumbent that has sent no frames for ≥ 2 s is preempted by a new connection; a session idle for 10 s is torn down server-side.
 
-**Close codes:** `4003` origin rejected (pre-accept — client fallback logic must not depend on reading it), `4408` protocol violation, `4409` busy/preempted, `1000` normal close after `stop`.
+**Close codes:** `4003` origin rejected (pre-accept — client fallback logic must not depend on reading it), `4408` protocol violation, `4409` busy/preempted, `1000` normal close after `stop`. Close codes are **coarse buckets**: `4408` also carries `session_timeout` and format/version rejections, and `4409` also carries `model_swapping`. The `error.code` field — not the close code — is the classification surface for fallback decisions (protocol §10).
 
 ---
 
@@ -283,7 +285,7 @@ These are runtime behaviours, not aspirational statements.
 - **Audio is transient (one-shot paths).** Both temp files (input and transcoded WAV) are deleted in a `finally` block that runs on success, failure, and WebSocket disconnect. Source: `transcribe.py:162-168`, `transcribe_ws.py:206-212`.
 - **The streaming path writes no temp files at all.** `/ws/stream` never touches disk: there is no residue to survive a `kill -9`, so the crash-cleanup caveat in Operational Requirements does not apply to it. This is the strongest form of the zero-persistence claim.
 - **Streaming audio retention is bounded in bytes, not "brief".** Session wall-clock length is unbounded (up to `STREAM_MAX_SESSION_S`), but at most `LEFT_CONTEXT_S + MAX_UNCOMMITTED_S` = 27 s of float32 mono 16 kHz audio — **≈ 1.7 MB** — exists in memory per session at any instant. Committed audio is discarded at each commit except the 3 s left-context carryover. The buffer is never serialized and is released on close, disconnect, and error alike.
-- **No content logging.** Transcript text, intermediate streaming hypotheses, and raw audio bytes are never written to logs at any log level. Operational telemetry only: transcode start/complete (with elapsed time and input format), inference and decode-tick start/complete (with elapsed time, window length, and detected language). No audio content, no transcript content, no hypothesis content.
+- **No content logging.** Transcript text, intermediate streaming hypotheses, and raw audio bytes are never written to logs at any log level. Operational telemetry only: transcode start/complete (with elapsed time and input format), one-shot inference start/complete (with elapsed time and detected language), streaming decode ticks (elapsed time and window length only, at debug level). No audio content, no transcript content, no hypothesis content.
 - **Localhost-only by default.** The API binds to `localhost` unless the bind address is explicitly overridden. CORS and WebSocket origin checks prevent cross-origin access from browser contexts (the origin check is replicated on `/ws/stream`).
 
 ---

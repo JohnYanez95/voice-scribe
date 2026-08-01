@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
-**Last Updated:** April 9, 2026
-**Status:** v3.4 Complete
+**Last Updated:** July 31, 2026
+**Status:** v4.0 implemented, peer-reviewed, and measured; field test next, then v4.1
 
 ---
 
@@ -1025,7 +1025,7 @@ strictly stronger than before.
 
 ---
 
-### v4 — Real-Time Streaming Ingestion (planning, branch `v4-streaming`)
+### v4 — Real-Time Streaming Ingestion (v4.0 implemented and peer-reviewed; v4.1 next — branch `v4-streaming`)
 
 **Deliverable:** Audio streams into inference *while the user is speaking*. The GPU decodes
 continuously against a growing in-memory buffer instead of sitting idle until utterance end.
@@ -1175,9 +1175,14 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
   tick occupancy, per-tick decode time vs token count — plus a baseline mode that runs the
   same audio through the v3 one-shot path and emits the hardware cost comparison. The harness
   ships *with* the endpoint — tuning without instrumentation is guessing. No frontend changes
-  in v4.0. **v4.1 de-risk spike, run during v4.0:** verify `onFrameProcessed` in the pinned
-  vad-web delivers contiguous, undecimated 16 kHz frames.
-- **v4.1 — Frontend integration.** Persistent WS session in continuous mode, frames streamed
+  in v4.0. (A v4.1 de-risk spike — verify `onFrameProcessed` in the pinned vad-web delivers
+  contiguous, undecimated 16 kHz frames — was scoped to run during v4.0 but **was not run**;
+  flagged at the peer review and promoted to the first task of v4.1, below.)
+- **v4.1 — Frontend integration.** **First task, before any capture plumbing: the
+  `onFrameProcessed` de-risk spike** (promoted from v4.0, where it did not run) — verify the
+  pinned vad-web delivers contiguous, undecimated 16 kHz frames; if it decimates or drops,
+  the capture source changes and the rest of v4.1 re-plans around that finding.
+  Then: persistent WS session in continuous mode, frames streamed
   via `onFrameProcessed` (**new capture plumbing** — review correction: no per-frame tap
   exists today, `useVAD.ts` exposes only `onSpeechEnd`), client-side pre-roll ring replaying
   `preSpeechPadMs` (~800 ms) as the first frames of each utterance (vad-web's pad exists
@@ -1311,6 +1316,71 @@ any v4 work), and the 60 s/10 MB hard limits silently didn't apply to a session-
   swap, `final.duration` provenance); schema regenerated; drift test green.
   `privacy-data-flow.mmd` updated and re-rendered. Test counts recounted, not estimated.
 - All existing tests green; one-shot and HTTP paths unchanged (no assertion edits).
+
+**v4.0 status (recorded 2026-07-31, RTX 3090 / large-v3 / float16, bare-host server):**
+implemented and measured — endpoint, pure core, guard, session tests (23) + policy tests (32),
+contract artifact updated, `stream_bench` operational against the live GPU backend.
+- **Correctness targets: met on every run.** Retractions 0 (reference reducer), `final.raw`
+  committed-prefix invariant holds, `dropped_audio_ms` 0, force-commit rate 0.
+- **Latency targets: partially met — tuning-pass material with named causes.** Finalization
+  from `flush`: 0.32–0.53 s across runs (target ≤ 0.5; spikes when the flush waits on an
+  in-flight tick — bounded by per-tick decode time, lever: beam-1 ticks). First partial:
+  1.6–1.8 s (target ≤ 1.5; decomposition: 1.0 s `MIN_DECODE_S` + first-tick decode 650–1000 ms,
+  vs ~300–520 ms warm ticks — a load-time warmup decode recovered ~350 ms of one-time kernel
+  cost; the residual first-tick premium and the `MIN_DECODE_S` value are the v4.2 dials).
+- Warm tick occupancy ~0.4–0.6 at 750 ms; the backpressure ladder (skip → 2× → 4×) was
+  observed firing correctly under an adversarial fixture (repeated identical audio triggers
+  Whisper temperature-fallback loops, 2–5 s decodes — a fixture artifact, and a useful stress
+  test). Long-form quality comparison (WER < 3%) needs varied real dictation — the repeated
+  fixture collapses on the one-shot path, making WER meaningless; it lands with the
+  three-minute live session at the v4-overall gate.
+
+**v4.0 post-implementation peer review (completed 2026-07-31, three fresh-context personas —
+same pattern as the design review):** Principal and PM: sign off with conditions; Senior
+Engineer: reject — confirmed correctness defects, all fixed and regression-tested the same
+day (session tests 23 → 33, policy tests 32 → 34, backend total 102 → 114). The confirmed
+findings, for the record:
+1. **Post-flush coordinate misalignment (blocker):** `plan_window` reaches left-context
+   seconds below the buffer trimmed at flush; decode and localize now share a clamped window
+   start. Before the fix, every utterance after the first emitted empty partials or
+   misaligned/duplicated commits — invisible to both the test suite and the harness, because
+   both flushed exactly once per session. `stream_bench` gained `--utterances N`; gate runs
+   use ≥ 3.
+2. **Overrun regime (blocker):** the buffer was never trimmed on overrun (§6's 1.7 MB bound
+   was unenforced — up to 7.7 MB resident) and `dropped_audio_ms` re-added the whole overflow
+   every tick. Now: trim at the slid window start, watermarked accounting (each dropped
+   sample counted exactly once), and the flush window is planner-bounded — audio reported
+   dropped is never decoded.
+3. **Edge guard anchor:** the guard was measured against the live buffer end, which frames
+   arriving mid-decode inflate — effective guard ≈ 0.6 s − decode time. Now anchored to the
+   decoded-audio snapshot.
+4. **Frontier jitter (20 ms tolerance):** re-decodes re-time words by up to one Whisper
+   frame; a committed word drifting later by < 20 ms committed twice — append-only, so
+   invisible to the retraction reducer. Suppression now tolerates one frame.
+5. **Tick pacing:** the loop slept *after* the decode, so the real cadence was
+   `tick + decode_ms` (~1.0–1.3 s at a 750 ms tick), and `ticks_skipped` counted overlong
+   decodes rather than missed grid slots. Fixed to C7.8 (`max(now, tick_start + tick)`).
+   **This invalidates the latency/occupancy numbers recorded above — they were measured on
+   the slower cadence and must be re-measured at the field test before any v4.2 tuning.**
+6. **C7.11 was unimplemented:** ja/zh/th sessions now run flush-only (partials only, commits
+   at flush) instead of force-committing whole utterances through whitespace tokenization.
+7. Smaller confirmed items: swap-vs-swap race in the guard, `PolicyConfig.validate()` never
+   called in production (env overrides could reintroduce the 30 s truncation), preemption
+   timeout proceeded with two sessions on the GPU (now rejects the newcomer), a
+   decode-or-flush-in-flight incumbent could be preempted as "stale" (now reports zero frame
+   age), per-tick logging demoted to debug, wire messages now round-trip-validated against
+   the exported schemas in tests. Protocol amendments (wire behavior unchanged) and the
+   clause reconciliations deferred to v4.1 are recorded at the end of `docs/v4/protocol.md`.
+
+**Gate lines not closed by the 2026-07-31 run — deferred to the field test, not silently:**
+the cost table (decode premium vs the 3–5× envelope; the instrument exists in
+`stream_bench --baseline`, the numbers were not recorded in the gate result), the empirical
+zero-persistence sweep (`TEMP_DIR` watch during a run, log sweep, post-session VRAM/process
+check), `ticks_skipped == 0` on a nominal varied-audio run (the recorded runs exercised the
+adversarial fixture, and the counter's semantics changed with the pacing fix), p95 tick
+occupancy reported *as a p95* (the recorded value was a warm-tick range), and the > 24 s
+buffer-slide run (now also covered by an automated overrun test; the live-GPU slide
+observation still lands with the field test). Runbook: `docs/v4/field-test.md`.
 
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial

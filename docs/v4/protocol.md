@@ -276,3 +276,41 @@ correct claim is "bounded", not "brief".
   rows (§6), close codes 4409/1000, error-code enum, `partial`/`committed`/`final` consumer
   guidance (C4.2–C4.4), privacy section per §9, `final.duration` provenance (C4.4). Schema
   regenerated; drift test green.
+
+---
+
+## Amendments — post-implementation peer review, 2026-07-31
+
+Wire-visible behavior is unchanged; these tighten server-internal clauses the review found
+underspecified, and record clause-vs-implementation gaps deferred to v4.1. Protocol version
+stays 1.
+
+- **C7.2 (tolerance):** frontier suppression — both the left-context suppression and the
+  commit-frontier filter — applies a tolerance of one decoder frame
+  (`FRAME_TOLERANCE_S = 0.02`): a word ending within 20 ms *after* the boundary is treated as
+  re-decoded committed audio. Re-decodes from a different window position re-time words by up
+  to one frame; without the tolerance, a committed word whose end drifts later duplicates
+  permanently, invisibly to the retraction reducer.
+- **C7.4 (anchor):** the edge guard is measured against the end of the audio actually handed
+  to the decoder (snapshot at decode start), not the live buffer end — frames arriving during
+  a decode must not erode the guard.
+- **C7.9 (drain cost):** faster-whisper's lazy segment iterator runs the full decode on the
+  first `next()` for single-segment windows (the common case at ≤ 30 s), so the "cancel drain"
+  is in practice one full tick decode. Flush latency budgets must assume
+  drain ≈ one decode, not ≈ one segment boundary.
+- **Flush window (C5.2 + C7.1):** the flush decode window is planned like a tick window:
+  after an overrun it starts at the effective (slid) edge — audio reported dropped is never
+  decoded — and is therefore bounded by `MAX_UNCOMMITTED_S`, never by `MAX_UTTERANCE_S`.
+- **Flush decode floor:** flush decodes shorter than `MIN_FLUSH_DECODE_S = 0.1 s` are skipped
+  (sub-frame tails reliably hallucinate); the `final` still fires with committed text.
+
+**Deferred to v4.1 (clause-vs-code reconciliation, to settle with the client design):**
+- **C2.4** second half: the frames-after-`stop` counter is structurally always 0 in the current
+  single-pass stop handling — either drain briefly before the ack or drop the field.
+- **C2.5**: implemented as a cumulative lead allowance (`received > 2 × elapsed + 10 s`), not a
+  5 s sliding window. Amend the clause or implement the window.
+- **C4.6**: pin which `utterance_id` the `stop` ack carries (reset acks the closed utterance;
+  stop currently acks the post-bump id).
+- **Close-code taxonomy:** 4408/4409 are coarse buckets; `error.code` is the classification
+  surface (now stated in the contract doc). Decide at v4.1 whether `session_timeout` and
+  `model_swapping` deserve distinct close codes.
