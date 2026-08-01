@@ -88,6 +88,7 @@
 
 \begin{frame}{Current Serving Timeline}
     \begin{center}
+    \resizebox{\textwidth}{!}{%
     \begin{tikzpicture}[xscale=1.0, yscale=0.9, every node/.style={font=\scriptsize}]
         % time axis (1 unit = 0.5 s)
         \draw[-{Stealth[length=4pt]}] (0,-0.15) -- (10.6,-0.15) node[right]{$t$};
@@ -120,7 +121,8 @@
         \draw[decorate, decoration={brace, mirror, amplitude=4pt}]
             (7,0.45) -- (9.8,0.45)
             node[midway, below=5pt]{\textbf{perceived latency $\approx$ 1.2--1.5\,s}};
-    \end{tikzpicture}
+    \end{tikzpicture}%
+    }
     \end{center}
 
     \vspace{0.2em}
@@ -132,6 +134,7 @@
 
 \begin{frame}{Streaming Serving Timeline}
     \begin{center}
+    \resizebox{\textwidth}{!}{%
     \begin{tikzpicture}[xscale=1.0, yscale=0.9, every node/.style={font=\scriptsize}]
         % time axis
         \draw[-{Stealth[length=4pt]}] (0,-0.15) -- (10.6,-0.15) node[right]{$t$};
@@ -170,7 +173,8 @@
         \draw[decorate, decoration={brace, mirror, amplitude=4pt}]
             (7,0.45) -- (7.9,0.45)
             node[midway, below=5pt]{\textbf{$\leq$ 0.5\,s}};
-    \end{tikzpicture}
+    \end{tikzpicture}%
+    }
     \end{center}
 
     \vspace{0.2em}
@@ -186,15 +190,15 @@
 % =========================================================================
 
 \begin{frame}{Why Whisper Cannot Stream Natively}
-    \small
+    \footnotesize
     \textbf{Whisper is an offline model.} Encoder--decoder over a 30\,s window;
     you cannot feed it one frame and get one token. Feeding it a growing buffer
     na\"ively gives a \emph{different} hypothesis every pass --- text that rewrites
     itself is unusable for dictation.
 
-    \vspace{0.5em}
+    \vspace{0.3em}
     \textbf{Two ways out:}
-    \begin{enumerate}\setlength{\itemsep}{3pt}
+    \begin{enumerate}\setlength{\itemsep}{2pt}
         \item Switch to a natively-streaming architecture (transducer / RNN-T,
               Kyutai STT) --- \emph{rejected}: abandons the proven
               \texttt{large-v3} accuracy stack
@@ -203,19 +207,20 @@
               commit --- \emph{chosen}
     \end{enumerate}
 
-    \vspace{0.5em}
-    \begin{block}{The key asymmetry}
+    \vspace{0.3em}
+    \begin{block}{\footnotesize The key asymmetry}
+        \footnotesize
         In a \emph{batch} pipeline, overlapping windows are equally informed ---
         you stitch or blend them. In a \emph{streaming} pipeline every new decode
-        sees strictly more context: the newest hypothesis simply \textbf{supersedes}
-        the old one. Nothing is blended. The only question is: \emph{which prefix
-        of the newest hypothesis is stable enough to commit?}
+        sees strictly more context: the newest hypothesis \textbf{supersedes} the
+        old one. The only question: \emph{which prefix is stable enough to commit?}
     \end{block}
 \end{frame}
 
 
 \begin{frame}{LocalAgreement --- Instance to Instance}
     \begin{center}
+    \resizebox{\textwidth}{!}{%
     \begin{tikzpicture}[
         node distance=2pt,
         word/.style={draw, rounded corners=2pt, font=\scriptsize\ttfamily,
@@ -262,7 +267,8 @@
         \node[font=\tiny, right=3pt of lg1] (lgt1) {committed --- never retracted};
         \node[tn, right=14pt of lgt1] (lg2) {\phantom{x}};
         \node[font=\tiny, right=3pt of lg2] {tentative --- shown gray, may change};
-    \end{tikzpicture}
+    \end{tikzpicture}%
+    }
     \end{center}
 
     \vspace{0.15em}
@@ -277,6 +283,7 @@
 
 \begin{frame}{Session Architecture}
     \begin{center}
+    \resizebox{!}{0.74\textheight}{%
     \begin{tikzpicture}[scale=0.82, every node/.style={transform shape},
         node distance=0.3cm,
         box/.style={draw, rounded corners=3pt, minimum width=4.6cm,
@@ -326,7 +333,8 @@
         \draw[arr] (decode) -- (policy);
         \draw[arr, dashed] (policy.east) -- ++(1.4,0) |-
               node[near start, right, font=\tiny]{messages} (ws.east);
-    \end{tikzpicture}
+    \end{tikzpicture}%
+    }
     \end{center}
 \end{frame}
 
@@ -337,7 +345,7 @@
 
 \begin{frame}{The Five Tunables}
     \begin{table}
-    \centering\footnotesize
+    \centering\scriptsize
     \begin{tabular}{@{} l p{5.4cm} l @{}}
         \toprule
         \textbf{Parameter} & \textbf{Meaning} & \textbf{Initial} \\
@@ -356,16 +364,17 @@
     \end{tabular}
     \end{table}
 
-    \vspace{0.3em}
-    \small
+    \vspace{0.1em}
+    \scriptsize
     Plus one non-tunable rule: \textbf{VAD flush} --- speech end is ground truth.
-    Decode the remaining buffer once, finalize everything. This is what bounds
+    Decode the remaining buffer once, finalize everything. This bounds
     finalization latency in practice.
 
-    \vspace{0.3em}
-    \begin{block}{The trade, stated honestly}
-        Each second of audio is decoded 3--5$\times$. Compute is spent to buy
-        latency. On a dedicated local GPU this is the right trade --- but it is
+    \vspace{0.1em}
+    \begin{block}{\footnotesize The trade, stated honestly}
+        \footnotesize
+        Each second of audio is decoded 3--5$\times$: compute is spent to buy
+        latency. Right trade on a dedicated local GPU --- but
         \emph{measured and reported}, not assumed.
     \end{block}
 \end{frame}
@@ -373,7 +382,7 @@
 
 \begin{frame}{Latency Targets --- the Gate Is a Measurement}
     \begin{table}
-    \centering\small
+    \centering\footnotesize
     \begin{tabular}{@{} l l l @{}}
         \toprule
         \textbf{Metric} & \textbf{Today} & \textbf{v4 target} \\
@@ -387,11 +396,11 @@
     \end{table}
 
     \vspace{0.5em}
-    \small
-    \textbf{Measurement harness ships with the endpoint:}
+    \footnotesize
+    \textbf{Measurement harness ships with the endpoint:}\\
     \texttt{ops/scripts/stream\_bench.py} replays a WAV over \texttt{/ws/stream}
-    at real-time pace and reports first-partial latency, finalization latency,
-    commit-lag distribution, and retraction count.
+    at real-time pace; reports first-partial latency, finalization latency,
+    commit-lag distribution, retraction count.
 
     \vspace{0.3em}
     \nt tuning without instrumentation is guessing. The harness is v4.0 scope,
@@ -405,29 +414,32 @@
     not asserted: \texttt{stream\_bench} runs the \textbf{same audio} through
     both paths and publishes the comparison.
 
-    \vspace{0.4em}
+    \vspace{0.3em}
     \begin{table}
-    \centering\footnotesize
+    \centering\scriptsize
+    \resizebox{\textwidth}{!}{%
     \begin{tabular}{@{} l l l @{}}
         \toprule
         \textbf{Measured per run} & \textbf{v3 one-shot (baseline)} & \textbf{v4 streaming} \\
         \midrule
         Decode-seconds per audio-second & $\sim$1$\times$ & expected 3--5$\times$ \\
-        GPU duty cycle (\texttt{nvidia-smi} sampled) & idle until speech end & sustained during speech \\
+        GPU duty cycle (\texttt{nvidia-smi}) & idle until speech end & sustained during speech \\
         Peak VRAM & measured & measured \\
         Per-tick decode time (RTF) & n/a & must stay $<1$ \\
         Finalization latency & $\sim$1.2--1.5\,s & $\leq$ 0.5\,s \\
         \bottomrule
-    \end{tabular}
+    \end{tabular}%
+    }
     \end{table}
 
-    \vspace{0.4em}
-    \begin{block}{The justification, stated as a sentence}
+    \vspace{0.3em}
+    \begin{block}{\footnotesize The justification, stated as a sentence}
+        \footnotesize
         ``An $X\times$ compute premium bought $Y$\,ms of perceived latency.''
-        If $X$ lands outside the 3--5$\times$ envelope, that is a tuning finding
-        (tick too fast, buffer trim broken) --- not a number to quietly accept.
-        Per-tick RTF $\geq 1$ means the buffer grows without bound: a
-        correctness failure, not a performance quirk.
+        $X$ outside the 3--5$\times$ envelope is a tuning finding (tick too
+        fast, buffer trim broken) --- not a number to quietly accept. Per-tick
+        RTF $\geq 1$ means the buffer grows without bound: a correctness
+        failure, not a performance quirk.
     \end{block}
 \end{frame}
 
@@ -437,9 +449,10 @@
 % =========================================================================
 
 \begin{frame}{What This Milestone Teaches (Field Vocabulary)}
+    \vspace{-0.3em}
     \begin{table}
-    \centering\footnotesize
-    \begin{tabular}{@{} l p{6.6cm} @{}}
+    \centering\scriptsize
+    \begin{tabular}{@{} l p{6.2cm} @{}}
         \toprule
         \textbf{Term} & \textbf{Where it appears in v4} \\
         \midrule
@@ -461,13 +474,12 @@
     \end{tabular}
     \end{table}
 
-    \vspace{0.3em}
-    \footnotesize
-    Contrast worth knowing: LLM serving batches \emph{across users}
-    (continuous batching); a local voice tool batches \emph{across time} for one
-    user. Same discipline --- schedulers, budgets, SLOs --- different axis.
-    Streaming ASR policy layers, session management, and latency instrumentation
-    are exactly the skills the voice-systems field hires for.
+    \scriptsize
+    Contrast worth knowing: LLM serving batches \emph{across users} (continuous
+    batching); a local voice tool batches \emph{across time} for one user. Same
+    discipline --- schedulers, budgets, SLOs --- different axis. Streaming ASR
+    policy layers, session management, and latency instrumentation are exactly
+    the skills the voice-systems field hires for.
 \end{frame}
 
 
@@ -476,10 +488,10 @@
 % =========================================================================
 
 \begin{frame}{Sub-Milestones}
-    \small
+    \footnotesize
     \begin{table}
-    \centering\footnotesize
-    \begin{tabular}{@{} l p{7.6cm} @{}}
+    \centering\scriptsize
+    \begin{tabular}{@{} l p{7.2cm} @{}}
         \toprule
         \textbf{Milestone} & \textbf{Deliverable} \\
         \midrule
@@ -495,17 +507,16 @@
     \end{tabular}
     \end{table}
 
-    \vspace{0.3em}
+    \vspace{0.2em}
     \textbf{Testing folded into each sub-milestone:}
-    \begin{itemize}\setlength{\itemsep}{1pt}
+    \begin{itemize}\setlength{\itemsep}{0pt}
         \item Commit policy as \textbf{pure functions} --- unit-tested on synthetic
               hypothesis sequences, no GPU, no WebSocket
-        \item Session tests with the existing model-mocking pattern (44 backend
-              tests' approach carries over)
+        \item Session tests with the existing model-mocking pattern
         \item vitest: partial rendering, retraction, fallback, teardown
     \end{itemize}
 
-    \vspace{0.2em}
+    \vspace{0.1em}
     \textbf{Design review checkpoint} before v4.0 code: fresh-context adversarial
     pass on protocol + commit policy.
 \end{frame}
@@ -513,7 +524,7 @@
 
 \begin{frame}{Gate}
     \small
-    \begin{itemize}\setlength{\itemsep}{3pt}
+    \begin{itemize}\setlength{\itemsep}{2pt}
         \item \texttt{stream\_bench}: all four targets met on GPU with
               \texttt{large-v3}
         \item Three-minute live dictation: committed text never visibly changes;
@@ -525,8 +536,9 @@
         \item All existing tests green; one-shot and HTTP paths unchanged
     \end{itemize}
 
-    \vspace{0.5em}
-    \begin{block}{Why v4 stays inside the capture boundary}
+    \vspace{0.3em}
+    \begin{block}{\footnotesize Why v4 stays inside the capture boundary}
+        \footnotesize
         v4 changes \emph{when} inference happens, not \emph{what} the product
         does. No transformation, no routing, no instrumentation of user content.
         The streaming path removes temp files entirely --- zero-persistence gets
