@@ -1,7 +1,7 @@
 # Voice Scribe — Roadmap
 
 **Last Updated:** July 31, 2026
-**Status:** v4.0 implemented, peer-reviewed, and measured; field test next, then v4.1
+**Status:** v4.0 implemented, peer-reviewed, and field-tested (2026-08-01); v4.1 next
 
 ---
 
@@ -1381,6 +1381,55 @@ adversarial fixture, and the counter's semantics changed with the pacing fix), p
 occupancy reported *as a p95* (the recorded value was a warm-tick range), and the > 24 s
 buffer-slide run (now also covered by an automated overrun test; the live-GPU slide
 observation still lands with the field test). Runbook: `docs/v4/field-test.md`.
+
+**v4.0 field test (2026-08-01, RTX 3090 / large-v3 / float16, bare-host server, WSL2; runbook
+`docs/v4/field-test.md`):** 222 s of varied live dictation against a 423-word rehearsed script,
+`--utterances 3` (≈ 74 s segments — every session exercises the post-flush path three times and
+slides the buffer far past 24 s). Three full sessions: two gate runs plus one WER diagnostic.
+One harness defect found and fixed first: `--baseline` sent the whole recording to the one-shot
+path, whose 60 s cap 400'd and the crash discarded the streaming stats — baseline now chunks at
+the cap (`oneshot_chunks`) and baseline failure degrades to a warning.
+
+- **Correctness: pass in every session.** Retractions 0 (reference reducer), committed-prefix
+  invariant holds, `dropped_audio_ms` 0, force-commit rate 0, non-empty partials in all three
+  utterances of every session. The 74 s utterances slid the buffer well past the 24 s span with
+  commits keeping the uncommitted window small (~2 s) — no overrun trims, coordinates stable.
+  The post-flush blocker is confirmed dead on real audio.
+- **Latency (first valid numbers on the corrected cadence — supersedes the invalidated
+  2026-07-31 figures).** First partial 1.55–1.63 s vs the ≤ 1.5 s target: the structural floor
+  (1.0 s `MIN_DECODE_S` + ~0.5 s first decode) sits at the target; the v4.2 dials stand.
+  Finalization from flush: 0.30–0.34 s on utterances 2–3 (≤ 0.5 s target met); utterance 1 took
+  2.1–3.8 s across runs — a content-dependent slow flush decode. The same audio region also
+  stalls the *one-shot* path (its 55 s chunk decodes in 12–13 s vs ~2.2 s for its neighbors):
+  Whisper temperature fallback on real varied speech — a decode-cost property, not a protocol
+  bug. Commit lag p50 1.71 s, max 3.88 s.
+- **Per-tick health (deferred lines, closed).** `occupancy_p95` 0.573–0.585 (target ≤ 0.7:
+  pass) over 289–291 ticks per session. `ticks_skipped` = 2 in every session — deterministic
+  with content (the two fallback decodes above); `tick_multiplier` never left 1. The `== 0`
+  line as written did not close; carried to v4.2 as a tuning input (beam-1 ticks is the named
+  lever), not silently accepted.
+- **Cost table (deferred line, closed — with a finding).** One-shot: 222 s decoded in
+  13.0–19.2 s wall (duty cycle 1.0, mean util 73%). Streaming: duty cycle 0.64, mean util 35%
+  across the ~227 s session. Compute premium ≈ 6–11× depending on metric (util-integral ratio
+  5.7×; duty-cycle ratio 7.6× against the fallback-slowed baseline, ~11× against a clean run) —
+  **above the 3–5× envelope**, which per the rule above is a tuning finding, not a number to
+  accept: every 750 ms tick re-encodes a 30 s-padded window, so tick interval, beam-1 ticks,
+  and `MIN_DECODE_S` are the v4.2 levers.
+- **WER (deferred line, measured — reference re-specified).** `committed_vs_oneshot` on the
+  full recording: 19.1% — but a > 60 s one-shot reference is not clean: the cap forces a
+  chunked baseline, arbitrary cuts land mid-phrase, and chunk 1 hit temperature fallback in
+  2 of 3 runs. Triangulated against the rehearsed script: stream 15.1% vs one-shot 15.6% —
+  **quality parity, which is the line's intent**. 36–41% of each side's script errors are
+  numeric formatting (the script spells out numbers, Whisper emits digits); the remainder
+  splits between speaker deviation from the script and independent mishearings (stream-vs-
+  oneshot divergence is only 8% numeric). The < 3% line needs a per-utterance ≤ 60 s unchunked
+  reference — re-spec at v4.1 alongside utterance-aligned capture.
+- **Zero-persistence sweep (deferred line, closed).** `TEMP_DIR` observed empty during an
+  active streaming session (the stream path creates no files); VRAM returned to the 1.0 GiB
+  system baseline after backend shutdown; the report JSON contains counters only.
+- **Footprint (feeds the README sizing table):** service VRAM ≈ 4.0 GiB idle with large-v3
+  loaded, ≈ 5.3 GiB peak while streaming (whole-GPU reading minus the 1.0 GiB desktop
+  baseline).
 
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial

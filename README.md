@@ -61,6 +61,24 @@ See [docs/docker-setup.md](docs/docker-setup.md) for browser mode setup and [doc
 - Linux system dependencies (WebKitGTK, GStreamer, ALSA)
 - Tested on Ubuntu 22.04.5 LTS
 
+### GPU sizing (default model: `large-v3`, float16)
+
+Measured at the v4.0 field test (2026-08-01, RTX 3090 on WSL2 — full numbers in
+`roadmap.md`): the service uses ~4.0 GiB VRAM idle with the model loaded and ~5.3 GiB
+peak while streaming; streaming holds a 0.64 GPU duty cycle (p95 tick occupancy 0.58 of
+the 750 ms budget) and one-shot transcription runs at roughly 12–17× real time.
+
+- **Recommended (large-v3):** RTX 3090 / 4080-class or better, ≥ 10 GB VRAM. Meets all
+  latency targets with headroom for model swaps and a desktop compositor sharing the GPU.
+- **Minimum (large-v3):** ≥ 8 GB VRAM and roughly half a 3090's fp16 throughput
+  (RTX 3060 Ti / 4060-class — estimated from relative throughput, not tested). Streaming
+  still works but sits in sustained overrun: the backpressure ladder doubles the tick
+  interval, so partials arrive at ~1.5 s cadence instead of 750 ms; one-shot latency
+  roughly doubles.
+- **Below that:** set `WHISPER_MODEL=medium` (about half the decode cost) or `small` —
+  a 6 GB card runs `medium` comfortably. With no CUDA GPU, `make desktop-cpu` (or the CPU
+  compose profile) runs `small` in int8: one-shot dictation is usable, streaming is not.
+
 ## Development
 
 ```bash
