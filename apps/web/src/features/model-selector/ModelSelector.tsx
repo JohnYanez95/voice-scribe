@@ -5,6 +5,10 @@ import type { ModelInfo } from "../../types";
 interface ModelSelectorProps {
   backendReady: boolean;
   onSwapStateChange: (swapping: boolean) => void;
+  /** A live recording/streaming session holds the model for its lifetime —
+   * the backend 409s a mid-session swap (protocol C8), so disable at the
+   * source instead of surfacing a raw 409. */
+  sessionActive?: boolean;
 }
 
 type SelectorState = "idle" | "loading" | "ready" | "swapping" | "error";
@@ -12,6 +16,7 @@ type SelectorState = "idle" | "loading" | "ready" | "swapping" | "error";
 export function ModelSelector({
   backendReady,
   onSwapStateChange,
+  sessionActive = false,
 }: ModelSelectorProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
@@ -100,7 +105,8 @@ export function ModelSelector({
       <select
         value={currentModel}
         onChange={handleChange}
-        disabled={selectorState === "swapping"}
+        disabled={selectorState === "swapping" || sessionActive}
+        title={sessionActive ? "Stop recording to change models" : undefined}
       >
         {models.map((m) => (
           <option key={m.name} value={m.name}>

@@ -20,6 +20,9 @@ import type { WsCompleteMessage } from "../src/types";
 // ---------------------------------------------------------------------------
 
 let capturedOnSpeechEnd: ((audio: Float32Array) => void) | undefined;
+let capturedOnSpeechStart: (() => void) | undefined;
+let capturedOnSpeechFrame: ((frame: Float32Array) => void) | undefined;
+let capturedOnVADMisfire: (() => void) | undefined;
 const mockStartListening = vi.fn().mockResolvedValue(undefined);
 const mockStopListening = vi.fn();
 
@@ -27,15 +30,51 @@ const mockStopListening = vi.fn();
 let mockIsListening = false;
 
 vi.mock("../src/hooks/useVAD", () => ({
-  useVAD: vi.fn((options: { onSpeechEnd: (a: Float32Array) => void }) => {
-    capturedOnSpeechEnd = options.onSpeechEnd;
-    return {
-      startListening: mockStartListening,
-      stopListening: mockStopListening,
-      isListening: mockIsListening,
-      error: null,
-    };
-  }),
+  useVAD: vi.fn(
+    (options: {
+      onSpeechEnd: (a: Float32Array) => void;
+      onSpeechStart?: () => void;
+      onSpeechFrame?: (f: Float32Array) => void;
+      onVADMisfire?: () => void;
+    }) => {
+      capturedOnSpeechEnd = options.onSpeechEnd;
+      capturedOnSpeechStart = options.onSpeechStart;
+      capturedOnSpeechFrame = options.onSpeechFrame;
+      capturedOnVADMisfire = options.onVADMisfire;
+      return {
+        startListening: mockStartListening,
+        stopListening: mockStopListening,
+        isListening: mockIsListening,
+        error: null,
+      };
+    }
+  ),
+}));
+
+// ---------------------------------------------------------------------------
+// streamSession mock — default: degrades SYNCHRONOUSLY inside
+// openStreamSession, before returning. The App then runs every continuous
+// utterance through the pre-v4.1 one-shot path, so the existing suite's
+// capturedOnSpeechEnd → streamTranscribeAudio flow is unchanged. Synchronous
+// (not queueMicrotask): the suite drives VAD callbacks in back-to-back sync
+// act() blocks that never drain the microtask queue.
+// ---------------------------------------------------------------------------
+
+vi.mock("../src/services/streamSession", () => ({
+  openStreamSession: vi.fn(
+    (_opts: unknown, cb: { onDegrade: (r: unknown) => void }) => {
+      cb.onDegrade({ kind: "connect_failed" });
+      return {
+        sendAudio: vi.fn(),
+        flush: vi.fn(),
+        reset: vi.fn(),
+        stop: vi.fn(),
+        close: vi.fn(),
+        age: () => 0,
+        state: "closed" as const,
+      };
+    }
+  ),
 }));
 
 // ---------------------------------------------------------------------------

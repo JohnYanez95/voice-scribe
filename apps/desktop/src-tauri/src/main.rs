@@ -491,6 +491,7 @@ fn main() {
                 let tooltip = match state_str {
                     "listening" => "Voice Scribe — Listening",
                     "recording" => "Voice Scribe — Recording",
+                    "streaming" => "Voice Scribe — Transcribing",
                     "processing" => "Voice Scribe — Processing",
                     _ => "Voice Scribe — Idle",
                 };
