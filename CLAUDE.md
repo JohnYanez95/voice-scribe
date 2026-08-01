@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech, a GPU-accelerated backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and delivery. Two runtime contexts: browser (React UI + Docker backend) and desktop (Tauri webview + bare-host Python sidecar). No cloud services are involved.
 
-**Current milestone:** v3.4 Complete. Voice Scribe is feature-complete as a capture primitive.
+**Current milestone:** v3.4 Complete; v4 (real-time streaming ingestion) in planning on branch `v4-streaming` — see roadmap v4 section. Streaming ingestion is capture-layer work; the downstream-product boundary is unchanged.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5174) + FastAPI backend (port 8084) over localhost. Backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode)

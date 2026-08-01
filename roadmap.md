@@ -995,9 +995,13 @@ recording duration UI verified against the implementation. Max-duration input ca
 (`max={60}` in Settings.tsx, `Math.min(60, ...)` in App.tsx) — matches `MAX_AUDIO_SECONDS` in
 `apps/api/app/config.py`. 178 tests (134 frontend + 44 backend), TypeScript clean, Rust clean.
 
-**v3.4 is the last mainline milestone.** Voice Scribe is feature-complete as a capture primitive.
-Further capability expansion (transformation, routing, instrumentation) belongs to downstream
-products that compose with Voice Scribe — see Adjacent Projects.
+**v3.4 closed the v3 line.** Voice Scribe is feature-complete as a capture primitive *at the
+current latency floor*. Further capability expansion (transformation, routing, instrumentation)
+still belongs to downstream products that compose with Voice Scribe — see Adjacent Projects.
+v4 (below) does not move that boundary: it changes *when* inference happens, not *what* the
+product does. Streaming ingestion is capture-layer work — it lowers the latency of transcription
+itself, removes temp files from the hot path, and leaves the zero-persistence compliance posture
+strictly stronger than before.
 
 ---
 
@@ -1018,6 +1022,135 @@ products that compose with Voice Scribe — see Adjacent Projects.
 - **Auto-update** — Tauri has built-in update support. Not in scope for v3.0–v3.4.
 - **Rust-native inference** — single-binary distribution via whisper.cpp. Trigger: "when distribution
   to non-developer users becomes a requirement." Not v3.
+
+---
+
+### v4 — Real-Time Streaming Ingestion (planning, branch `v4-streaming`)
+
+**Deliverable:** Audio streams into inference *while the user is speaking*. The GPU decodes
+continuously against a growing in-memory buffer instead of sitting idle until utterance end.
+Perceived latency (speech end → final text) drops from ~1.2–1.5 s to a target of ≤ 500 ms, and
+partial text becomes visible while the user is still talking.
+
+**Problem statement.** The v2.1 "streaming" is output-only. In continuous mode the full path is:
+client VAD waits for a complete utterance → WAV encode → new WebSocket per utterance → server
+writes temp file → ffmpeg transcode → full-clip inference → segments stream back. Every stage
+starts *after* the user stops speaking. The GPU is idle for the entire duration of speech — the
+one window in which inference could have been free.
+
+**Approach — proposed locked decisions (subject to design review, see checkpoint below):**
+
+- **Model unchanged.** faster-whisper `large-v3` stays. Whisper is an offline 30 s-window model;
+  streaming is realized as a *serving policy layer* on top (paced re-decode + prefix commit),
+  not a model swap. Natively-streaming architectures (transducer models via sherpa-onnx, Kyutai
+  STT) rejected for v4 — abandoning the proven accuracy stack to gain latency is the wrong trade
+  for a capture tool, and the policy layer is the transferable serving lesson.
+- **Commit policy: LocalAgreement-2** (whisper_streaming / UFAL lineage). Each decode tick
+  re-transcribes the uncommitted buffer; the longest common word-prefix between two consecutive
+  hypotheses is committed and never re-decoded; the disagreeing tail is surfaced as a tentative
+  partial. Agreement-across-time replaces confidence stitching — Whisper token logprobs are not
+  calibrated enough to merge overlapping windows in probability space. Confidence enters only as
+  a *veto* (see tunables), never as a merge weight.
+- **New endpoint `/ws/stream`** — persistent, session-long WebSocket. Supplements, does not
+  replace: `/ws/transcribe` (one-shot) and `POST /transcribe` remain the push-to-talk path and
+  the fallback, same supplement-not-replace pattern as v2.1.
+- **PCM-only ingestion on the streaming path.** Client sends 16 kHz mono PCM frames (binary WS
+  messages); JSON text messages carry control (`start`, `stop`, `reset`). No ffmpeg, **no temp
+  files** — the ring buffer lives in memory only. The streaming path strengthens zero-persistence
+  rather than straining it. The AudioWorklet capture and 16 kHz resample already exist in the
+  continuous-mode path; client-side VAD still gates silence at the source (v2.2 invariant holds).
+- **Server → client message types:** `partial` (tentative tail, may be retracted), `committed`
+  (stable prefix, never retracted), `final` (utterance flush: raw + cleaned + metadata, same
+  fields as today's `complete`), `error`.
+- **One active stream session per server.** Single-user tool; a second concurrent `/ws/stream`
+  connection is rejected with an error message, not queued. No queues, no workers — the session
+  loop lives inside the connection handler.
+- **Model swap during an active stream is rejected** (clear error from `/models/swap`). Keeps the
+  v2.0 swap concurrency contract simple; swapping mid-stream has no use case.
+
+**Serving policy — the five tunables:**
+
+| Parameter | Meaning | Initial value |
+|---|---|---|
+| `DECODE_TICK_MS` | Interval between re-decode passes over the uncommitted buffer. Main latency/compute dial — commit lag ≈ 2 ticks. | 750 ms |
+| `COMMIT_LOGPROB_FLOOR` | Veto: refuse to commit a prefix whose segment `avg_logprob` is below this, even when two passes agree (two passes can hallucinate identically on a mid-word buffer edge). | −1.0 |
+| `NO_SPEECH_MAX` | Drop segments with `no_speech_prob` above this before they enter the agreement comparison. | 0.6 |
+| `MAX_HOLDBACK_TICKS` | Force-commit ceiling: if a region stays tentative this many ticks (model flip-flopping on disfluency), commit the newest hypothesis rather than hold text hostage. Bounds worst-case latency. | 6 |
+| `MAX_BUFFER_S` | Uncommitted-buffer cap. Committed audio is trimmed each commit; if the buffer would exceed Whisper's 30 s window before a silence boundary, slide it and carry a few seconds of committed audio as left-context (prompt conditioning) so decoding never cold-starts mid-sentence. | 28 s |
+
+Plus one non-tunable rule: **VAD flush** — when the client signals speech end, decode the whole
+remaining buffer once and finalize everything. Silence is ground truth; no agreement needed.
+This is what bounds finalization latency in practice.
+
+**Latency targets (the gate is a measurement, not an opinion):**
+
+- First partial visible ≤ 1.5 s from speech onset
+- Final transcript ≤ 500 ms from speech end (current: ~1.2–1.5 s)
+- Committed text retraction rate: **zero by construction** — verified, not assumed
+- GPU re-decode overhead: measured and reported (expected 3–5× the audio's real-time compute;
+  acceptable on the target hardware, but it must be a known number, not a shrug)
+
+**Hardware cost justification (v3 → v4).** The streaming path deliberately spends compute to buy
+latency. That trade must be quantified, not asserted: `stream_bench` runs the *same* audio through
+the v3 one-shot path (baseline) and the v4 streaming path, and reports both sides — decode-seconds
+per audio-second, GPU utilization duty cycle (sampled via `nvidia-smi` during the run), peak VRAM,
+and per-tick decode time (the RTF-per-tick number that must stay < 1 or the buffer grows without
+bound). The gate result publishes the comparison as a cost/benefit table: X× compute premium
+bought Y ms of perceived latency. If the premium lands outside the expected 3–5× envelope, that
+is a tuning finding (tick too fast, buffer trim not working), not a number to quietly accept.
+
+**Sub-milestones:**
+
+- **v4.0 — Backend session loop + measurement harness.** `/ws/stream` endpoint, ring buffer,
+  paced decode thread, LocalAgreement commit, VAD-flush finalization. Driven by a synthetic PCM
+  test client (`ops/scripts/stream_bench.py`) that replays a WAV at real-time pace and reports
+  first-partial latency, finalization latency, commit lag distribution, and retraction count —
+  plus a baseline mode that runs the same audio through the v3 one-shot path and emits the
+  hardware cost comparison (see Hardware cost justification above). The harness ships *with* the
+  endpoint — tuning without instrumentation is guessing. No frontend changes in v4.0.
+- **v4.1 — Frontend integration.** Persistent WS session in continuous mode, frames streamed as
+  captured, partial-vs-committed rendering (tentative gray tail after committed text).
+  `state-machine.mmd` updated **before** component code (new states: streaming session live,
+  partial visible). `privacy-data-flow.mmd` updated for the in-memory path (temp files gone on
+  the streaming path). Per-utterance WebSocket churn eliminated.
+- **v4.2 — Voice command fast path + tuning pass.** `detectVoiceCommand` runs on committed text
+  as it lands instead of waiting for utterance completion — addresses the parking-lot latency
+  concern without a client-side keyword model. Tunables adjusted against `stream_bench` numbers
+  and real dictation; severity asymmetry from v2.3.1 still governs (`clear` on committed-partial
+  text must show zero false fires before the fast path applies to it).
+
+**Testing (folded into each sub-milestone, not a trailing phase):**
+
+- **Commit policy as a pure function.** The LocalAgreement core (`agree(prev_hyp, curr_hyp) →
+  (committed, tentative)`, logprob veto, holdback counter, buffer-trim arithmetic) is implemented
+  as pure functions with no model, no WebSocket, no threads — and unit-tested exhaustively on
+  synthetic hypothesis sequences: agreement, partial agreement, flip-flop until holdback fires,
+  veto blocking an agreed prefix, trim offsets after commit, left-context carryover at the 30 s
+  slide. This module is where correctness lives; it must be testable without a GPU.
+- **Session tests (pytest).** `/ws/stream` exercised with the same model-mocking pattern the
+  existing 44 backend tests use: control-message sequencing (`start` → frames → `stop`),
+  second-session rejection, mid-session disconnect cleanup (no leaked thread, no leaked buffer),
+  swap-during-stream rejection, empty/oversized frame handling. No CUDA required, same as today.
+- **Frontend tests (vitest, v4.1).** Partial-vs-committed rendering, retraction of the tentative
+  tail, fallback to the one-shot path when `/ws/stream` fails, session teardown on unmount
+  (`wsCleanupSetRef` discipline extends to the persistent session).
+- **`stream_bench` doubles as the regression harness.** Latency numbers recorded in the gate
+  result the same way smoke-test latency was recorded in v1 — a tunables change that regresses
+  the numbers is visible, not vibes.
+
+**Design review checkpoint (before v4.0 code):** fresh-context adversarial review of the protocol
+and commit policy — the standing questions: swap-during-stream, disconnect mid-session cleanup,
+buffer-slide correctness at the 30 s boundary, hallucination behavior on the buffer edge, and
+whether `partial` retraction semantics are honest in the UI.
+
+**Gate (v4 overall):** `stream_bench` reports all four targets met on GPU with `large-v3`, and
+the v3→v4 hardware cost comparison is recorded in the gate result (compute premium within the
+3–5× envelope, or the deviation explained).
+Three-minute live continuous dictation session: committed text never visibly changes; partial
+tail flickers but never survives incorrectly into committed text; final segments match the
+one-shot path's quality on the same audio. Kill the server mid-stream → frontend falls back to
+the one-shot path gracefully. `ps`/VRAM clean after session close. All existing tests green;
+one-shot and HTTP paths unchanged.
 
 ---
 
