@@ -1,0 +1,260 @@
+{
+  "$defs": {
+    "ErrorResponse": {
+      "properties": {
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "ErrorResponse",
+      "type": "object"
+    },
+    "HealthResponse": {
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "model_loaded": {
+          "title": "Model Loaded",
+          "type": "boolean"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "model_loaded",
+        "device",
+        "model_name"
+      ],
+      "title": "HealthResponse",
+      "type": "object"
+    },
+    "ModelInfo": {
+      "properties": {
+        "is_current": {
+          "title": "Is Current",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "is_current"
+      ],
+      "title": "ModelInfo",
+      "type": "object"
+    },
+    "ModelListResponse": {
+      "$defs": {
+        "ModelInfo": {
+          "properties": {
+            "is_current": {
+              "title": "Is Current",
+              "type": "boolean"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "is_current"
+          ],
+          "title": "ModelInfo",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "current_model": {
+          "title": "Current Model",
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ModelInfo"
+          },
+          "title": "Models",
+          "type": "array"
+        }
+      },
+      "required": [
+        "models",
+        "current_model"
+      ],
+      "title": "ModelListResponse",
+      "type": "object"
+    },
+    "ModelSwapRequest": {
+      "properties": {
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_name"
+      ],
+      "title": "ModelSwapRequest",
+      "type": "object"
+    },
+    "ModelSwapResponse": {
+      "properties": {
+        "current_model": {
+          "title": "Current Model",
+          "type": "string"
+        },
+        "previous_model": {
+          "title": "Previous Model",
+          "type": "string"
+        },
+        "swap_duration": {
+          "title": "Swap Duration",
+          "type": "number"
+        }
+      },
+      "required": [
+        "previous_model",
+        "current_model",
+        "swap_duration"
+      ],
+      "title": "ModelSwapResponse",
+      "type": "object"
+    },
+    "TranscribeResponse": {
+      "properties": {
+        "cleaned": {
+          "title": "Cleaned",
+          "type": "string"
+        },
+        "duration": {
+          "title": "Duration",
+          "type": "number"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "processing_mode": {
+          "title": "Processing Mode",
+          "type": "string"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "raw",
+        "cleaned",
+        "language",
+        "duration",
+        "processing_mode",
+        "model_name"
+      ],
+      "title": "TranscribeResponse",
+      "type": "object"
+    },
+    "WsCompleteMessage": {
+      "properties": {
+        "cleaned": {
+          "title": "Cleaned",
+          "type": "string"
+        },
+        "duration": {
+          "title": "Duration",
+          "type": "number"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "processing_mode": {
+          "title": "Processing Mode",
+          "type": "string"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "type": {
+          "const": "complete",
+          "title": "Type"
+        }
+      },
+      "required": [
+        "type",
+        "raw",
+        "cleaned",
+        "language",
+        "duration",
+        "model_name",
+        "processing_mode"
+      ],
+      "title": "WsCompleteMessage",
+      "type": "object"
+    },
+    "WsErrorMessage": {
+      "properties": {
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "type": {
+          "const": "error",
+          "title": "Type"
+        }
+      },
+      "required": [
+        "type",
+        "detail"
+      ],
+      "title": "WsErrorMessage",
+      "type": "object"
+    },
+    "WsSegmentMessage": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "segment",
+          "title": "Type"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "title": "WsSegmentMessage",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Machine-readable JSON Schema for all Voice Scribe API request and response bodies. Each entry under $defs is the standalone schema for one message type. Contract version equals the Voice Scribe git tag of the release that ships this file.",
+  "title": "Voice Scribe Runtime Contract"
+}

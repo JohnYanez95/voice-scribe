@@ -14,7 +14,7 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 - Desktop clipboard + audio: HTTP server (`tiny_http` on port 8001) in the Rust process. POST `/clipboard` writes to system clipboard via `arboard`. POST `/audio/play` plays embedded WAV cues via `rodio`, bypassing WebKitGTK's unreliable audio subsystem. Both bypass WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- 178 tests (134 frontend, 44 backend), TypeScript clean, Rust clean
+- 180 tests (134 frontend, 46 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
 - v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → ~~v3.2 (audio feedback, clipboard cleanup, segmentation fix)~~ → ~~v3.3 (system tray + window management)~~ → ~~v3.4 (design system + theme toggle + model selector extraction)~~. v3.4 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
 
@@ -58,7 +58,11 @@ Two-service system over localhost. WebSocket (default, v2.1+) and HTTP (fallback
 - **Backend** (`apps/api/`, port 8084): FastAPI with GPU. Validates upload, transcodes via ffmpeg to 16kHz mono WAV, runs faster-whisper inference, returns transcript. Runs in Docker (browser mode) or as bare-host Python process (desktop mode) — same code, different process boundary.
 - **Desktop shell** (`apps/desktop/src-tauri/`): Tauri v2. Spawns the Python API as a sidecar, polls health, emits `backend-ready` event. HTTP clipboard + audio server on port 8001 (`tiny_http` + `arboard` + `rodio`). System tray with context menu and recording-state tooltip. Close-to-minimize with second-close quit. WebKitGTK media permissions granted programmatically. CUDA runtime discovery via `cuda_ld_library_path()`. WebKitGTK intercepts `Ctrl+Shift+Space` and `Ctrl+Shift+S` at the native level — `Ctrl+Shift+Y` (copy) and `Ctrl+Shift+X` (clear) work reliably.
 
-Request flow: `MediaRecorder (webm/opus)` → `WebSocket /transcribe/ws` → `MIME validation` → `ffmpeg transcode` → `faster-whisper inference` → `streaming transcript JSON` → `editable textarea`
+Request flow (WebSocket): `MediaRecorder (webm/opus)` → `WebSocket /ws/transcribe` → `ffmpeg transcode` → `faster-whisper inference` → `streaming transcript JSON` → `editable textarea`
+
+Request flow (HTTP fallback): `MediaRecorder (webm/opus)` → `POST /transcribe` → `MIME validation` → `ffmpeg transcode` → `faster-whisper inference` → `TranscribeResponse JSON` → `editable textarea`
+
+**Backend contract:** `docs/contract/runtime-contract.md` is the stable description of request/response shapes, hard limits, and privacy guarantees for downstream consumers. Any change that touches endpoint shapes or constraints must update the contract doc and regenerate `docs/contract/runtime-contract.schema.json` (`cd apps/api && python scripts/export_contract.py`). The drift test (`tests/test_contract_export.py`) will fail if the schema file is not updated.
 
 ### Key backend files
 - `app/main.py` — FastAPI app, CORS, lifespan (model loading)
