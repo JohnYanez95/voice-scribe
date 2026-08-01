@@ -24,6 +24,24 @@ class Settings:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
     API_PORT: int = int(os.getenv("API_PORT", "8084"))
 
+    # Streaming path (/ws/stream) — limits and serving policy tunables.
+    # docs/v4/protocol.md §6 and §7 are the authority on meanings and defaults.
+    STREAM_PROTOCOL_VERSION: int = 1
+    STREAM_SAMPLE_RATE: int = 16000
+    STREAM_SAMPLE_FORMAT: str = "pcm_f32le"
+    STREAM_MAX_FRAME_BYTES: int = int(os.getenv("STREAM_MAX_FRAME_BYTES", "65536"))
+    STREAM_DECODE_TICK_MS: int = int(os.getenv("STREAM_DECODE_TICK_MS", "750"))
+    STREAM_MIN_DECODE_S: float = float(os.getenv("STREAM_MIN_DECODE_S", "1.0"))
+    STREAM_MAX_UNCOMMITTED_S: float = float(os.getenv("STREAM_MAX_UNCOMMITTED_S", "24.0"))
+    STREAM_LEFT_CONTEXT_S: float = float(os.getenv("STREAM_LEFT_CONTEXT_S", "3.0"))
+    STREAM_WORD_PROB_FLOOR: float = float(os.getenv("STREAM_WORD_PROB_FLOOR", "0.5"))
+    STREAM_EDGE_GUARD_S: float = float(os.getenv("STREAM_EDGE_GUARD_S", "0.6"))
+    STREAM_MAX_HOLDBACK_TICKS: int = int(os.getenv("STREAM_MAX_HOLDBACK_TICKS", "6"))
+    STREAM_MAX_UTTERANCE_S: float = float(os.getenv("STREAM_MAX_UTTERANCE_S", "120"))
+    STREAM_MAX_SESSION_S: float = float(os.getenv("STREAM_MAX_SESSION_S", "1800"))
+    STREAM_IDLE_TIMEOUT_S: float = float(os.getenv("STREAM_IDLE_TIMEOUT_S", "10"))
+    STREAM_PREEMPT_GRACE_S: float = float(os.getenv("STREAM_PREEMPT_GRACE_S", "2.0"))
+
     @property
     def cors_origins(self) -> list[str]:
         # Tauri v2 origin: https://tauri.localhost (Windows) or tauri://localhost (Linux).

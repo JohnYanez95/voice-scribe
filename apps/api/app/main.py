@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routes import health, models, transcribe, transcribe_ws
+from app.routes import health, models, stream_ws, transcribe, transcribe_ws
 from app.services.transcription import load_model
 
 LOG_LEVELS = {
@@ -50,3 +50,4 @@ app.include_router(health.router)
 app.include_router(transcribe.router)
 app.include_router(models.router)
 app.include_router(transcribe_ws.router)
+app.include_router(stream_ws.router)

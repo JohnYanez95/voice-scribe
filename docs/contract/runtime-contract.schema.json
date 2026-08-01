@@ -202,7 +202,8 @@
         },
         "type": {
           "const": "complete",
-          "title": "Type"
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -225,7 +226,8 @@
         },
         "type": {
           "const": "error",
-          "title": "Type"
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -243,7 +245,8 @@
         },
         "type": {
           "const": "segment",
-          "title": "Type"
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -251,6 +254,353 @@
         "text"
       ],
       "title": "WsSegmentMessage",
+      "type": "object"
+    },
+    "WsStreamAckMessage": {
+      "description": "Ack for stop/reset (C4.6).",
+      "properties": {
+        "frames_dropped_after_stop": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frames Dropped After Stop"
+        },
+        "of": {
+          "enum": [
+            "stop",
+            "reset"
+          ],
+          "title": "Of",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ack",
+          "title": "Type",
+          "type": "string"
+        },
+        "utterance_id": {
+          "title": "Utterance Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "of",
+        "utterance_id"
+      ],
+      "title": "WsStreamAckMessage",
+      "type": "object"
+    },
+    "WsStreamCommittedMessage": {
+      "description": "Append-only delta (C4.3). t0/t1 are received-audio seconds within the\nutterance \u2014 not wall clock.",
+      "properties": {
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "t0": {
+          "title": "T0",
+          "type": "number"
+        },
+        "t1": {
+          "title": "T1",
+          "type": "number"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "committed",
+          "title": "Type",
+          "type": "string"
+        },
+        "utterance_id": {
+          "title": "Utterance Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "utterance_id",
+        "text",
+        "t0",
+        "t1"
+      ],
+      "title": "WsStreamCommittedMessage",
+      "type": "object"
+    },
+    "WsStreamErrorMessage": {
+      "description": "code is the stable machine-readable surface (C4.5); detail is unstable.\nfatal=true \u2192 session over, degrade per protocol \u00a710.",
+      "properties": {
+        "code": {
+          "enum": [
+            "busy",
+            "preempted",
+            "protocol_violation",
+            "frame_too_large",
+            "unsupported_format",
+            "unsupported_version",
+            "model_swapping",
+            "decode_failure",
+            "overrun",
+            "session_timeout"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "fatal": {
+          "title": "Fatal",
+          "type": "boolean"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "type": {
+          "const": "error",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "code",
+        "detail",
+        "fatal"
+      ],
+      "title": "WsStreamErrorMessage",
+      "type": "object"
+    },
+    "WsStreamFinalMessage": {
+      "description": "Utterance flush (C4.4). raw carries the utterance's committed text as a\nliteral prefix. duration is received-audio seconds from frame count.",
+      "properties": {
+        "cleaned": {
+          "title": "Cleaned",
+          "type": "string"
+        },
+        "dropped_audio_ms": {
+          "title": "Dropped Audio Ms",
+          "type": "number"
+        },
+        "duration": {
+          "title": "Duration",
+          "type": "number"
+        },
+        "forced": {
+          "title": "Forced",
+          "type": "boolean"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "processing_mode": {
+          "title": "Processing Mode",
+          "type": "string"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "type": {
+          "const": "final",
+          "title": "Type",
+          "type": "string"
+        },
+        "utterance_id": {
+          "title": "Utterance Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "utterance_id",
+        "raw",
+        "cleaned",
+        "language",
+        "duration",
+        "model_name",
+        "processing_mode",
+        "dropped_audio_ms",
+        "forced"
+      ],
+      "title": "WsStreamFinalMessage",
+      "type": "object"
+    },
+    "WsStreamPartialMessage": {
+      "description": "Tentative tail (C4.2). text REPLACES the entire tentative tail. Never\npersist, copy, transform, or act on partial text.",
+      "properties": {
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "partial",
+          "title": "Type",
+          "type": "string"
+        },
+        "utterance_id": {
+          "title": "Utterance Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "utterance_id",
+        "text"
+      ],
+      "title": "WsStreamPartialMessage",
+      "type": "object"
+    },
+    "WsStreamReadyMessage": {
+      "description": "Handshake echo (C4.1). Client must not send frames before this.",
+      "properties": {
+        "decode_tick_ms": {
+          "title": "Decode Tick Ms",
+          "type": "integer"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Language"
+        },
+        "max_frame_bytes": {
+          "title": "Max Frame Bytes",
+          "type": "integer"
+        },
+        "max_holdback_ticks": {
+          "title": "Max Holdback Ticks",
+          "type": "integer"
+        },
+        "max_uncommitted_s": {
+          "title": "Max Uncommitted S",
+          "type": "number"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "protocol_version": {
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "sample_format": {
+          "title": "Sample Format",
+          "type": "string"
+        },
+        "sample_rate": {
+          "title": "Sample Rate",
+          "type": "integer"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "ready",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "seq",
+        "protocol_version",
+        "session_id",
+        "sample_rate",
+        "sample_format",
+        "max_frame_bytes",
+        "model_name",
+        "language",
+        "decode_tick_ms",
+        "max_uncommitted_s",
+        "max_holdback_ticks"
+      ],
+      "title": "WsStreamReadyMessage",
+      "type": "object"
+    },
+    "WsStreamStartMessage": {
+      "description": "Client \u2192 server session open (protocol C3.1).",
+      "properties": {
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "protocol_version": {
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "sample_format": {
+          "title": "Sample Format",
+          "type": "string"
+        },
+        "sample_rate": {
+          "title": "Sample Rate",
+          "type": "integer"
+        },
+        "type": {
+          "const": "start",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "protocol_version",
+        "sample_format",
+        "sample_rate"
+      ],
+      "title": "WsStreamStartMessage",
       "type": "object"
     }
   },

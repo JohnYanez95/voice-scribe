@@ -1,6 +1,6 @@
 # Voice Scribe Runtime Contract
 
-**Contract version:** `v3.4.1` (equals the Voice Scribe git tag of the release that ships this file).
+**Contract version:** `v4.0-dev` (in-tree; becomes the `v4.0` git tag at release — see Versioning rule).
 
 ---
 
@@ -22,18 +22,15 @@ Contract version = Voice Scribe git tag of the release that ships it. Breaking c
 
 ## Transport
 
-Two transports are supported. Both bind to `localhost` only and share the same response body shapes for successful transcription.
+Three transports are supported. All bind to `localhost` only and share the same transcript field set for a completed utterance.
 
 | Transport | Default | Path | Use case |
 |-----------|---------|------|----------|
-| WebSocket | Yes (v2.1+) | `ws://localhost:8084/ws/transcribe` | Streaming segments during inference |
+| WebSocket (streaming session) | v4.0+ | `ws://localhost:8084/ws/stream` | Live PCM ingestion; partial/committed text while the user speaks |
+| WebSocket (one-shot) | Yes (v2.1+) | `ws://localhost:8084/ws/transcribe` | Streaming segments during inference on a complete blob |
 | HTTP | Fallback | `http://localhost:8084/transcribe` | Single-shot, synchronous |
 
-Both transports:
-- Accept a binary audio blob from the client
-- Transcode via ffmpeg to 16 kHz mono WAV before inference
-- Return the same transcript field set on success
-- Delete all temp files before the response/connection closes
+The one-shot WS and HTTP paths accept a binary audio blob, transcode it via ffmpeg to 16 kHz mono WAV before inference, and delete all temp files before the response/connection closes. The streaming path is different by design: it accepts raw 16 kHz mono `pcm_f32le` frames, runs no ffmpeg, and creates **no temp files at any point** — audio exists only in a bounded in-memory buffer (see Privacy guarantees).
 
 ---
 
@@ -155,6 +152,7 @@ If the requested model is already loaded, returns immediately with `swap_duratio
 | Status | Condition |
 |--------|-----------|
 | `400` | `model_name` not in the available set |
+| `409` | A `/ws/stream` session is active (v4.0+). A streaming session pins its model reference for the session's lifetime, so a mid-stream swap would hold double VRAM for minutes — stop the stream first. |
 | `500` | Model load failure |
 
 ---
@@ -214,9 +212,35 @@ Field semantics match `POST /transcribe` — see table above.
 
 ---
 
+### `WS /ws/stream` (v4.0+)
+
+Persistent streaming session: the client sends raw PCM frames while the user speaks; the server decodes on a paced tick and emits text incrementally. **The normative specification is `docs/v4/protocol.md` (protocol version 1)** — session tests enforce it clause by clause. Summary for consumers:
+
+**Session shape:** JSON `start` (with `protocol_version: 1`, `sample_format: "pcm_f32le"`, `sample_rate: 16000`, optional `language`) → server `ready` (echoes config and the serving tunables in force) → binary PCM frames interleaved with JSON control (`flush` = utterance boundary, many per session; `stop` = session end; `reset` = destructive drop of the current utterance, acked) → server messages, each carrying `seq` and `utterance_id`.
+
+**Server → client message types and how to treat them:**
+
+| Type | Treatment |
+|------|-----------|
+| `partial` | Full replacement of the tentative tail. **Never persist, copy to clipboard, transform, or act on it.** May be retracted by the next `partial`. |
+| `committed` | Append-only delta with `t0`/`t1` in received-audio seconds (not wall clock). Never revised by any later message. Safe to act on. |
+| `final` | Authoritative for the utterance. Carries the utterance's committed text as a **literal prefix** of `raw`, plus `cleaned`, `language`, `duration`, `model_name`, `processing_mode`, `dropped_audio_ms`, `forced`. The only message carrying `cleaned`. Also the signal that a client-retained copy of the utterance audio may be dropped. |
+| `error` | `code` is the stable machine-readable surface (`busy`, `preempted`, `protocol_violation`, `frame_too_large`, `unsupported_format`, `unsupported_version`, `model_swapping`, `decode_failure`, `overrun`, `session_timeout`); `detail` is human-readable and unstable — do not parse it. `fatal: true` means the session is over. |
+| `ack` | Confirms `stop`/`reset`. |
+
+`final.duration` is computed from received frame count, not from the decoder — on this path there is no WAV header to read.
+
+**One session per server.** A second connection is accepted, sent `error{code:"busy"}`, and closed with `4409` — post-accept, so the code is observable (a pre-accept close surfaces to browsers as a generic connection failure). An incumbent that has sent no frames for ≥ 2 s is preempted by a new connection; a session idle for 10 s is torn down server-side.
+
+**Close codes:** `4003` origin rejected (pre-accept — client fallback logic must not depend on reading it), `4408` protocol violation, `4409` busy/preempted, `1000` normal close after `stop`.
+
+---
+
 ## Hard limits
 
 These are enforced constraints, not configuration suggestions. Breaking them returns an error before any inference runs.
+
+**One-shot paths (`POST /transcribe`, `/ws/transcribe`) — per-request limits:**
 
 | Limit | Value | Enforcement |
 |-------|-------|-------------|
@@ -224,6 +248,18 @@ These are enforced constraints, not configuration suggestions. Breaking them ret
 | Max audio duration | 60 s (`MAX_AUDIO_SECONDS`) | HTTP only: checked after transcoding via `get_wav_duration()`. WS: **not enforced** — see Known Limitations. |
 | Requests per connection | 1 | One audio blob per HTTP request or WS connection. |
 | Concurrent requests | 1 (single-flight) | See Known Limitations. |
+
+**Streaming path (`/ws/stream`) — the per-request limits above do not apply. A session is bounded by (protocol §6):**
+
+| Limit | Value | Enforcement |
+|-------|-------|-------------|
+| Max frame size | 64 KiB (`STREAM_MAX_FRAME_BYTES`) | Fatal error + close before buffering. Frame length must also be a nonzero multiple of 4 (f32). |
+| Max uncommitted audio | 24 s (`STREAM_MAX_UNCOMMITTED_S`) | Oldest uncommitted audio dropped with an `overrun` signal — never silently. |
+| Max utterance | 120 s (`STREAM_MAX_UTTERANCE_S`) | Server-side forced flush (`final.forced: true`). |
+| Max session | 30 min (`STREAM_MAX_SESSION_S`) | Flush + fatal error + close. |
+| Idle timeout | 10 s (`STREAM_IDLE_TIMEOUT_S`) | Session teardown; frees the single session slot. |
+| Ingest rate | ≤ 2× real-time sustained | Fatal protocol violation — the wire is a live capture path, not a file upload. |
+| Sessions per server | 1 | Second connection gets `busy` + close 4409; stale incumbents are preempted. |
 
 **MIME allowlist (HTTP only):**
 
@@ -244,9 +280,11 @@ Codec parameters are stripped before validation (`audio/webm;codecs=opus` → `a
 
 These are runtime behaviours, not aspirational statements.
 
-- **Audio is transient.** Both temp files (input and transcoded WAV) are deleted in a `finally` block that runs on success, failure, and WebSocket disconnect. Source: `transcribe.py:162-168`, `transcribe_ws.py:206-212`.
-- **No content logging.** Transcript text and raw audio bytes are never written to logs at any log level. Operational telemetry only: transcode start/complete (with elapsed time and input format), inference start/complete (with elapsed time and detected language). No audio content, no transcript content.
-- **Localhost-only by default.** The API binds to `localhost` unless the bind address is explicitly overridden. CORS and WebSocket origin checks prevent cross-origin access from browser contexts.
+- **Audio is transient (one-shot paths).** Both temp files (input and transcoded WAV) are deleted in a `finally` block that runs on success, failure, and WebSocket disconnect. Source: `transcribe.py:162-168`, `transcribe_ws.py:206-212`.
+- **The streaming path writes no temp files at all.** `/ws/stream` never touches disk: there is no residue to survive a `kill -9`, so the crash-cleanup caveat in Operational Requirements does not apply to it. This is the strongest form of the zero-persistence claim.
+- **Streaming audio retention is bounded in bytes, not "brief".** Session wall-clock length is unbounded (up to `STREAM_MAX_SESSION_S`), but at most `LEFT_CONTEXT_S + MAX_UNCOMMITTED_S` = 27 s of float32 mono 16 kHz audio — **≈ 1.7 MB** — exists in memory per session at any instant. Committed audio is discarded at each commit except the 3 s left-context carryover. The buffer is never serialized and is released on close, disconnect, and error alike.
+- **No content logging.** Transcript text, intermediate streaming hypotheses, and raw audio bytes are never written to logs at any log level. Operational telemetry only: transcode start/complete (with elapsed time and input format), inference and decode-tick start/complete (with elapsed time, window length, and detected language). No audio content, no transcript content, no hypothesis content.
+- **Localhost-only by default.** The API binds to `localhost` unless the bind address is explicitly overridden. CORS and WebSocket origin checks prevent cross-origin access from browser contexts (the origin check is replicated on `/ws/stream`).
 
 ---
 
@@ -261,6 +299,8 @@ These are real gaps. They are named here so a downstream consumer knows exactly 
 **Impact:** A workspace product that records long-form sessions and streams them via WebSocket should not assume the 60 s limit applies. The HTTP path enforces it; the WS path does not.
 
 **Fix trigger:** When a downstream use case that needs long-form WS capture arises, the fix is to add `get_wav_duration()` after transcoding in `transcribe_ws.py` — one addition, same as the HTTP path. This is the same change required to decouple the UI cap from the backend constant (parking lot item in `roadmap.md`). Both close in one edit.
+
+**v4.0 note:** `/ws/stream` is a second, *deliberate* instance of "no 60 s cap" — a session-long stream is unbounded per-utterance duration by design. It replaces the missing cap with its own explicit bounds (frame size, uncommitted-buffer cap, forced flush at 120 s, session ceiling, idle timeout — see Hard limits). The one-shot WS gap above remains an accidental omission; the streaming behaviour is a specified one.
 
 ### WS does not enforce a MIME allowlist
 
@@ -307,4 +347,4 @@ A WebSocket connection from an origin not in the list closes immediately with co
 1. **Voice Scribe must be running.** The workspace product is responsible for starting and health-checking the Voice Scribe API before sending audio. Poll `GET /health` until `model_loaded: true`.
 2. **The consumer's origin must be in the allowlist.** Set `CORS_ORIGINS` at Voice Scribe startup to include the workspace dev server origin. If running in a Tauri context, `https://tauri.localhost` and `tauri://localhost` are in the default list.
 3. **Single-flight semantics must be respected.** Do not send a second audio blob before the first completes. The server will not reject the second request outright, but inference results will be serialised and VRAM pressure may increase during a model swap.
-4. **Temp file cleanup is guaranteed, but not idempotent on crash.** If the process is killed mid-inference, temp files may remain in `TEMP_DIR`. A consumer operating in a long-running sidecar context may want to clean `TEMP_DIR` at startup.
+4. **Temp file cleanup is guaranteed, but not idempotent on crash.** If the process is killed mid-inference, temp files may remain in `TEMP_DIR`. A consumer operating in a long-running sidecar context may want to clean `TEMP_DIR` at startup. This applies to the one-shot paths only — `/ws/stream` never writes temp files, so a crash leaves no residue on that path.

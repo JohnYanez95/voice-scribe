@@ -26,10 +26,20 @@ from app.schemas import (  # noqa: E402
     WsCompleteMessage,
     WsErrorMessage,
     WsSegmentMessage,
+    WsStreamAckMessage,
+    WsStreamCommittedMessage,
+    WsStreamErrorMessage,
+    WsStreamFinalMessage,
+    WsStreamPartialMessage,
+    WsStreamReadyMessage,
+    WsStreamStartMessage,
 )
 
 # Stable ordering — determines the order of $defs keys before sort_keys
 # alphabetises them. Listed here for readability; sort_keys ensures idempotency.
+# Every Ws* class in app.schemas MUST appear here — enforced by
+# test_contract_export.py::test_every_ws_schema_is_registered (the drift test
+# alone only detects file-vs-code drift, not an unregistered model).
 CONTRACT_MODELS = [
     HealthResponse,
     TranscribeResponse,
@@ -41,6 +51,13 @@ CONTRACT_MODELS = [
     WsSegmentMessage,
     WsCompleteMessage,
     WsErrorMessage,
+    WsStreamStartMessage,
+    WsStreamReadyMessage,
+    WsStreamPartialMessage,
+    WsStreamCommittedMessage,
+    WsStreamFinalMessage,
+    WsStreamErrorMessage,
+    WsStreamAckMessage,
 ]
 
 OUTPUT_PATH = (
