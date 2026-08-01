@@ -348,3 +348,37 @@ def test_committed_words_are_append_only_across_a_full_scenario():
         assert text.startswith(prev_text), f"retraction at tick {i}: {prev_text!r} → {text!r}"
         prev_text = text
     assert prev_text.startswith("the quick brown")
+
+
+# ---------------------------------------------------------------------------
+# Frame tolerance at the commit frontier — C7.2 (peer-review regression,
+# 2026-07-31): re-decodes from a different window position re-time words by
+# up to one Whisper frame (20 ms). A committed word whose end drifts later
+# by less than the tolerance must still be suppressed, or it commits twice —
+# an append-only duplicate the retraction reducer cannot see.
+# ---------------------------------------------------------------------------
+
+def test_localize_suppresses_frontier_word_within_one_frame_drift():
+    boundary = sample(1.5)
+    drifted = localize([("gamma", 1.1, 1.51, 0.95)], 0, boundary, CFG)
+    assert drifted == (), "20 ms of DTW drift must not resurrect a committed word"
+    survives = localize([("delta", 1.3, 1.55, 0.95)], 0, boundary, CFG)
+    assert len(survives) == 1
+
+
+def test_frontier_timestamp_jitter_does_not_recommit():
+    jittered = hyp(
+        w("gamma", 1.1, 1.52),  # committed through 1.5 s; end drifted +20 ms
+        w("delta", 1.6, 2.0),
+        w("epsilon", 2.1, 2.5),
+        w("zeta", 2.6, 3.0),
+    )
+    state = PolicyState(
+        committed_words=hyp(w("gamma", 1.1, 1.5)),
+        committed_through_sample=sample(1.5),
+        prev_hypothesis=jittered,
+    )
+    decision = agree(state, jittered, sample(6.0), CFG)
+    texts = [x.text for x in decision.newly_committed]
+    assert "gamma" not in texts, "frontier word committed twice on timestamp jitter"
+    assert texts == ["delta", "epsilon"]

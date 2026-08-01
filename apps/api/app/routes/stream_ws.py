@@ -25,6 +25,7 @@ from app.services.cleanup import clean_transcript
 from app.services.stream_policy import (
     PolicyConfig,
     PolicyState,
+    WindowPlan,
     agree,
     committed_text,
     localize,
@@ -40,9 +41,18 @@ router = APIRouter()
 CLOSE_POLICY_VIOLATION = 4408
 CLOSE_BUSY = 4409
 
+# C7.11 — whitespace tokenization would treat an utterance as one word.
+# Sessions pinned to these languages run flush-only: partials shown, commits
+# only at flush.
+FLUSH_ONLY_LANGUAGES = {"ja", "zh", "th"}
+
+# Flush decodes shorter than this are skipped: sub-100 ms tails are below one
+# Whisper frame of usable content and reliably hallucinate.
+MIN_FLUSH_DECODE_S = 0.1
+
 
 def _policy_config() -> PolicyConfig:
-    return PolicyConfig(
+    cfg = PolicyConfig(
         sample_rate=settings.STREAM_SAMPLE_RATE,
         left_context_s=settings.STREAM_LEFT_CONTEXT_S,
         max_uncommitted_s=settings.STREAM_MAX_UNCOMMITTED_S,
@@ -50,6 +60,8 @@ def _policy_config() -> PolicyConfig:
         edge_guard_s=settings.STREAM_EDGE_GUARD_S,
         max_holdback_ticks=settings.STREAM_MAX_HOLDBACK_TICKS,
     )
+    cfg.validate()  # C7.1 — env overrides must not reintroduce silent truncation
+    return cfg
 
 
 class StreamSession:
@@ -71,7 +83,9 @@ class StreamSession:
         self.total_samples = 0
         self.utterance_start_sample = 0
         self.dropped_audio_ms = 0.0
+        self.dropped_edge_sample = 0  # watermark: drops accounted through here
         self.overrun_signaled = False
+        self.flush_only = False  # C7.11 — set when a flush-only language is pinned
 
         self.policy = PolicyState()
         self.send_lock = asyncio.Lock()
@@ -87,18 +101,30 @@ class StreamSession:
 
         self.started_mono = time.monotonic()
         self.last_frame_mono = time.monotonic()
-        self.last_activity_mono = time.monotonic()
+        self.first_tick_pending = True  # C7.10 — first tick fires off-grid
         self.frames_since_tick = 0
         self.stopped = False
         self.frames_after_stop = 0
         self.consecutive_overruns = 0
         self.tick_multiplier = 1
         self.ticks_skipped = 0
+        self.decode_ms_samples: list[float] = []  # occupancy telemetry (C9.2-safe)
 
     # -- guard handle protocol (stream_guard.StreamSessionHandle) ----------
 
     def last_frame_age_s(self) -> float:
+        # A session with a decode or flush in flight is actively streaming even
+        # if the receive loop hasn't drained a frame recently (C1.4: an actively
+        # streaming incumbent is never preempted) — a flush decode blocks the
+        # receive loop for longer than PREEMPT_GRACE_S under tick degradation.
+        if self.decode_lock.locked():
+            return 0.0
         return time.monotonic() - self.last_frame_mono
+
+    def pin_language(self, language: str) -> None:
+        """C7.7/C7.11: pin the language and derive the flush-only mode."""
+        self.language = language
+        self.flush_only = language in FLUSH_ONLY_LANGUAGES
 
     def request_preempt(self) -> None:
         self.loop.call_soon_threadsafe(self.preempt_event.set)
@@ -148,9 +174,17 @@ class StreamSession:
         self.base_sample = keep_from_sample
 
     def _window_audio(self, start_sample: int) -> np.ndarray:
-        audio = np.concatenate(self.chunks) if self.chunks else np.zeros(0, dtype=np.float32)
         offset = start_sample - self.base_sample
-        return audio[offset:] if offset > 0 else audio
+        if offset < 0:
+            # A caller asked for audio before the retained buffer. Returning
+            # the buffer anyway would hand the decoder audio whose coordinates
+            # disagree with the requested start — every word would be rebased
+            # wrong. Fail loudly instead.
+            raise ValueError(
+                f"window start {start_sample} precedes buffer base {self.base_sample}"
+            )
+        audio = np.concatenate(self.chunks) if self.chunks else np.zeros(0, dtype=np.float32)
+        return audio[offset:]
 
     def uncommitted_seconds(self) -> float:
         return (self.total_samples - max(self.policy.committed_through_sample,
@@ -180,36 +214,57 @@ class StreamSession:
             return None
         return words, info.language
 
+    async def _apply_overflow(self, plan: WindowPlan, committed_edge: int) -> None:
+        """C5.6: on overrun, drop the OLDEST uncommitted audio from the buffer
+        itself (§6 memory bound — sliding only the decode window leaves the
+        bytes resident), account each dropped sample exactly once via the
+        watermark, and signal the first drop of the utterance."""
+        if plan.overflow_drop_samples <= 0:
+            return
+        newly_dropped = plan.context_end_sample - max(self.dropped_edge_sample, committed_edge)
+        if newly_dropped > 0:
+            self.dropped_audio_ms += newly_dropped / self.sr * 1000.0
+            self.dropped_edge_sample = plan.context_end_sample
+        self._trim_buffer(max(plan.window_start_sample, self.base_sample))
+        if not self.overrun_signaled:
+            self.overrun_signaled = True
+            await self.send_error(
+                "overrun", "Decode fell behind ingest; oldest uncommitted audio dropped.",
+                fatal=False,
+            )
+
     async def _tick_once(self) -> None:
         committed_edge = max(self.policy.committed_through_sample, self.utterance_start_sample)
         plan = plan_window(committed_edge, self.total_samples, self.cfg)
+        await self._apply_overflow(plan, committed_edge)
 
-        if plan.overflow_drop_samples > 0:
-            # C5.6: drop the OLDEST uncommitted audio, never silently
-            self.dropped_audio_ms += plan.overflow_drop_samples / self.sr * 1000.0
-            if not self.overrun_signaled:
-                self.overrun_signaled = True
-                await self.send_error(
-                    "overrun", "Decode fell behind ingest; oldest uncommitted audio dropped.",
-                    fatal=False,
-                )
-
+        # The planned window may start before the retained buffer: after a
+        # flush, left context would reach into the previous (cleared)
+        # utterance. Decode AND localize from the same clamped start, or every
+        # word is rebased into the wrong coordinates.
+        window_start = max(plan.window_start_sample, self.base_sample)
         generation = self.decode_generation
-        audio = self._window_audio(plan.window_start_sample)
+        audio = self._window_audio(window_start)
         if len(audio) == 0:
             return
+        # C7.4: the edge guard is measured against the audio the decoder saw —
+        # frames arriving during the decode must not erode the guard.
+        decoded_end_sample = window_start + len(audio)
         start = time.monotonic()
         result = await asyncio.to_thread(self._decode_sync, audio, generation)
         decode_ms = (time.monotonic() - start) * 1000.0
-        log.info("stream tick decode", duration_ms=f"{decode_ms:.0f}",
-                 window_s=f"{len(audio) / self.sr:.1f}")
+        self.first_tick_pending = False
+        self.decode_ms_samples.append(decode_ms)
+        log.debug("stream tick decode", duration_ms=f"{decode_ms:.0f}",
+                  window_s=f"{len(audio) / self.sr:.1f}")
 
-        # C7.8 rule 3: three consecutive overruns double the effective tick (cap 4x)
+        # C7.8 rule 3: three consecutive overruns double the effective tick
+        # (cap 4x, log once per escalation, counter restarts after each)
         if decode_ms > settings.STREAM_DECODE_TICK_MS:
             self.consecutive_overruns += 1
-            self.ticks_skipped += 1
             if self.consecutive_overruns >= 3 and self.tick_multiplier < 4:
                 self.tick_multiplier = min(4, self.tick_multiplier * 2)
+                self.consecutive_overruns = 0
                 log.warning("stream tick interval degraded", multiplier=self.tick_multiplier)
         else:
             self.consecutive_overruns = 0
@@ -218,10 +273,18 @@ class StreamSession:
             return  # flush/reset invalidated this tick
         raw_words, language = result
         if self.language is None and language:
-            self.language = language  # C7.7: pinned from first successful decode
+            self.pin_language(language)  # C7.7: pinned from first successful decode
 
-        hyp = localize(raw_words, plan.window_start_sample, plan.context_end_sample, self.cfg)
-        decision = agree(self.policy, hyp, self.total_samples, self.cfg)
+        hyp = localize(raw_words, window_start, plan.context_end_sample, self.cfg)
+        if self.flush_only:
+            # C7.11: no whitespace tokenization — partials only, commits at flush
+            await self.send({
+                "type": "partial",
+                "utterance_id": self.utterance_id,
+                "text": committed_text(hyp),
+            })
+            return
+        decision = agree(self.policy, hyp, decoded_end_sample, self.cfg)
         self.policy = decision.state
 
         if decision.newly_committed:
@@ -245,14 +308,24 @@ class StreamSession:
 
     async def decode_loop(self) -> None:
         tick_s = settings.STREAM_DECODE_TICK_MS / 1000.0
+        tick_start = time.monotonic()
         while True:
             # C7.10: the first tick of an utterance fires as soon as
             # MIN_DECODE_S is buffered instead of waiting for the tick grid —
             # this is what keeps first-partial ≤ 1.5 s at a 750 ms tick.
-            if self.policy.prev_hypothesis is None:
+            if self.first_tick_pending:
                 await asyncio.sleep(0.05)
+                tick_start = time.monotonic()
             else:
-                await asyncio.sleep(tick_s * self.tick_multiplier)
+                # C7.8 rule 2: next tick at max(now, tick_start + tick) — the
+                # sleep is anchored to the previous tick START. Sleeping after
+                # the decode returns would make the effective period
+                # tick + decode_ms and silently slow the whole cadence.
+                target = tick_start + tick_s * self.tick_multiplier
+                now = time.monotonic()
+                if target > now:
+                    await asyncio.sleep(target - now)
+                tick_start = time.monotonic()
             # C7.10: skip idle ticks — near-silence decodes hallucinate
             if self.frames_since_tick == 0:
                 continue
@@ -265,6 +338,8 @@ class StreamSession:
                 except Exception as e:
                     log.error("stream tick failed", error=str(e))
                     await self.send_error("decode_failure", "Streaming decode failed.", fatal=False)
+            if time.monotonic() - tick_start > tick_s * self.tick_multiplier:
+                self.ticks_skipped += 1  # C7.8 rule 2: the decode overran its grid slot
 
     # -- utterance boundaries -----------------------------------------------
 
@@ -275,10 +350,18 @@ class StreamSession:
         async with self.decode_lock:
             committed_edge = max(self.policy.committed_through_sample,
                                  self.utterance_start_sample)
-            audio = self._window_audio(committed_edge)
+            # C5.2 + C7.1: the flush decodes the uncommitted buffer only, and
+            # never a window larger than the planner allows. After an overrun
+            # the flush starts at the effective (slid) edge — decoding audio
+            # the client was told was dropped would make the message log and
+            # the emitted text disagree.
+            plan = plan_window(committed_edge, self.total_samples, self.cfg)
+            await self._apply_overflow(plan, committed_edge)
+            flush_start = max(plan.context_end_sample, self.base_sample)
+            audio = self._window_audio(flush_start)
             tail_words = ()
             language = self.language or ""
-            if len(audio) >= int(0.1 * self.sr):
+            if len(audio) >= int(MIN_FLUSH_DECODE_S * self.sr):
                 generation = self.decode_generation
                 try:
                     result = await asyncio.to_thread(self._decode_sync, audio, generation)
@@ -296,9 +379,9 @@ class StreamSession:
                 if result is not None:
                     raw_words, detected = result
                     if self.language is None and detected:
-                        self.language = detected
+                        self.pin_language(detected)
                         language = detected
-                    tail_words = localize(raw_words, committed_edge, committed_edge, self.cfg)
+                    tail_words = localize(raw_words, flush_start, flush_start, self.cfg)
 
             prior = committed_text(self.policy.committed_words)
             tail = committed_text(tail_words)
@@ -324,7 +407,9 @@ class StreamSession:
         self.policy = PolicyState()
         self.utterance_start_sample = self.total_samples
         self.dropped_audio_ms = 0.0
+        self.dropped_edge_sample = self.total_samples
         self.overrun_signaled = False
+        self.first_tick_pending = True
         self.chunks = []
         self.base_sample = self.total_samples
 
@@ -406,7 +491,9 @@ async def ws_stream(websocket: WebSocket) -> None:
         if problem:
             await session.fail(*problem)
             return
-        session.language = start_msg.get("language") or None
+        client_language = start_msg.get("language") or None
+        if client_language:
+            session.pin_language(client_language)
 
         # ---- one-session rule (C1.3–C1.4) ----
         status, incumbent = stream_guard.try_acquire_stream(
@@ -421,7 +508,14 @@ async def ws_stream(websocket: WebSocket) -> None:
         if status == "preempting" and incumbent is not None:
             done = await asyncio.to_thread(incumbent.closed_event.wait, 5.0)
             if not done:
-                log.warning("stream preemption: incumbent teardown timed out")
+                # C1.7: proceeding would put two sessions on the GPU — fail
+                # the newcomer instead. (The finally: release is identity-
+                # checked, so it cannot clear a later session's registration.)
+                log.warning("stream preemption: incumbent teardown timed out; "
+                            "rejecting newcomer")
+                await session.fail("busy", "Incumbent session teardown timed out.",
+                                   close_code=CLOSE_BUSY)
+                return
 
         # C7.7 — model resolved once, held for the session
         session.model = get_model()
@@ -535,4 +629,14 @@ async def ws_stream(websocket: WebSocket) -> None:
         if acquired:
             stream_guard.release_stream(session)
         session.closed_event.set()
-        log.info("stream session closed", session_id=session.session_id)
+        # Occupancy and skip counters are server-internal; this line is how a
+        # gate/field-test run observes them (counters only — C9.2).
+        samples = sorted(session.decode_ms_samples)
+        occupancy_p95 = (
+            round(samples[int(0.95 * (len(samples) - 1))] / settings.STREAM_DECODE_TICK_MS, 3)
+            if samples else None
+        )
+        log.info("stream session closed", session_id=session.session_id,
+                 ticks=len(samples), ticks_skipped=session.ticks_skipped,
+                 tick_multiplier=session.tick_multiplier,
+                 occupancy_p95=occupancy_p95)

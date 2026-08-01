@@ -34,6 +34,12 @@ class PolicyConfig:
     word_prob_floor: float = 0.5
     edge_guard_s: float = 0.6
     max_holdback_ticks: int = 6
+    # Boundary suppression tolerance: one Whisper frame (20 ms). Re-decodes
+    # from a different window position re-time words by up to one frame; a
+    # committed word whose end drifts later than the frontier by less than
+    # this must still be suppressed or it commits twice (append-only, so the
+    # duplicate is permanent and invisible to the retraction reducer).
+    frame_tolerance_s: float = 0.02
 
     def validate(self) -> None:
         """Window invariant (C7.1): pad_or_trim silently truncates past 30 s."""
@@ -139,8 +145,8 @@ def localize(
         if not text:
             continue
         abs_start, abs_end = offset_s + start, offset_s + end
-        if abs_end <= boundary_s:
-            continue  # entirely (or exactly) inside re-decoded committed audio
+        if abs_end <= boundary_s + cfg.frame_tolerance_s:
+            continue  # inside re-decoded committed audio (± one decoder frame)
         out.append(Word(text=text, start=abs_start, end=abs_end, probability=prob))
     return tuple(out)
 
@@ -191,7 +197,7 @@ def agree(
     # ending at or before it is already-committed audio — comparing or
     # re-committing it would duplicate text. This also re-aligns prev when the
     # previous tick committed words out of it.
-    boundary_s = state.committed_through_sample / cfg.sample_rate
+    boundary_s = state.committed_through_sample / cfg.sample_rate + cfg.frame_tolerance_s
     curr = tuple(x for x in curr if x.end > boundary_s)
     prev = state.prev_hypothesis
     if prev is not None:

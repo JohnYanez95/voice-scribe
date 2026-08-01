@@ -17,7 +17,12 @@ never transcript text. Fixtures should be synthetic/committed audio
 Usage:
     python ops/scripts/stream_bench.py ops/scripts/test.mp3 [--baseline]
         [--url ws://localhost:8084] [--language en] [--frame-ms 96]
-        [--report bench_report.json]
+        [--utterances 3] [--report bench_report.json]
+
+--utterances N splits the audio into N contiguous segments with a flush after
+each — a single-flush replay never exercises the post-flush coordinate path
+(peer review 2026-07-31: utterance ≥ 1 partials died and the single-flush
+harness certified the build). Gate runs should use N ≥ 3.
 
 Requires: websockets, numpy, ffmpeg on PATH. No GPU needed on the client side.
 """
@@ -144,16 +149,16 @@ class ReferenceReducer:
 
 
 async def run_stream(url: str, audio: np.ndarray, language: str | None,
-                     frame_ms: int) -> dict:
+                     frame_ms: int, utterances: int = 1) -> dict:
     frame_samples = int(SR * frame_ms / 1000)
-    frames = [audio[i:i + frame_samples]
-              for i in range(0, len(audio), frame_samples)]
+    seg_bounds = np.linspace(0, len(audio), utterances + 1).astype(int)
     audio_dur = len(audio) / SR
 
     reducer = ReferenceReducer()
     stats: dict = {
         "audio_seconds": round(audio_dur, 3),
         "frame_ms": frame_ms,
+        "utterances": utterances,
         "retractions": 0,
         "committed_words_total": 0,
         "committed_words_forced": 0,
@@ -181,47 +186,61 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
         t_first_frame: float | None = None
         t_flush_sent: float | None = None
         first_partial_lat: float | None = None
-        finalization_from_flush: float | None = None
+        utt_first_frame: dict[int, float] = {}
+        flush_times: list[float] = []
+        finalization_lats: list[float] = []
+        nonempty_partial_utts: set[int] = set()
         done = asyncio.Event()
 
         async def sender():
             nonlocal t_first_frame, t_flush_sent
             sent_samples = 0
-            for f in frames:
-                if t_first_frame is None:
-                    t_first_frame = time.monotonic()
-                await ws.send(f.astype(np.float32).tobytes())
-                sent_samples += len(f)
-                # real-time pace against an absolute clock — per-frame sleep
-                # overhead otherwise drifts ~1 s over a 30 s replay and
-                # corrupts the speech-end anchor
-                target = t_first_frame + sent_samples / SR
-                delay = target - time.monotonic()
-                if delay > 0:
-                    await asyncio.sleep(delay)
-            t_flush_sent = time.monotonic()
-            await ws.send(json.dumps({"type": "flush"}))
+            for u in range(utterances):
+                seg = audio[seg_bounds[u]:seg_bounds[u + 1]]
+                first_of_utt = True
+                for i in range(0, len(seg), frame_samples):
+                    f = seg[i:i + frame_samples]
+                    if t_first_frame is None:
+                        t_first_frame = time.monotonic()
+                    if first_of_utt:
+                        utt_first_frame[u] = time.monotonic()
+                        first_of_utt = False
+                    await ws.send(f.astype(np.float32).tobytes())
+                    sent_samples += len(f)
+                    # real-time pace against an absolute clock — per-frame sleep
+                    # overhead otherwise drifts ~1 s over a 30 s replay and
+                    # corrupts the speech-end anchor
+                    target = t_first_frame + sent_samples / SR
+                    delay = target - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                t_flush_sent = time.monotonic()
+                flush_times.append(t_flush_sent)
+                await ws.send(json.dumps({"type": "flush"}))
 
         async def receiver():
-            nonlocal first_partial_lat, finalization_from_flush
+            nonlocal first_partial_lat
             while not done.is_set():
                 msg = json.loads(await ws.recv())
                 now = time.monotonic()
                 mtype = msg.get("type")
                 if mtype == "partial":
                     stats["partials"] += 1
-                    if msg["text"] and first_partial_lat is None and t_first_frame:
-                        first_partial_lat = now - t_first_frame
+                    if msg["text"]:
+                        nonempty_partial_utts.add(msg["utterance_id"])
+                        if first_partial_lat is None and t_first_frame:
+                            first_partial_lat = now - t_first_frame
                 elif mtype == "committed":
                     reducer.on_committed(msg["utterance_id"], msg["text"])
                     n = len(msg["text"].split())
                     stats["committed_words_total"] += n
                     if msg.get("forced"):
                         stats["committed_words_forced"] += n
-                    if t_first_frame:
-                        # commit lag: word audibly ended at t_first_frame + t1
+                    anchor = utt_first_frame.get(msg["utterance_id"], t_first_frame)
+                    if anchor:
+                        # commit lag: word audibly ended at anchor + t1
                         stats["commit_lag_s"].append(
-                            round(now - (t_first_frame + msg["t1"]), 3))
+                            round(now - (anchor + msg["t1"]), 3))
                 elif mtype == "final":
                     prior = reducer.committed.get(msg["utterance_id"], "")
                     if prior and not msg["raw"].startswith(prior):
@@ -229,9 +248,11 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
                     reducer.on_final(msg["utterance_id"], msg["raw"])
                     final_raws.append(msg["raw"])
                     stats["dropped_audio_ms"] += msg["dropped_audio_ms"]
-                    if t_flush_sent:
-                        finalization_from_flush = now - t_flush_sent
-                    done.set()
+                    if len(final_raws) <= len(flush_times):
+                        finalization_lats.append(
+                            round(now - flush_times[len(final_raws) - 1], 3))
+                    if len(final_raws) >= utterances:
+                        done.set()
                 elif mtype == "error":
                     stats["errors"].append(msg["code"])
                     if msg.get("fatal"):
@@ -254,11 +275,12 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
     speech_end_wall = (t_first_frame or 0) + audio_dur
     stats["retractions"] = reducer.retractions
     stats["first_partial_s"] = round(first_partial_lat, 3) if first_partial_lat else None
-    stats["finalization_from_flush_s"] = (
-        round(finalization_from_flush, 3) if finalization_from_flush else None)
-    if finalization_from_flush is not None and t_flush_sent is not None:
+    stats["finalization_per_utterance_s"] = finalization_lats
+    stats["finalization_from_flush_s"] = max(finalization_lats) if finalization_lats else None
+    stats["utterances_with_nonempty_partials"] = len(nonempty_partial_utts)
+    if finalization_lats and t_flush_sent is not None:
         stats["finalization_from_speech_end_s"] = round(
-            (t_flush_sent + finalization_from_flush) - speech_end_wall, 3)
+            (t_flush_sent + finalization_lats[-1]) - speech_end_wall, 3)
     if stats["commit_lag_s"]:
         lags = stats["commit_lag_s"]
         stats["commit_lag_p50_s"] = round(statistics.median(lags), 3)
@@ -305,6 +327,9 @@ def main() -> None:
     ap.add_argument("--http-url", default="http://localhost:8084")
     ap.add_argument("--language", default=None)
     ap.add_argument("--frame-ms", type=int, default=96)
+    ap.add_argument("--utterances", type=int, default=1,
+                    help="Split the audio into N segments with a flush after each "
+                         "(gate runs: >= 3 — exercises the post-flush coordinate path)")
     ap.add_argument("--baseline", action="store_true",
                     help="Also run the v3 one-shot path for the cost comparison")
     ap.add_argument("--report", default=None, help="Write JSON report (counters only)")
@@ -314,7 +339,8 @@ def main() -> None:
 
     sampler = GpuSampler()
     sampler.start()
-    stream_stats = asyncio.run(run_stream(args.url, audio, args.language, args.frame_ms))
+    stream_stats = asyncio.run(run_stream(args.url, audio, args.language, args.frame_ms,
+                                          args.utterances))
     gpu_stream = sampler.stop()
 
     report = {"stream": stream_stats, "gpu_during_stream": gpu_stream}
@@ -341,6 +367,9 @@ def main() -> None:
         "dropped_audio_ms == 0": stream_stats["dropped_audio_ms"] == 0,
         "force_commit_rate < 5%": stream_stats["force_commit_rate"] < 0.05,
     }
+    if args.utterances > 1:
+        gate["partials_in_every_utterance"] = (
+            stream_stats["utterances_with_nonempty_partials"] == args.utterances)
     if "committed_vs_oneshot_wer" in report:
         gate["committed_vs_oneshot WER < 3%"] = report["committed_vs_oneshot_wer"] < 0.03
     print("\nGate:", file=sys.stderr)

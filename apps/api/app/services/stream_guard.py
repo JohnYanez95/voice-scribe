@@ -56,10 +56,14 @@ def release_stream(session: StreamSessionHandle) -> None:
 
 
 def try_begin_swap() -> bool:
-    """Reject the swap if a stream is active (C8.1 — HTTP 409 at the route)."""
+    """Reject the swap if a stream is active OR another swap is already in
+    progress (C8.1 — HTTP 409 at the route). Without the second check, two
+    concurrent swaps both pass, and the first to finish clears the flag while
+    the second is still loading — a stream start in that window would block
+    on the model lock mid-load."""
     global _swap_in_progress
     with _lock:
-        if _active_session is not None:
+        if _active_session is not None or _swap_in_progress:
             return False
         _swap_in_progress = True
         return True
