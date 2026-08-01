@@ -1,14 +1,23 @@
 flowchart TD
     subgraph ui ["UI Context (browser or Tauri webview)"]
         mic["Microphone audio"]
-        vad["VAD<br/>silence discarded"]
-        blob["Audio blob"]
-        mic --> vad --> blob
+        vad["VAD gate<br/>sustained silence discarded<br/>(pre-roll pad + sub-redemption<br/>holds ARE sent — protocol C2.6)"]
+        preroll["Pre-roll ring<br/>~0.9 s of recent frames<br/>trimmed continuously"]
+        blob["Audio blob<br/>(one-shot paths)"]
+        fifo["Unfinalized-utterance PCM FIFO<br/>≤ 8 entries (C10.3)"]
+        cdel["Dropped on final /<br/>session end"]
+        mic --> vad
+        vad --> preroll
+        vad --> blob
+        vad --> fifo
+        fifo --> cdel
+        fifo -- "degrade replay only" --> blob
     end
 
     blob --> http["HTTP POST"]
     blob --> wsIn["WebSocket binary"]
-    vad --> frames["PCM frames<br/>(v4 streaming)"]
+    vad --> frames["PCM frames<br/>(v4 streaming, speech only)"]
+    preroll -- "replayed at speech onset" --> frames
     frames --> wsStream["WebSocket /ws/stream"]
 
     subgraph backend ["Backend (Docker container or bare-host sidecar)"]
@@ -33,11 +42,14 @@ flowchart TD
 
     txt --> resp["JSON response"]
     txt --> wsOut["WS segments"]
-    stxt --> wsMsgs["WS partial / committed / final"]
+    stxt --> wsLive["WS partial / committed"]
+    stxt --> wsFinal["WS final"]
 
-    resp --> area["Editable textarea"]
+    resp --> area["Editable textarea<br/>(finalized text only)"]
     wsOut --> area
-    wsMsgs --> area
+    wsFinal --> area
+    wsLive --> live["Read-only live region<br/>never copied, persisted,<br/>or fed to a transform (C4.2)"]
+    live --> ldel["Cleared at final /<br/>degrade / error"]
 
     area -- "browser" --> browserClip["navigator.clipboard<br/>.writeText()"]
     area -- "desktop" --> httpPost["HTTP POST :8001/clipboard"]
@@ -48,7 +60,7 @@ flowchart TD
     classDef output fill:#ddf5dd,stroke:#448844
     classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
 
-    class mic,blob,frames sensitive
+    class mic,blob,frames,preroll,fifo sensitive
     class vad,http,wsIn,wsStream,tmp1,tmp2,ring,httpPost ephemeral
-    class txt,stxt,resp,wsOut,wsMsgs,area,browserClip,rustClip output
-    class del,rdel deleted
+    class txt,stxt,resp,wsOut,wsLive,wsFinal,area,live,browserClip,rustClip output
+    class del,rdel,cdel,ldel deleted

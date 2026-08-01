@@ -2,6 +2,7 @@ export type RecordingState =
   | "idle"
   | "recording"
   | "listening"
+  | "streaming"
   | "processing"
   | "done"
   | "error";
@@ -55,3 +56,95 @@ export interface WsErrorMessage {
 }
 
 export type WsMessage = WsSegmentMessage | WsCompleteMessage | WsErrorMessage;
+
+// --- /ws/stream protocol v1 (docs/v4/protocol.md) — mirrors app/schemas.py ---
+
+export type StreamErrorCode =
+  | "busy"
+  | "preempted"
+  | "protocol_violation"
+  | "frame_too_large"
+  | "unsupported_format"
+  | "unsupported_version"
+  | "model_swapping"
+  | "decode_failure"
+  | "overrun"
+  | "session_timeout";
+
+export interface WsStreamReadyMessage {
+  type: "ready";
+  seq: number;
+  protocol_version: number;
+  session_id: string;
+  sample_rate: number;
+  sample_format: string;
+  max_frame_bytes: number;
+  model_name: string;
+  language: string | null;
+  decode_tick_ms: number;
+  max_uncommitted_s: number;
+  max_holdback_ticks: number;
+  /** C3.8 capability signal — absent on a v4.0 server; ping only when present. */
+  idle_timeout_s?: number;
+}
+
+/** C4.2: text REPLACES the entire tentative tail. Never persist, copy,
+ * transform, or act on partial text. */
+export interface WsStreamPartialMessage {
+  type: "partial";
+  seq: number;
+  utterance_id: number;
+  text: string;
+}
+
+/** C4.3: append-only delta; t0/t1 are received-audio seconds within the
+ * utterance. forced marks a holdback force-commit. */
+export interface WsStreamCommittedMessage {
+  type: "committed";
+  seq: number;
+  utterance_id: number;
+  text: string;
+  t0: number;
+  t1: number;
+  forced: boolean;
+}
+
+/** C4.4: raw carries the utterance's committed text as a literal prefix.
+ * Release signal for the retained utterance PCM (C10.3). */
+export interface WsStreamFinalMessage {
+  type: "final";
+  seq: number;
+  utterance_id: number;
+  raw: string;
+  cleaned: string;
+  language: string;
+  duration: number;
+  model_name: string;
+  processing_mode: string;
+  dropped_audio_ms: number;
+  forced: boolean;
+}
+
+export interface WsStreamErrorMessage {
+  type: "error";
+  seq: number;
+  code: StreamErrorCode;
+  detail: string;
+  fatal: boolean;
+}
+
+/** C4.6: utterance_id is the id in force AFTER the control was applied. */
+export interface WsStreamAckMessage {
+  type: "ack";
+  seq: number;
+  of: "stop" | "reset";
+  utterance_id: number;
+}
+
+export type WsStreamServerMessage =
+  | WsStreamReadyMessage
+  | WsStreamPartialMessage
+  | WsStreamCommittedMessage
+  | WsStreamFinalMessage
+  | WsStreamErrorMessage
+  | WsStreamAckMessage;

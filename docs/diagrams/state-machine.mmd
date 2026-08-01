@@ -18,10 +18,19 @@ stateDiagram-v2
 
     recording --> processing : stop<br/>(hotkey / button)
 
-    listening : Mic open<br/>VAD active<br/>silence discarded
-    listening --> processing : speech detected<br/>(VAD fires)
+    listening : Mic open · VAD active<br/>streaming session live (v4.1)<br/>ping keepalive while silent<br/>session rotated at 1500 s
+    listening --> streaming : speech start<br/>(session open, not degraded)
+    listening --> processing : speech end<br/>(degraded — one-shot per utterance)
     listening --> done : stop continuous
     listening --> error : VAD failure
+
+    streaming : Speech over live session<br/>committed text + gray tentative tail<br/>(partials never persisted)
+    streaming --> streaming : forced final (120 s)<br/>text appends, FIFO untouched
+    streaming --> listening : final received<br/>(utterance complete)
+    streaming --> listening : VAD misfire → reset<br/>(live text cleared)
+    streaming --> listening : fatal stream error<br/>→ silent degrade, FIFO replayed
+    streaming --> done : final + stop requested
+    streaming --> error : decode_failure<br/>(surface — never falls back)
 
     state processing {
         direction TB
@@ -45,6 +54,7 @@ stateDiagram-v2
     class idle idleClass
     class recording activeClass
     class listening activeClass
+    class streaming activeClass
     class processing inflightClass
     class done successClass
     class error failureClass
