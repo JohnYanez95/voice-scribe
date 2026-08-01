@@ -328,3 +328,73 @@ describe("Transcript — auto-scroll", () => {
     expect(textarea.scrollTop).toBe(200);
   });
 });
+
+describe("Transcript streaming live region (v4.1)", () => {
+  const defaultProps = {
+    text: "",
+    rawText: "",
+    isLoading: false,
+    onTextChange: () => {},
+    showComparison: false,
+    isRecordingActive: false,
+  };
+
+  it("renders the live region when live text exists but text is empty", () => {
+    render(
+      <Transcript {...defaultProps} liveCommitted="four score" liveTail="and seven" />
+    );
+    const live = screen.getByTestId("transcript-live");
+    expect(live.textContent).toBe("four score and seven");
+    expect(live.querySelector(".tentative")?.textContent).toContain("and seven");
+  });
+
+  it("tail is replaced wholesale — a retraction removes the old suffix", () => {
+    const { rerender } = render(
+      <Transcript {...defaultProps} liveCommitted="four score" liveTail="and seven years" />
+    );
+    rerender(
+      <Transcript {...defaultProps} liveCommitted="four score" liveTail="and seven" />
+    );
+    const live = screen.getByTestId("transcript-live");
+    expect(live.textContent).toBe("four score and seven");
+    expect(live.textContent).not.toContain("years");
+  });
+
+  it("live region absent when both live fields are empty", () => {
+    render(<Transcript {...defaultProps} text="finalized" />);
+    expect(screen.queryByTestId("transcript-live")).toBeNull();
+  });
+
+  it("renders nothing when text and live text are all empty", () => {
+    const { container } = render(<Transcript {...defaultProps} />);
+    expect(container.querySelector(".transcript")).toBeNull();
+  });
+
+  it("streaming mode shows the live region instead of the loading spinner", () => {
+    render(<Transcript {...defaultProps} isLoading={true} liveTail="hello" />);
+    expect(screen.queryByText("Transcribing...")).toBeNull();
+    expect(screen.getByTestId("transcript-live")).toBeTruthy();
+  });
+
+  it("Copy payload excludes live text (C4.2 — partials never copyable)", async () => {
+    render(
+      <Transcript {...defaultProps} text="finalized" liveCommitted="not yet" liveTail="tail" />
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByText("Copy to Clipboard"));
+    });
+    await waitFor(() => {
+      expect(mockWriteClipboard).toHaveBeenCalledWith("finalized");
+    });
+  });
+
+  it("aria-live sits on the committed span, not the tentative tail", () => {
+    render(
+      <Transcript {...defaultProps} liveCommitted="committed" liveTail="tentative" />
+    );
+    const live = screen.getByTestId("transcript-live");
+    const polite = live.querySelector('[aria-live="polite"]');
+    expect(polite?.textContent).toBe("committed");
+    expect(live.querySelector(".tentative")?.getAttribute("aria-live")).toBeNull();
+  });
+});

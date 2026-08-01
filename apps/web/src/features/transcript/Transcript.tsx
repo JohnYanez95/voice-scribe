@@ -9,6 +9,14 @@ interface TranscriptProps {
   onTextChange: (text: string) => void;
   showComparison: boolean;
   isRecordingActive: boolean;
+  /** Streaming (v4.1): committed raw text of the in-progress utterance.
+   * Rendered in a read-only live region — never enters the textarea, so it
+   * can never be edited, copied, or persisted (protocol C4.2 by construction).
+   * Replaced by final.cleaned at utterance completion (C5.4: differs by
+   * capitalization/whitespace only). */
+  liveCommitted?: string;
+  /** Streaming (v4.1): tentative tail — replaced wholesale per partial. */
+  liveTail?: string;
 }
 
 /** Pixel tolerance for float-rounding in scrollTop comparisons. */
@@ -21,18 +29,20 @@ export function Transcript({
   onTextChange,
   showComparison,
   isRecordingActive,
+  liveCommitted = "",
+  liveTail = "",
 }: TranscriptProps) {
   const [copied, setCopied] = useState<"" | "main" | "raw" | "cleaned">("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isPinnedRef = useRef(true);
 
-  // Auto-scroll to bottom when text changes, if pinned.
+  // Auto-scroll to bottom when text or live text changes, if pinned.
   useEffect(() => {
     const el = textareaRef.current;
     if (el && isPinnedRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [text]);
+  }, [text, liveCommitted, liveTail]);
 
   // Re-engage pin when a new recording session starts.
   useEffect(() => {
@@ -76,7 +86,10 @@ export function Transcript({
     }
   }, []);
 
-  if (isLoading && !text) {
+  const hasLive = Boolean(liveCommitted || liveTail);
+
+  // Streaming mode never shows the spinner — the live region replaces it.
+  if (isLoading && !text && !hasLive) {
     return (
       <div className="transcript">
         <div className="loading">Transcribing...</div>
@@ -84,7 +97,7 @@ export function Transcript({
     );
   }
 
-  if (!text) {
+  if (!text && !hasLive) {
     return null;
   }
 
@@ -127,6 +140,19 @@ export function Transcript({
         onScroll={handleScroll}
         placeholder="Transcript will appear here..."
       />
+      {hasLive && (
+        <div className="transcript-live" data-testid="transcript-live">
+          {/* aria-live on the committed span only: the tentative tail is
+              wholesale-replaced per partial and would spam screen readers. */}
+          <span aria-live="polite">{liveCommitted}</span>
+          {liveTail && (
+            <span className="tentative">
+              {liveCommitted ? " " : ""}
+              {liveTail}
+            </span>
+          )}
+        </div>
+      )}
       <button className="copy-btn" onClick={() => handleCopy(text, "main")}>
         {copied === "main" ? "Copied!" : "Copy to Clipboard"}
       </button>

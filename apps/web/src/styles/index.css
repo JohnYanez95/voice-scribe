@@ -278,6 +278,29 @@ body {
   border-color: var(--accent-dim);
 }
 
+/* Streaming live region (v4.1): reads as a continuation of the textarea.
+   Read-only by construction — partial text never enters an editable or
+   copyable surface (protocol C4.2). */
+.transcript-live {
+  flex-shrink: 0;
+  padding: 0.6rem 1.25rem;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  font-family: var(--font-body);
+  font-size: 1.1rem;
+  line-height: 1.65;
+  max-height: 20vh;
+  overflow-y: auto;
+}
+
+.transcript-live .tentative {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* --- Comparison panes ---------------------------------------------- */
 
 .comparison {
