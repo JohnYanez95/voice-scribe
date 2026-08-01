@@ -6,7 +6,17 @@ import { useVAD } from "../src/hooks/useVAD";
 let capturedOptions: {
   onSpeechStart?: () => void;
   onSpeechEnd?: (audio: Float32Array) => void;
+  onFrameProcessed?: (probs: { isSpeech: number }, frame: Float32Array) => void;
+  onVADMisfire?: () => void;
 } = {};
+
+// Drive helpers — mirror frame-processor.js dispatch order: FrameProcessed
+// fires BEFORE SpeechStart for the triggering frame.
+const frame = (id: number) => new Float32Array([id]);
+const feedSilence = (f: Float32Array) =>
+  capturedOptions.onFrameProcessed?.({ isSpeech: 0.05 }, f);
+const feedSpeech = (f: Float32Array) =>
+  capturedOptions.onFrameProcessed?.({ isSpeech: 0.9 }, f);
 
 const mockVad = {
   start: vi.fn().mockResolvedValue(undefined),
@@ -128,6 +138,108 @@ describe("useVAD", () => {
     });
 
     expect(mockVad.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("onSpeechFrame replays the pre-roll ring exactly once at speech start", async () => {
+    const onSpeechEnd = vi.fn();
+    const frames: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd, onSpeechFrame: (f) => frames.push(f) })
+    );
+    await act(async () => {
+      await result.current.startListening();
+    });
+
+    // 12 silence frames — ring keeps the most recent 9.
+    const silence = Array.from({ length: 12 }, (_, i) => frame(i));
+    act(() => {
+      silence.forEach(feedSilence);
+    });
+    expect(frames).toHaveLength(0); // nothing streamed while silent
+
+    // Triggering frame: FrameProcessed (silent state → into ring), then
+    // SpeechStart replays the ring including it.
+    const trigger = frame(100);
+    act(() => {
+      feedSpeech(trigger); // hook still in silent state: goes into ring
+      capturedOptions.onSpeechStart?.();
+    });
+    // Ring held 9 most recent: frames 4..11 + trigger — replayed once, in order.
+    expect(frames.map((f) => f[0])).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 100]);
+
+    // Live speech frames flow directly — no duplicates of the ring.
+    act(() => {
+      feedSpeech(frame(101));
+    });
+    expect(frames.map((f) => f[0])).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 100, 101]);
+  });
+
+  it("holds sub-threshold frames during speech, releases in order on resume", async () => {
+    const onSpeechEnd = vi.fn();
+    const frames: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd, onSpeechFrame: (f) => frames.push(f) })
+    );
+    await act(async () => {
+      await result.current.startListening();
+    });
+    act(() => {
+      feedSpeech(frame(1));
+      capturedOptions.onSpeechStart?.();
+      feedSpeech(frame(2));
+      feedSilence(frame(3)); // redemption-window silence: held
+      feedSilence(frame(4)); // held
+      feedSpeech(frame(5)); // resume: held released in order, then live
+    });
+    expect(frames.map((f) => f[0])).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("releases at most a 2-frame tail on speech end, drops the rest", async () => {
+    const onSpeechEnd = vi.fn();
+    const frames: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd, onSpeechFrame: (f) => frames.push(f) })
+    );
+    await act(async () => {
+      await result.current.startListening();
+    });
+    act(() => {
+      feedSpeech(frame(1));
+      capturedOptions.onSpeechStart?.();
+      // Redemption tail: 5 held silence frames, then speech end.
+      [2, 3, 4, 5, 6].forEach((i) => feedSilence(frame(i)));
+      capturedOptions.onSpeechEnd?.(new Float32Array([9]));
+    });
+    // Frame 1 (ring replay) + first 2 held frames only.
+    expect(frames.map((f) => f[0])).toEqual([1, 2, 3]);
+    expect(onSpeechEnd).toHaveBeenCalledOnce();
+  });
+
+  it("misfire drops all held frames and fires onVADMisfire", async () => {
+    const onSpeechEnd = vi.fn();
+    const onVADMisfire = vi.fn();
+    const frames: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd, onVADMisfire, onSpeechFrame: (f) => frames.push(f) })
+    );
+    await act(async () => {
+      await result.current.startListening();
+    });
+    act(() => {
+      feedSpeech(frame(1));
+      capturedOptions.onSpeechStart?.();
+      feedSilence(frame(2)); // held
+      capturedOptions.onVADMisfire?.();
+    });
+    expect(frames.map((f) => f[0])).toEqual([1]); // held frame never streamed
+    expect(onVADMisfire).toHaveBeenCalledOnce();
+    expect(onSpeechEnd).not.toHaveBeenCalled();
+
+    // Post-misfire the tap is back to silent-state ring buffering.
+    act(() => {
+      feedSilence(frame(3));
+    });
+    expect(frames).toHaveLength(1);
   });
 
   it("init failure sets error, does not throw", async () => {
