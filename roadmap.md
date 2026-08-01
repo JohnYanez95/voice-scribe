@@ -1038,7 +1038,8 @@ writes temp file → ffmpeg transcode → full-clip inference → segments strea
 starts *after* the user stops speaking. The GPU is idle for the entire duration of speech — the
 one window in which inference could have been free.
 
-**Approach — proposed locked decisions (subject to design review, see checkpoint below):**
+**Approach — locked decisions (design review checkpoint completed 2026-07-31; full protocol
+specification in `docs/v4/protocol.md`, which is the v4.0 acceptance surface):**
 
 - **Model unchanged.** faster-whisper `large-v3` stays. Whisper is an offline 30 s-window model;
   streaming is realized as a *serving policy layer* on top (paced re-decode + prefix commit),
@@ -1054,41 +1055,97 @@ one window in which inference could have been free.
 - **New endpoint `/ws/stream`** — persistent, session-long WebSocket. Supplements, does not
   replace: `/ws/transcribe` (one-shot) and `POST /transcribe` remain the push-to-talk path and
   the fallback, same supplement-not-replace pattern as v2.1.
-- **PCM-only ingestion on the streaming path.** Client sends 16 kHz mono PCM frames (binary WS
-  messages); JSON text messages carry control (`start`, `stop`, `reset`). No ffmpeg, **no temp
-  files** — the ring buffer lives in memory only. The streaming path strengthens zero-persistence
-  rather than straining it. The AudioWorklet capture and 16 kHz resample already exist in the
-  continuous-mode path; client-side VAD still gates silence at the source (v2.2 invariant holds).
-- **Server → client message types:** `partial` (tentative tail, may be retracted), `committed`
-  (stable prefix, never retracted), `final` (utterance flush: raw + cleaned + metadata, same
-  fields as today's `complete`), `error`.
-- **One active stream session per server.** Single-user tool; a second concurrent `/ws/stream`
-  connection is rejected with an error message, not queued. No queues, no workers — the session
-  loop lives inside the connection handler.
-- **Model swap during an active stream is rejected** (clear error from `/models/swap`). Keeps the
-  v2.0 swap concurrency contract simple; swapping mid-stream has no use case.
+- **PCM-only ingestion on the streaming path.** Client sends 16 kHz mono `pcm_f32le` frames
+  (binary WS messages; format pinned in the `start` handshake, NaN-sanitized on ingest); JSON
+  text messages carry control. **Review correction:** `stop` conflated utterance boundary with
+  session teardown — the control set is now `start` / `flush` (utterance boundary, many per
+  session) / `stop` (session end) / `reset` (destructive drop, acked). No ffmpeg, **no temp
+  files** — the buffer lives in memory only (bounded: ≤ ~1.7 MB of audio per session at any
+  instant — see protocol §6). Client-side VAD still gates silence at the source (v2.2
+  invariant holds). **Review correction:** the client-side per-frame tap does *not* already
+  exist — `useVAD.ts` exposes only `onSpeechEnd`; v4.1 wires `onFrameProcessed` (new capture
+  plumbing) and must replay the `preSpeechPadMs` pre-roll as the first frames of each
+  utterance, or the first word of every utterance reaches the model truncated — see v4.1 scope.
+- **Server → client message types:** `ready` (handshake echo: session config + tunables in
+  force), `partial` (full replacement of the tentative tail, retractable), `committed`
+  (append-only delta, never retracted), `final` (utterance flush: committed text as literal
+  prefix + cleaned + metadata), `error` (machine-readable `code` + `fatal` flag), `ack`. All
+  server messages carry `seq` + `utterance_id`. Protocol version 1, negotiated at `start`.
+- **One active stream session per server.** Single-user tool; no queues, no workers — the
+  session loop lives inside the connection handler. A second connection is accepted, told
+  `busy`, and closed 4409 (post-accept so the client can read the code). A dead incumbent
+  can't brick the slot: idle timeout (10 s) tears it down, and a newcomer preempts an
+  incumbent that has been frame-silent ≥ 2 s.
+- **Model swap during an active stream is rejected** with HTTP 409 from `/models/swap`, and
+  stream start during a swap is rejected with `model_swapping`. Both checks live under a
+  **single** module-level guard lock (two flags, one lock — the two-lock version is a TOCTOU
+  race). The session pins its model reference at `start`; language is pinned at session start
+  and passed explicitly to every decode (per-tick auto-detect flips mid-utterance).
 
-**Serving policy — the five tunables:**
+**Serving policy — the tunables (revised at design review; the set changed, see notes below):**
 
 | Parameter | Meaning | Initial value |
 |---|---|---|
 | `DECODE_TICK_MS` | Interval between re-decode passes over the uncommitted buffer. Main latency/compute dial — commit lag ≈ 2 ticks. | 750 ms |
-| `COMMIT_LOGPROB_FLOOR` | Veto: refuse to commit a prefix whose segment `avg_logprob` is below this, even when two passes agree (two passes can hallucinate identically on a mid-word buffer edge). | −1.0 |
-| `NO_SPEECH_MAX` | Drop segments with `no_speech_prob` above this before they enter the agreement comparison. | 0.6 |
-| `MAX_HOLDBACK_TICKS` | Force-commit ceiling: if a region stays tentative this many ticks (model flip-flopping on disfluency), commit the newest hypothesis rather than hold text hostage. Bounds worst-case latency. | 6 |
-| `MAX_BUFFER_S` | Uncommitted-buffer cap. Committed audio is trimmed each commit; if the buffer would exceed Whisper's 30 s window before a silence boundary, slide it and carry a few seconds of committed audio as left-context (prompt conditioning) so decoding never cold-starts mid-sentence. | 28 s |
+| `WORD_PROB_FLOOR` | Veto (withhold-only): refuse to commit a word whose `word.probability` is below this, even when two passes agree. Requires `word_timestamps=True` (~+15% per decode, measured). | 0.5 |
+| `EDGE_GUARD_S` | Veto (withhold-only): never commit a word whose end timestamp lies within this distance of the buffer end. The structural defense against truncation hallucinations — which agree across ticks with *good* logprobs, because the conditioning that produces them is identical. | 0.6 s |
+| `MAX_HOLDBACK_TICKS` | Force-commit ceiling, **frontier-anchored**: the counter keys on the commit-frontier position and resets only when the frontier advances (a global or changed-hypothesis counter either never fires or starves on A-B-A-B alternation). Bounds worst-case latency. | 6 |
+| `MAX_UNCOMMITTED_S` | Uncommitted-buffer cap (renamed from `MAX_BUFFER_S = 28`, which was a review-caught arithmetic bug: 28 s + left context exceeds Whisper's 30 s window, and `pad_or_trim` **silently truncates** — the tail words would simply vanish). Window invariant, enforced by the planner: `LEFT_CONTEXT_S (3.0) + MAX_UNCOMMITTED_S (24.0) + SAFETY_S (3.0) ≤ 30.0`. | 24 s |
 
-Plus one non-tunable rule: **VAD flush** — when the client signals speech end, decode the whole
-remaining buffer once and finalize everything. Silence is ground truth; no agreement needed.
-This is what bounds finalization latency in practice.
+Review notes on the set: the originally proposed `COMMIT_LOGPROB_FLOOR = −1.0` and
+`NO_SPEECH_MAX = 0.6` were **removed** — those values duplicate faster-whisper's internal
+defaults (`log_prob_threshold`, `no_speech_threshold`), which already skip and
+temperature-fallback on them inside the library, so the veto would have been near-dead code
+reporting "0 fires" while providing no protection; and a segment-mean `avg_logprob` cannot
+protect a word-level commit decision anyway (two hallucinated edge words hide inside a healthy
+20-word average). Word-level probability + the edge guard replace them. Agreement is compared
+on a normalized key (NFKC → casefold → strip edge punctuation), commits the raw surface form
+from the *newer* hypothesis, and a word must be non-terminal in both hypotheses to be eligible
+(terminal words carry unstable punctuation/casing — without this guard, holdback force-commit
+becomes the steady-state commit path on ordinary speech). Decode settings on this path:
+`word_timestamps=True`, `vad_filter=False` (server-side re-segmentation destabilizes agreement;
+the client gates at the source), `condition_on_previous_text=False`. All hypothesis comparison
+happens in absolute sample coordinates; left-context audio is suppressed from hypotheses by
+timestamp, never by string matching. Non-space-delimited languages (ja, zh): flush-only in v4 —
+whitespace tokenization would treat the utterance as one word; revisit with the tutor project.
+
+Plus two non-tunable rules: **VAD flush** — when the client signals speech end (`flush`),
+cancel any in-flight tick, decode the remaining uncommitted buffer once, finalize. Silence is
+ground truth; no agreement needed. This is what bounds finalization latency in practice. And
+**backpressure** (promoted from the deck's vocabulary slide to a locked decision): one decode
+in flight per session, ticks never queue; next tick at `max(now, tick_start + DECODE_TICK_MS)`
+with overruns counted in `ticks_skipped`; three consecutive overruns double the effective tick
+interval (cap 4×). Idle ticks are skipped below `MIN_DECODE_S = 1.0` s of uncommitted audio
+(near-silence decodes are Whisper's most reliable hallucination trigger); the first tick of an
+utterance fires as soon as 1.0 s is buffered, which is what keeps first-partial ≤ 1.5 s.
 
 **Latency targets (the gate is a measurement, not an opinion):**
 
 - First partial visible ≤ 1.5 s from speech onset
-- Final transcript ≤ 500 ms from speech end (current: ~1.2–1.5 s)
-- Committed text retraction rate: **zero by construction** — verified, not assumed
+- Final transcript ≤ 500 ms from speech end. **Measurement origin, pinned at review:** the
+  v4.0 number is measured from server receipt of `flush` (what `stream_bench` controls);
+  `stream_bench` also reports it from true speech end in the source WAV. The client-side VAD
+  detection lag (`redemptionMs = 1400` in vad-web's defaults — the current "~1.2–1.5 s"
+  baseline is anchored to that *late* event) is a separate, additive v4.1 number. Without
+  pinning this, bench says 400 ms, live feels like ~1.9 s, and the gap gets blamed on
+  "browser overhead". Reducing `redemptionMs` (1400 → 600–800) is a v4.2 tuning lever:
+  with streaming, the tail is already decoded before the redemption window expires.
+- Committed text retraction rate: **zero by construction** — verified by replaying the message
+  log through a reference reducer (a retraction = any message whose effect is that the client
+  displays different committed text for a given `(utterance_id, offset)` than before)
+- **Force-commit rate < 5% of committed words, and committed-vs-one-shot WER < 3%** (added at
+  review: force-commit preserves zero-retraction while committing unagreed text — without
+  these two numbers the retraction gate passes at 100% force-commit, i.e. on a broken policy)
+- Per-tick health: `tick_occupancy = decode_ms / DECODE_TICK_MS`, p95 ≤ 0.7, and
+  `ticks_skipped == 0` on the gate run (review correction: the original "RTF < 1 per tick"
+  ratio — decode time ÷ *audio duration* — scores 0.05 during exactly the runaway it exists
+  to catch; measured per-tick cost is ~230–260 ms on the target GPU regardless of buffer
+  length, since the encoder always pads to 30 s, so occupancy against the tick budget is the
+  ratio that detects trouble)
+- `dropped_audio_ms == 0` on the gate run (overrun drops are signaled, never silent)
 - GPU re-decode overhead: measured and reported (expected 3–5× the audio's real-time compute;
-  acceptable on the target hardware, but it must be a known number, not a shrug)
+  at 750 ms ticks the projection is ~4–5× — already the top of the envelope, which is one of
+  the two reasons the tick stays at 750 ms; see resolved question 1)
 
 **Hardware cost justification (v3 → v4).** The streaming path deliberately spends compute to buy
 latency. That trade must be quantified, not asserted: `stream_bench` runs the *same* audio through
@@ -1101,23 +1158,54 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
 
 **Sub-milestones:**
 
-- **v4.0 — Backend session loop + measurement harness.** `/ws/stream` endpoint, ring buffer,
-  paced decode thread, LocalAgreement commit, VAD-flush finalization. Driven by a synthetic PCM
-  test client (`ops/scripts/stream_bench.py`) that replays a WAV at real-time pace and reports
-  first-partial latency, finalization latency, commit lag distribution, and retraction count —
-  plus a baseline mode that runs the same audio through the v3 one-shot path and emits the
-  hardware cost comparison (see Hardware cost justification above). The harness ships *with* the
-  endpoint — tuning without instrumentation is guessing. No frontend changes in v4.0.
-- **v4.1 — Frontend integration.** Persistent WS session in continuous mode, frames streamed as
-  captured, partial-vs-committed rendering (tentative gray tail after committed text).
+- **v4.0 — Backend session loop + measurement harness.** `/ws/stream` per `docs/v4/protocol.md`
+  (the acceptance surface — session tests name the clauses they enforce), in-memory buffer,
+  paced decode loop (asyncio task + `to_thread`, cancel-event drain — not a bare thread),
+  LocalAgreement commit as **pure functions in absolute sample coordinates** (`plan_window`,
+  `localize`, `agree`, `trim_plan` — the seam widened at review so the trim/slide arithmetic
+  is testable without threads), VAD-flush finalization. Contract artifact obligations ship in
+  the same milestone: stream message models in `CONTRACT_MODELS` + a guard test that every
+  `Ws*` schema class is registered (the drift test alone cannot catch an unregistered model),
+  contract doc + schema regenerated, `privacy-data-flow.mmd` updated for the new backend path
+  (moved here from v4.1 at review — the diagram maps where audio can exist in the process,
+  and downstream consumers reach this endpoint without the frontend). Driven by a synthetic
+  PCM test client (`ops/scripts/stream_bench.py`) that replays a WAV at real-time pace and
+  reports first-partial latency, finalization latency (both anchors), commit lag distribution,
+  retraction count (via reference reducer), force-commit rate, committed-vs-one-shot WER,
+  tick occupancy, per-tick decode time vs token count — plus a baseline mode that runs the
+  same audio through the v3 one-shot path and emits the hardware cost comparison. The harness
+  ships *with* the endpoint — tuning without instrumentation is guessing. No frontend changes
+  in v4.0. **v4.1 de-risk spike, run during v4.0:** verify `onFrameProcessed` in the pinned
+  vad-web delivers contiguous, undecimated 16 kHz frames.
+- **v4.1 — Frontend integration.** Persistent WS session in continuous mode, frames streamed
+  via `onFrameProcessed` (**new capture plumbing** — review correction: no per-frame tap
+  exists today, `useVAD.ts` exposes only `onSpeechEnd`), client-side pre-roll ring replaying
+  `preSpeechPadMs` (~800 ms) as the first frames of each utterance (vad-web's pad exists
+  *because* Silero clips onsets; without the replay, the first word of every utterance — the
+  word LocalAgreement commits earliest and never retracts — reaches the model truncated, and
+  the quality-parity gate line fails for reasons unrelated to the commit policy),
+  partial-vs-committed rendering (tentative gray tail after committed text), degrade ladder
+  per protocol §10 with the client retaining each utterance's PCM until its `final`.
   `state-machine.mmd` updated **before** component code (new states: streaming session live,
-  partial visible). `privacy-data-flow.mmd` updated for the in-memory path (temp files gone on
-  the streaming path). Per-utterance WebSocket churn eliminated.
+  partial visible). Per-utterance WebSocket churn eliminated.
 - **v4.2 — Voice command fast path + tuning pass.** `detectVoiceCommand` runs on committed text
-  as it lands instead of waiting for utterance completion — addresses the parking-lot latency
-  concern without a client-side keyword model. Tunables adjusted against `stream_bench` numbers
-  and real dictation; severity asymmetry from v2.3.1 still governs (`clear` on committed-partial
-  text must show zero false fires before the fast path applies to it).
+  as it lands instead of waiting for utterance completion — **`copy` only** (resolved question
+  2 below: `clear` never fast-paths). Tunables adjusted against `stream_bench` numbers and
+  real dictation; `redemptionMs` reduction evaluated here, gated on false-finalization rate.
+
+**Scope guardrails (named at review so creep is visible when it knocks):**
+- `stream_bench` stays in `ops/scripts/`, manually invoked, never imported by runtime code,
+  never wired to the frontend, and measures from the *client* side of the protocol — the
+  server gains no instrumentation hooks. Opt-in instrumentation is Voice Workspace's scope.
+- v4.2 changes *when* the existing detector runs, not *what* it detects. No new commands, no
+  arguments/targets in v4. Any vocabulary change re-runs Gate 1 per the v2.3.1 process.
+- Per-segment logprobs/probabilities stay internal to the veto. Exposing confidence or
+  structured output on the wire is the Integration Contract decision, driven by a downstream
+  need — not by the data sitting one field away.
+- No per-commit command dispatch hook and no undo/restore buffer in v4.0 or v4.1. v4.1
+  exposes committed text to the app layer for rendering and stops there; v4.2 owns dispatch.
+  (An undo buffer is a new retained-content surface in the milestone whose compliance story
+  is "persistence gets stronger" — killed with resolved question 2.)
 
 **Testing (folded into each sub-milestone, not a trailing phase):**
 
@@ -1128,9 +1216,14 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
   veto blocking an agreed prefix, trim offsets after commit, left-context carryover at the 30 s
   slide. This module is where correctness lives; it must be testable without a GPU.
 - **Session tests (pytest).** `/ws/stream` exercised with the same model-mocking pattern the
-  existing 44 backend tests use: control-message sequencing (`start` → frames → `stop`),
-  second-session rejection, mid-session disconnect cleanup (no leaked thread, no leaked buffer),
-  swap-during-stream rejection, empty/oversized frame handling. No CUDA required, same as today.
+  existing 46 backend tests use, each test naming the protocol clause it enforces:
+  control-message sequencing (`start` → `ready` → frames → `flush`/`stop`), second-session
+  rejection (post-accept 4409), preemption and idle timeout, mid-session disconnect cleanup
+  (asserted deterministically: session task done, guard flag cleared in `finally`, buffer
+  weakref dead after gc, next session connects — *not* `threading.active_count()`, which is
+  flaky against a thread pool), swap-during-stream 409 both directions under the single guard
+  lock, frame validation (empty/oversized/non-multiple-of-4/NaN), out-of-order control. No
+  CUDA required, same as today.
 - **Frontend tests (vitest, v4.1).** Partial-vs-committed rendering, retraction of the tentative
   tail, fallback to the one-shot path when `/ws/stream` fails, session teardown on unmount
   (`wsCleanupSetRef` discipline extends to the persistent session).
@@ -1138,34 +1231,95 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
   result the same way smoke-test latency was recorded in v1 — a tunables change that regresses
   the numbers is visible, not vibes.
 
-**Design review checkpoint (before v4.0 code):** fresh-context adversarial review of the protocol
-and commit policy — the standing questions: swap-during-stream, disconnect mid-session cleanup,
-buffer-slide correctness at the 30 s boundary, hallucination behavior on the buffer edge, and
-whether `partial` retraction semantics are honest in the UI.
+**Design review checkpoint — completed 2026-07-31, before any v4.0 code.** Fresh-context
+adversarial reviews by all three personas (Principal: protocol contract; Senior Engineer:
+commit policy + implementation risk, with live decode-cost measurements on the target GPU;
+PM: scope, limits, compliance). Verdict: commit-policy approach and sub-milestone structure
+approved; the protocol as sketched was **not** approved — "three bullet points where it needs
+to be a specification." Outcome: `docs/v4/protocol.md` (protocol v1) pins everything the
+reviews required — `flush`/`stop` split, `ready` handshake, `pcm_f32le` + frame validity,
+error-code enum with `fatal`, `seq`/`utterance_id`, the `final`-has-committed-as-prefix
+invariant, streaming limits table, single guard lock for session/swap, preemption + idle
+timeout, and the privacy retention model. The standing questions all resolved into protocol
+clauses: swap-during-stream (§8), disconnect cleanup (§1), buffer-slide correctness (§7 —
+including the caught 28 + 3 > 30 truncation bug), buffer-edge hallucination (edge guard,
+§7.4), and `partial` retraction honesty (full-replacement semantics + the commit-or-withhold
+formulation, §5). The proposed segment-level vetoes were replaced (near-dead code at their
+stated values — they duplicated faster-whisper's internal defaults). Two review blockers were
+also structural: the branch was missing the v3.4.1 contract artifact (merged from main before
+any v4 work), and the 60 s/10 MB hard limits silently didn't apply to a session-long stream
+(replaced by the protocol §6 limits table).
 
-**Open questions for the design review (raised at planning, 2026-07-31 — unresolved by intent):**
+**Open questions — resolved at the design review (2026-07-31):**
 
-1. **Initial tick value.** 750 ms is a compromise, not a measurement. 500 ms halves commit lag
-   but pushes the compute premium toward the top of the 3–5× envelope. `stream_bench` decides;
-   the initial value just needs to be defensible.
-2. **Does the v4.2 command fast path apply to `clear` at all?** The v2.3.1 severity asymmetry
-   still governs: `clear` destroys the buffer unrecoverably. The plan gates fast-path `clear`
-   behind a zero-false-fire requirement on committed-partial text, but "never fast-path `clear`,
-   full-utterance confirmation only" is a defensible simpler answer. Decide at review, not at
-   implementation.
-3. **Review timing.** The protocol contract (message types, PCM-only ingestion, one-session rule)
-   is the expensive-to-change surface; the backend loop behind it is cheap to rebuild. If the
-   review must be cut for time, review the protocol before v4.0 and defer the commit-policy
-   review to the v4.0→v4.1 boundary — not the other way around.
+1. **Initial tick value: 750 ms, confirmed by measurement — not a compromise.** Per-tick decode
+   cost on the target GPU is ~230–260 ms *regardless of buffer length* (the encoder always
+   pads to 30 s; cost scales with token count, ~12 ms/token at beam 5). At 750 ms the healthy
+   tick occupancy is 0.35–0.60 with headroom for slow ticks; at 500 ms it is 0.52–0.90 with no
+   margin for exactly the stalled-frontier case that matters, and — because the dominant cost
+   is fixed encoder work — the compute premium scales with 1/tick: 500 ms multiplies it by
+   1.5×, from a projected ~4–5× (top of the committed envelope) to ~7× (outside it). Moving to
+   500 ms requires all three, on a three-minute real-dictation `stream_bench` run at 750 ms:
+   p95 tick occupancy ≤ 0.50, `ticks_skipped == 0`, and measured premium ≤ 3.3×. First lever
+   if the premium exceeds 5×: `beam_size=1` for tick decodes (~30% cheaper, measured), flush
+   stays at beam 5 — adopted only after `stream_bench` reports committed-vs-one-shot WER at
+   beam 1.
+2. **`clear` never fast-paths — resolved as option (b), unanimous across reviewers.** The fast
+   path applies to `copy` only; `clear` is confirmed only on `final` (the utterance boundary
+   *is* the confirmation, exactly as today). Three independent reasons: (i) LocalAgreement
+   commits word prefixes mid-utterance by construction, so "clear" lands as a standalone
+   committed token in the middle of "clear the cache" as *routine* behavior — the streaming
+   path manufactures the v2.3.1 false-positive vector; (ii) the zero-false-fire gate on an
+   unbounded input surface is unfalsifiable — it can be failed but never passed, so in
+   practice it converts to "ship and watch," which is what the severity asymmetry exists to
+   prevent; (iii) two-pass agreement is structurally vulnerable to identical truncation
+   hallucinations at the buffer edge (same conditioning both ticks, good logprobs) — the
+   exact condition under which a fast-path `clear` would fire. Re-open trigger: `copy` shows
+   zero false fires over a defined field sample *and* a recoverable undo is separately scoped
+   and reviewed on its own compliance merits. Not v4.
+3. **Review timing — rationale confirmed; the fallback was not needed** (the full review ran
+   before v4.0). Two amendments, recorded for the next time a review must be cut: the
+   buffer-slide/retention model belongs on the *protocol* side of the split (it is the
+   in-memory retention story the contract's privacy section publishes, plus a
+   message-semantics question — whether `final` can contradict `committed`), not on the
+   deferrable commit-policy side; agreement/veto/holdback *tuning* is what defers to the
+   v4.0→v4.1 boundary. This question is resolved, not standing — it does not get re-litigated
+   at v4.1.
 
-**Gate (v4 overall):** `stream_bench` reports all four targets met on GPU with `large-v3`, and
-the v3→v4 hardware cost comparison is recorded in the gate result (compute premium within the
-3–5× envelope, or the deviation explained).
+**Gate (v4.0 — self-contained, no frontend running):**
+- Protocol conformance: session tests green, each naming its `docs/v4/protocol.md` clause;
+  second-session 4409, preemption, idle timeout, swap 409 both directions, disconnect cleanup
+  (deterministic assertions), frame validation, out-of-order control.
+- Pure core: the policy module imports and tests with no model, no WebSocket, no threads —
+  agreement, partial agreement, flip-flop until frontier-anchored holdback fires, word-prob
+  veto, edge guard, terminal-word guard, trim offsets after commit (including a word
+  straddling the boundary), left-context suppression by timestamp, window invariant.
+- `stream_bench` on GPU with `large-v3`: first partial ≤ 1.5 s; finalization ≤ 500 ms from
+  server receipt of `flush` (both anchors reported); retractions = 0 via reference reducer;
+  `final.raw` committed-prefix invariant asserted per utterance; force-commit rate < 5%;
+  committed-vs-one-shot WER < 3%; p95 tick occupancy ≤ 0.7; `ticks_skipped == 0`;
+  `dropped_audio_ms == 0`; buffer slide exercised by a run longer than `MAX_UNCOMMITTED_S`
+  with retractions still 0 and no unbounded memory growth.
+- Cost table in the gate result: decode-seconds per audio-second both paths, GPU duty cycle
+  (`nvidia-smi` sampled), peak VRAM, per-tick decode time vs token count — stated as "X×
+  bought Y ms," deviation from the 3–5× envelope explained, not accepted.
+- Zero-persistence verified, not read off the code: `TEMP_DIR` watched during a bench run (no
+  files); no log line carries transcript/hypothesis/audio content; no committed bench artifact
+  contains transcript text; VRAM and process table clean after session close.
+- Contract: stream schemas in `CONTRACT_MODELS` + guard test; contract doc updated (transport
+  table corrected, per-path limits, close codes, error enum, privacy retention model, 409 on
+  swap, `final.duration` provenance); schema regenerated; drift test green.
+  `privacy-data-flow.mmd` updated and re-rendered. Test counts recounted, not estimated.
+- All existing tests green; one-shot and HTTP paths unchanged (no assertion edits).
+
+**Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial
 tail flickers but never survives incorrectly into committed text; final segments match the
-one-shot path's quality on the same audio. Kill the server mid-stream → frontend falls back to
-the one-shot path gracefully. `ps`/VRAM clean after session close. All existing tests green;
-one-shot and HTTP paths unchanged.
+one-shot path's quality on the same audio (with the pre-roll replay in place — without it this
+line fails for capture reasons, not policy reasons). Kill the server mid-stream → frontend
+falls back to the one-shot path gracefully, replaying the retained utterance PCM. `ps`/VRAM
+clean after session close. Client VAD detection lag reported as its own number next to the
+server-side finalization latency.
 
 ---
 

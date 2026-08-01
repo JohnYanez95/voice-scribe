@@ -32,7 +32,7 @@
 \title[Voice Scribe v4]{Voice Scribe v4\\Real-Time Streaming Ingestion}
 \author[J. Yanez]{Johnraymond Yanez}
 \institute[Voice Scribe]{Voice Scribe}
-\date{\today}
+\date{Planning: July 2026 --- protocol locked at design review (\texttt{docs/v4/protocol.md})}
 
 \begin{document}
 
@@ -225,7 +225,7 @@
         node distance=2pt,
         word/.style={draw, rounded corners=2pt, font=\scriptsize\ttfamily,
                      minimum height=0.5cm, inner sep=3pt},
-        cm/.style={word, fill=green!22},
+        cmt/.style={word, fill=green!22},
         tn/.style={word, fill=gray!12, densely dashed},
         rowlbl/.style={font=\scriptsize\bfseries, anchor=east},
         ann/.style={font=\tiny, gray},
@@ -240,17 +240,17 @@
 
         % --- tick k+1 ---
         \node[rowlbl] (r2) at (0,-1.0) {tick $k{+}1$};
-        \node[cm, right=6pt of r2] (b1) {the};
-        \node[cm, right=of b1] (b2) {quick};
-        \node[cm, right=of b2] (b3) {brown};
+        \node[cmt, right=6pt of r2] (b1) {the};
+        \node[cmt, right=of b1] (b2) {quick};
+        \node[cmt, right=of b2] (b3) {brown};
         \node[tn, right=of b3] (b4) {fox};
         \node[tn, right=of b4] (b5) {jum-};
         \node[ann, right=8pt of b5] {prefix agrees with tick $k$ $\Rightarrow$ commit};
 
         % --- tick k+2 ---
         \node[rowlbl] (r3) at (0,-2.0) {tick $k{+}2$};
-        \node[cm, right=6pt of r3] (c1) {fox};
-        \node[cm, right=of c1] (c2) {jumps};
+        \node[cmt, right=6pt of r3] (c1) {fox};
+        \node[cmt, right=of c1] (c2) {jumps};
         \node[tn, right=of c2] (c3) {over};
         \node[tn, right=of c3] (c4) {the};
         \node[tn, right=of c4] (c5) {la-};
@@ -263,7 +263,7 @@
             {longest common word-prefix};
 
         % legend
-        \node[cm, anchor=west] (lg1) at (0,-3.1) {\phantom{x}};
+        \node[cmt, anchor=west] (lg1) at (0,-3.1) {\phantom{x}};
         \node[font=\tiny, right=3pt of lg1] (lgt1) {committed --- never retracted};
         \node[tn, right=14pt of lgt1] (lg2) {\phantom{x}};
         \node[font=\tiny, right=3pt of lg2] {tentative --- shown gray, may change};
@@ -273,11 +273,12 @@
 
     \vspace{0.15em}
     \footnotesize
-    Agreement-across-time replaces confidence stitching. Confidence enters only as a
-    \emph{veto}: an agreed prefix below \texttt{COMMIT\_LOGPROB\_FLOOR} is held (two
-    passes can hallucinate identically on a mid-word buffer edge). A flip-flopping
-    region is force-committed after \texttt{MAX\_HOLDBACK\_TICKS} --- latency is
-    bounded, never hostage.
+    Agreement-across-time replaces confidence stitching. Every policy element either
+    \textbf{commits or withholds --- none revises}: the word-probability floor and the
+    buffer-edge guard only withhold; agreement and holdback force-commit only commit.
+    Force-commit (after \texttt{MAX\_HOLDBACK\_TICKS}) bounds latency at a stated cost:
+    it converts a visible flicker into a possible \emph{invisible permanent error} ---
+    hence the gate also measures force-commit rate and WER, not just retractions.
 \end{frame}
 
 
@@ -352,25 +353,25 @@
         \midrule
         \texttt{DECODE\_TICK\_MS} & Re-decode pacing; main latency/compute dial.
             Commit lag $\approx$ 2 ticks. & 750\,ms \\
-        \texttt{COMMIT\_LOGPROB\_FLOOR} & Veto: agreed prefix below this
-            \texttt{avg\_logprob} is not committed. & $-1.0$ \\
-        \texttt{NO\_SPEECH\_MAX} & Segments above this \texttt{no\_speech\_prob}
-            never enter the agreement comparison. & 0.6 \\
-        \texttt{MAX\_HOLDBACK\_TICKS} & Force-commit ceiling for flip-flopping
-            regions; bounds worst-case latency. & 6 \\
-        \texttt{MAX\_BUFFER\_S} & Uncommitted-buffer cap; slide with committed
-            left-context before Whisper's 30\,s window. & 28\,s \\
+        \texttt{WORD\_PROB\_FLOOR} & Veto (withhold-only): word below this
+            \texttt{word.probability} never commits. & 0.5 \\
+        \texttt{EDGE\_GUARD\_S} & Veto: never commit a word ending within this
+            distance of the buffer end (edge hallucinations agree across
+            ticks). & 0.6\,s \\
+        \texttt{MAX\_HOLDBACK\_TICKS} & Force-commit ceiling, frontier-anchored;
+            bounds worst-case latency. & 6 \\
+        \texttt{MAX\_UNCOMMITTED\_S} & Uncommitted cap; window invariant
+            $3 + 24 + 3 \leq 30$\,s (left context + uncommitted + safety). & 24\,s \\
         \bottomrule
     \end{tabular}
     \end{table}
 
-    \vspace{0.1em}
+    \vspace{-0.2em}
     \scriptsize
     Plus one non-tunable rule: \textbf{VAD flush} --- speech end is ground truth.
     Decode the remaining buffer once, finalize everything. This bounds
     finalization latency in practice.
 
-    \vspace{0.1em}
     \begin{block}{\footnotesize The trade, stated honestly}
         \footnotesize
         Each second of audio is decoded 3--5$\times$: compute is spent to buy
@@ -388,8 +389,10 @@
         \textbf{Metric} & \textbf{Today} & \textbf{v4 target} \\
         \midrule
         First partial visible (from speech onset) & n/a & $\leq$ 1.5\,s \\
-        Final transcript (from speech end) & $\sim$1.2--1.5\,s & $\leq$ 0.5\,s \\
+        Final transcript (from \texttt{flush} receipt)\textsuperscript{*} & $\sim$1.2--1.5\,s & $\leq$ 0.5\,s \\
         Committed-text retractions & n/a & 0 (by construction) \\
+        Force-commit rate / committed WER & n/a & $<$5\,\% / $<$3\,\% \\
+        Tick occupancy (decode\,/\,tick budget) & n/a & p95 $\leq$ 0.7 \\
         GPU re-decode overhead & 1$\times$ & measured, reported \\
         \bottomrule
     \end{tabular}
@@ -403,6 +406,9 @@
     commit-lag distribution, retraction count.
 
     \vspace{0.3em}
+    \scriptsize
+    \textsuperscript{*}\,Client VAD detection lag (\texttt{redemptionMs}) is a separate,
+    additive v4.1 number --- bench and live measure different anchors by design.
     \nt tuning without instrumentation is guessing. The harness is v4.0 scope,
     not an afterthought --- same discipline as v1's smoke-test latency record.
 \end{frame}
@@ -495,30 +501,31 @@
         \toprule
         \textbf{Milestone} & \textbf{Deliverable} \\
         \midrule
-        v4.0 & Backend session loop: \texttt{/ws/stream}, ring buffer, decode
-               ticks, LocalAgreement commit, VAD flush. Driven by
-               \texttt{stream\_bench} --- no frontend changes \\
-        v4.1 & Frontend: persistent session in continuous mode,
-               partial-vs-committed rendering. \texttt{state-machine.mmd} and
-               \texttt{privacy-data-flow.mmd} updated \emph{before} code \\
-        v4.2 & Voice command fast path on committed text + tuning pass against
-               \texttt{stream\_bench} numbers \\
+        v4.0 & Backend session loop per \texttt{docs/v4/protocol.md}:
+               \texttt{/ws/stream}, decode ticks, LocalAgreement pure core,
+               VAD flush. Contract + privacy diagram updated. Driven by
+               \texttt{stream\_bench}; no frontend changes \\
+        v4.1 & Frontend: persistent session, \texttt{onFrameProcessed} tap +
+               pre-roll replay, partial-vs-committed rendering, degrade
+               ladder. \texttt{state-machine.mmd} \emph{before} code \\
+        v4.2 & Fast path on committed text --- \textbf{copy only}
+               (review-locked) + tuning against \texttt{stream\_bench} \\
         \bottomrule
     \end{tabular}
     \end{table}
 
-    \vspace{0.2em}
+    \vspace{0.1em}
     \textbf{Testing folded into each sub-milestone:}
     \begin{itemize}\setlength{\itemsep}{0pt}
-        \item Commit policy as \textbf{pure functions} --- unit-tested on synthetic
-              hypothesis sequences, no GPU, no WebSocket
-        \item Session tests with the existing model-mocking pattern
+        \item Commit policy as \textbf{pure functions} --- synthetic hypothesis
+              sequences, no GPU, no WebSocket
+        \item Session tests: model-mocking pattern, each names its clause
         \item vitest: partial rendering, retraction, fallback, teardown
     \end{itemize}
 
     \vspace{0.1em}
-    \textbf{Design review checkpoint} before v4.0 code: fresh-context adversarial
-    pass on protocol + commit policy.
+    \textbf{Design review checkpoint} --- completed 2026-07-31: protocol locked
+    in \texttt{docs/v4/protocol.md}, open questions resolved in the roadmap.
 \end{frame}
 
 
