@@ -40,6 +40,7 @@ class Settings:
     STREAM_MAX_UTTERANCE_S: float = float(os.getenv("STREAM_MAX_UTTERANCE_S", "120"))
     STREAM_MAX_SESSION_S: float = float(os.getenv("STREAM_MAX_SESSION_S", "1800"))
     STREAM_IDLE_TIMEOUT_S: float = float(os.getenv("STREAM_IDLE_TIMEOUT_S", "10"))
+    STREAM_BURST_CREDIT_S: float = float(os.getenv("STREAM_BURST_CREDIT_S", "10"))
     STREAM_PREEMPT_GRACE_S: float = float(os.getenv("STREAM_PREEMPT_GRACE_S", "2.0"))
 
     @property

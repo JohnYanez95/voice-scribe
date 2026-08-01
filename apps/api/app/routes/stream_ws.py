@@ -104,7 +104,6 @@ class StreamSession:
         self.first_tick_pending = True  # C7.10 — first tick fires off-grid
         self.frames_since_tick = 0
         self.stopped = False
-        self.frames_after_stop = 0
         self.consecutive_overruns = 0
         self.tick_multiplier = 1
         self.ticks_skipped = 0
@@ -432,12 +431,12 @@ class StreamSession:
 
     async def do_reset(self) -> None:
         """C3.6: drop uncommitted AND committed state for the current
-        utterance; no final; acked."""
+        utterance; no final; acked. C4.6: the ack carries the utterance_id in
+        force after the control was applied (post-bump, uniform with stop)."""
         self.decode_generation += 1
         async with self.decode_lock:
-            old_utterance = self.utterance_id
             self._next_utterance()
-        await self.send({"type": "ack", "of": "reset", "utterance_id": old_utterance})
+        await self.send({"type": "ack", "of": "reset", "utterance_id": self.utterance_id})
 
     # -- ingest validation ----------------------------------------------------
 
@@ -450,11 +449,13 @@ class StreamSession:
             )
         if len(data) % 4 != 0:
             return "protocol_violation", "Frame byte length must be a multiple of 4 (pcm_f32le)."
-        # C2.5: sustained ingest above 2x real-time is a live-capture violation
+        # C2.5: cumulative lead over real-time is clamped at a fixed burst
+        # credit — covers the pre-roll replay (~0.9 s) and startup jitter
+        # without letting long keepalive pauses bank unbounded replay credit.
         received_s = self.total_samples / self.sr
         elapsed_s = time.monotonic() - self.started_mono
-        if received_s > 2.0 * elapsed_s + 10.0:
-            return "protocol_violation", "Ingest rate exceeds 2x real-time."
+        if received_s > elapsed_s + settings.STREAM_BURST_CREDIT_S:
+            return "protocol_violation", "Ingest exceeds real-time plus burst credit."
         return None
 
 
@@ -550,6 +551,9 @@ async def ws_stream(websocket: WebSocket) -> None:
             "decode_tick_ms": settings.STREAM_DECODE_TICK_MS,
             "max_uncommitted_s": settings.STREAM_MAX_UNCOMMITTED_S,
             "max_holdback_ticks": settings.STREAM_MAX_HOLDBACK_TICKS,
+            # C3.8 — advertises keepalive support; a client must ping only when
+            # this field is present (absent on a v4.0 server → no pings, no skew).
+            "idle_timeout_s": settings.STREAM_IDLE_TIMEOUT_S,
         })
         session.decode_task = asyncio.create_task(session.decode_loop())
 
@@ -587,8 +591,7 @@ async def ws_stream(websocket: WebSocket) -> None:
                 data = message.get("bytes")
                 if data is not None:
                     if session.stopped:
-                        session.frames_after_stop += 1  # C2.4 — dropped, counted
-                        continue
+                        continue  # C2.4 — frames after stop dropped silently
                     problem = session.frame_problem(data)
                     if problem:
                         await session.fail(*problem)
@@ -607,6 +610,10 @@ async def ws_stream(websocket: WebSocket) -> None:
                 ctype = control.get("type") if isinstance(control, dict) else None
                 if ctype == "flush":
                     await session.do_flush()
+                elif ctype == "ping":
+                    # C3.8 — keepalive: receipt alone resets the idle timer;
+                    # no ack, no effect on C1.4 preemption or C2.5 accounting.
+                    continue
                 elif ctype == "reset":
                     await session.do_reset()
                 elif ctype == "stop":
@@ -616,7 +623,6 @@ async def ws_stream(websocket: WebSocket) -> None:
                     await session.send({
                         "type": "ack", "of": "stop",
                         "utterance_id": session.utterance_id,
-                        "frames_dropped_after_stop": session.frames_after_stop,
                     })
                     try:
                         await websocket.close(code=1000)

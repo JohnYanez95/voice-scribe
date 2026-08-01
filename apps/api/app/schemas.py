@@ -93,6 +93,14 @@ class WsStreamStartMessage(BaseModel):
     language: str | None = None
 
 
+class WsStreamPingMessage(BaseModel):
+    """Client → server keepalive (C3.8). Legal only between ready and stop;
+    resets the idle timer by receipt alone. No ack. Send only when the ready
+    message advertised idle_timeout_s. Does not shield against preemption
+    (C1.4 keys on binary frames)."""
+    type: Literal["ping"]
+
+
 class WsStreamReadyMessage(BaseModel):
     """Handshake echo (C4.1). Client must not send frames before this."""
     type: Literal["ready"]
@@ -107,6 +115,9 @@ class WsStreamReadyMessage(BaseModel):
     decode_tick_ms: int
     max_uncommitted_s: float
     max_holdback_ticks: int
+    # C3.8/C4.1 — presence advertises keepalive support; clients derive the
+    # ping period from this value and must not ping when it is absent.
+    idle_timeout_s: float
 
 
 class WsStreamPartialMessage(BaseModel):
@@ -159,9 +170,9 @@ class WsStreamErrorMessage(BaseModel):
 
 
 class WsStreamAckMessage(BaseModel):
-    """Ack for stop/reset (C4.6)."""
+    """Ack for stop/reset (C4.6). utterance_id is the id in force after the
+    control was applied (post-bump, uniform for stop and reset)."""
     type: Literal["ack"]
     seq: int
     of: Literal["stop", "reset"]
     utterance_id: int
-    frames_dropped_after_stop: int | None = None

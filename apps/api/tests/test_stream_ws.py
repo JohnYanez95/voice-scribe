@@ -334,7 +334,9 @@ def test_reset_acks_without_final_and_bumps_utterance(mock_get_model, _name):
             msg = ws.receive_json()
         assert msg["type"] == "ack"
         assert msg["of"] == "reset"
-        assert msg["utterance_id"] == 0
+        # C4.6 — ack carries the id in force AFTER the control was applied
+        # (post-bump, uniform with stop)
+        assert msg["utterance_id"] == 1
 
         # post-reset utterance is clean: duration counts new audio only
         ws.send_bytes(pcm(0.5))
@@ -757,3 +759,80 @@ def test_wire_messages_validate_against_exported_schemas(mock_get_model, _name):
     assert {"ready", "partial", "committed", "final", "ack"} <= {m["type"] for m in collected}
     for m in collected:
         MODEL_BY_TYPE[m["type"]](**m)
+
+
+# ---------------------------------------------------------------------------
+# C3.8 — ping keepalive; C4.1 — ready advertises idle_timeout_s
+# ---------------------------------------------------------------------------
+
+@patch("app.routes.stream_ws.get_current_model_name", return_value="m")
+@patch("app.routes.stream_ws.get_model")
+def test_ready_advertises_idle_timeout(mock_get_model, _name):
+    mock_get_model.return_value = make_model([])
+    with connect() as ws:
+        ready = start_session(ws)
+        assert ready["idle_timeout_s"] == settings.STREAM_IDLE_TIMEOUT_S
+        ws.send_text(json.dumps({"type": "stop"}))
+        assert ws.receive_json()["type"] == "ack"
+
+
+@patch("app.routes.stream_ws.get_current_model_name", return_value="m")
+@patch("app.routes.stream_ws.get_model")
+def test_ping_resets_idle_timer(mock_get_model, _name, monkeypatch):
+    """C3.8: a silent-but-pinging session outlives the idle timeout."""
+    monkeypatch.setattr(settings, "STREAM_IDLE_TIMEOUT_S", 0.3)
+    mock_get_model.return_value = make_model([("hi", 0.1, 0.3, 0.9)])
+    with connect() as ws:
+        start_session(ws)
+        for _ in range(6):  # 6 x 0.15 s = 0.9 s silent >> 0.3 s idle timeout
+            time.sleep(0.15)
+            ws.send_text(json.dumps({"type": "ping"}))
+        # session must still be alive and functional
+        ws.send_bytes(pcm(0.5))
+        ws.send_text(json.dumps({"type": "stop"}))
+        types = []
+        msg = ws.receive_json()
+        while msg["type"] != "ack":
+            types.append(msg["type"])
+            msg = ws.receive_json()
+        assert msg["of"] == "stop"
+        assert "error" not in types
+
+
+@patch("app.routes.stream_ws.get_current_model_name", return_value="m")
+@patch("app.routes.stream_ws.get_model")
+def test_ping_before_start_is_fatal(mock_get_model, _name):
+    """C3.8: ping is legal only after start — as a first message it is a
+    protocol violation (a v4.1 client never does this; C3.7 applies)."""
+    mock_get_model.return_value = make_model([])
+    with connect() as ws:
+        ws.send_text(json.dumps({"type": "ping"}))
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert msg["code"] == "protocol_violation"
+        assert msg["fatal"] is True
+
+
+# ---------------------------------------------------------------------------
+# C2.5 — cumulative lead over real-time clamped at STREAM_BURST_CREDIT_S
+# ---------------------------------------------------------------------------
+
+@patch("app.routes.stream_ws.get_current_model_name", return_value="m")
+@patch("app.routes.stream_ws.get_model")
+def test_ingest_burst_credit_clamped(mock_get_model, _name, monkeypatch):
+    monkeypatch.setattr(settings, "STREAM_BURST_CREDIT_S", 2.0)
+    mock_get_model.return_value = make_model([])
+    with connect() as ws:
+        start_session(ws)
+        # A ~0.9 s pre-roll style burst is legal…
+        ws.send_bytes(pcm(0.9))
+        # …but bulk replay far over real-time + credit is fatal (C2.5).
+        with pytest.raises(WebSocketDisconnect):
+            for _ in range(8):
+                ws.send_bytes(pcm(0.5))
+            # server closes after the violating frame; next receive surfaces it
+            msg = ws.receive_json()
+            while msg["type"] != "error":
+                msg = ws.receive_json()
+            assert msg["code"] == "protocol_violation"
+            raise WebSocketDisconnect(1008)

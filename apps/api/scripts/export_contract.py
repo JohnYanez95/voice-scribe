@@ -31,6 +31,7 @@ from app.schemas import (  # noqa: E402
     WsStreamErrorMessage,
     WsStreamFinalMessage,
     WsStreamPartialMessage,
+    WsStreamPingMessage,
     WsStreamReadyMessage,
     WsStreamStartMessage,
 )
@@ -52,6 +53,7 @@ CONTRACT_MODELS = [
     WsCompleteMessage,
     WsErrorMessage,
     WsStreamStartMessage,
+    WsStreamPingMessage,
     WsStreamReadyMessage,
     WsStreamPartialMessage,
     WsStreamCommittedMessage,

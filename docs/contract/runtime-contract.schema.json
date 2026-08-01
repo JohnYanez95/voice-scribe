@@ -257,20 +257,8 @@
       "type": "object"
     },
     "WsStreamAckMessage": {
-      "description": "Ack for stop/reset (C4.6).",
+      "description": "Ack for stop/reset (C4.6). utterance_id is the id in force after the\ncontrol was applied (post-bump, uniform for stop and reset).",
       "properties": {
-        "frames_dropped_after_stop": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Frames Dropped After Stop"
-        },
         "of": {
           "enum": [
             "stop",
@@ -489,12 +477,31 @@
       "title": "WsStreamPartialMessage",
       "type": "object"
     },
+    "WsStreamPingMessage": {
+      "description": "Client \u2192 server keepalive (C3.8). Legal only between ready and stop;\nresets the idle timer by receipt alone. No ack. Send only when the ready\nmessage advertised idle_timeout_s. Does not shield against preemption\n(C1.4 keys on binary frames).",
+      "properties": {
+        "type": {
+          "const": "ping",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "WsStreamPingMessage",
+      "type": "object"
+    },
     "WsStreamReadyMessage": {
       "description": "Handshake echo (C4.1). Client must not send frames before this.",
       "properties": {
         "decode_tick_ms": {
           "title": "Decode Tick Ms",
           "type": "integer"
+        },
+        "idle_timeout_s": {
+          "title": "Idle Timeout S",
+          "type": "number"
         },
         "language": {
           "anyOf": [
@@ -561,7 +568,8 @@
         "language",
         "decode_tick_ms",
         "max_uncommitted_s",
-        "max_holdback_ticks"
+        "max_holdback_ticks",
+        "idle_timeout_s"
       ],
       "title": "WsStreamReadyMessage",
       "type": "object"

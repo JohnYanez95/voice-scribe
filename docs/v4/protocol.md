@@ -51,12 +51,27 @@ resolved open questions are recorded in `roadmap.md` (v4 section).
 - **C2.3** NaN/Inf sanitization: non-finite samples are replaced with 0.0 on ingest. A single
   NaN otherwise poisons the whole decode window and presents as a model-quality bug.
 - **C2.4** Frames before `start` or before the server's `ready`: protocol violation (fatal).
-  Frames after `stop`: dropped silently and counted (count reported in the `stop` ack).
-- **C2.5** Ingest rate: sustained ingest above 2× real-time for 5 consecutive seconds is a
-  protocol violation (fatal). The wire is a live capture path, not a file upload — bulk replay
-  belongs to the one-shot endpoints.
+  Frames after `stop`: dropped silently. *(v4.1 amendment: the per-count report field was
+  removed — single-pass stop handling made it structurally 0, and draining just to count
+  would add stop latency for a number no client reads. Removal is legal because the contract
+  is untagged `v4.0-dev`; post-release this would be a major bump. Client rule: `sendAudio`
+  after `stop` is an explicit no-op.)*
+- **C2.5** Ingest rate: cumulative received audio may lead real time by at most
+  `BURST_CREDIT_S` (10 s): `received_s > elapsed_s + BURST_CREDIT_S` is a protocol violation
+  (fatal). The wire is a live capture path, not a file upload — bulk replay belongs to the
+  one-shot endpoints. *(v4.1 amendment: the previous "2× real-time" form let legal lead grow
+  without bound over a long session — with keepalive making long pauses routine, a client
+  could bank minutes of instantaneous replay credit. The fixed credit covers what it is for:
+  the ~0.9 s pre-roll replay at speech onset, startup jitter, and wire-frame batching. The §6
+  memory bound holds under either form; the exposure was decode thrash, not memory.)*
 - **C2.6** Client-side VAD gating at the source remains the invariant (v2.2): silence is not
-  sent. The server does not run `vad_filter` on this path (see C7.6).
+  sent. The server does not run `vad_filter` on this path (see C7.6). *(v4.1 note — sanctioned
+  exceptions, deliberate: (1) the `preSpeechPadMs` pre-roll replay sends up to ~0.9 s of
+  pre-speech audio at each onset — it exists because Silero clips onsets; (2) intra-utterance
+  sub-redemption silence may be sent when speech resumes, to keep the server's audio timeline
+  contiguous. C2.6 forbids* sustained *silence streaming — the redemption tail is gated
+  client-side (at most ~0.2 s of trailing silence reaches the flush decode), because a
+  multi-second silent flush window is Whisper's most reliable hallucination trigger.)*
 
 ## 3. Control messages (client → server, JSON text)
 
@@ -83,6 +98,27 @@ resolved open questions are recorded in `roadmap.md` (v4 section).
   `clear` itself is confirmed only on `final` — see roadmap open question 2, resolved.)
 - **C3.7** Malformed JSON, unknown `type`, or out-of-order control (`flush` before `start`,
   second `start`) → `error{code:"protocol_violation", fatal:true}` + close.
+- **C3.8** *(added v4.1 — idle-timeout/keepalive decision)* `{"type":"ping"}` — keepalive.
+  Legal only between `ready` and `stop`; pre-`start` it is a protocol violation (C3.7).
+  Receipt alone resets the C1.5 idle timer; there is no ack. A client MUST send pings only
+  when the `ready` message carried `idle_timeout_s` (absent on a v4.0 server — pinging one
+  would be fatal under C3.7; presence is the capability signal), SHOULD derive its period
+  from that value (`idle_timeout_s / 3`), and SHOULD suppress pings while frames are flowing.
+  Ping does **not** reset the C1.4 preemption grace (which keys on binary frames — a
+  pinging-but-silent session stays preemptable; deliberate, do not "fix" it) and has no
+  effect on C2.5 accounting or the C1.6 ceiling.
+  **Decision rationale, recorded:** the alternatives were a longer idle timeout and
+  fresh-session re-establishment on `session_timeout`. A longer timeout's real cost is
+  C8.1/C8.3 — a dead session holds `stream_active`, 409-ing `/models/swap` and pinning the
+  model reference for the whole window (C1.4 preemption already covers slot *contention*).
+  Re-establishment reintroduces the per-pause WS churn v4.1 exists to eliminate and collides
+  with C10.2's session_timeout→degrade mapping. Ping preserves the 10 s crash-recovery
+  teardown exactly: a crashed client stops pinging.
+  **C1.6 interaction:** with keepalive, the 1800 s wall-clock ceiling becomes reachable in
+  continuous dictation. The client therefore *rotates* the session (close 1000 via `stop`,
+  fresh handshake) at 1500 s, at an inter-utterance boundary (`listening`, no outstanding
+  flush) — invisible to the user. A ceiling `session_timeout` that still slips through
+  degrades per C10.2.
 
 ## 4. Server → client messages
 
@@ -93,9 +129,10 @@ message whose `utterance_id` is below the current one.
 - **C4.1** `ready` — sent in response to `start`, before any other message. Carries
   `protocol_version`, `session_id`, `sample_rate`, `sample_format`, `max_frame_bytes`,
   `model_name`, `language` (null until pinned), and the tunables in force: `decode_tick_ms`,
-  `max_uncommitted_s`, `max_holdback_ticks`. The client MUST NOT send binary frames before
-  `ready`. `stream_bench` records this echo so every measurement is attributable to the
-  tunables that produced it.
+  `max_uncommitted_s`, `max_holdback_ticks`, `idle_timeout_s` *(added v4.1 — the C3.8
+  keepalive capability signal and the value the client derives its ping period from)*. The
+  client MUST NOT send binary frames before `ready`. `stream_bench` records this echo so
+  every measurement is attributable to the tunables that produced it.
 - **C4.2** `partial` — `{type, seq, utterance_id, text}`. **`text` is a full replacement of the
   entire tentative tail** for the current utterance — never an append. Retractable by the next
   `partial`. Downstream consumers: `partial` must never be persisted, copied to the clipboard,
@@ -119,8 +156,11 @@ message whose `utterance_id` is below the current one.
   `fatal:false` → session continues. Codes: `busy`, `preempted`, `protocol_violation`,
   `frame_too_large`, `unsupported_format`, `unsupported_version`, `model_swapping`,
   `decode_failure`, `overrun`, `session_timeout`.
-- **C4.6** `ack` — `{type, seq, of:"stop"|"reset", utterance_id}`. For `stop`, includes
-  `frames_dropped_after_stop`.
+- **C4.6** `ack` — `{type, seq, of:"stop"|"reset", utterance_id}`. **Uniform rule (v4.1):**
+  the ack carries the `utterance_id` in force *after* the control was applied (post-bump for
+  both stop and reset — reset was changed to match, so the client's stale-id filter adopts
+  the acked id directly with no `+1` inference). The former `frames_dropped_after_stop`
+  field was removed (see C2.4).
 
 ## 5. The commitment contract (the invariants that make "zero retraction" honest)
 
@@ -255,13 +295,26 @@ correct claim is "bounded", not "brief".
 
 - **C10.1** Degrade ladder: `/ws/stream` failure → one-shot `/ws/transcribe` for the remainder
   of the session; the existing one-shot → HTTP POST fallback (v2.1) is unchanged beneath it.
-- **C10.2** By error code: failure before `ready`, or `code ∈ {busy, preempted,
-  unsupported_version, session_timeout}` → degrade. `code == decode_failure` → surface the
+- **C10.2** *(rewritten v4.1 as a default rule, not an enumeration)* Failure before `ready`,
+  or any fatal error with `code !== "decode_failure"` — **including codes unknown to the
+  client** (forward compatibility) — → degrade. `code == decode_failure` → surface the
   error, do not fall back (the same failure recurs on the one-shot path). Same
-  application-vs-connection split v2.1 established.
-- **C10.3** Client retains the current utterance's PCM until `final` for that `utterance_id`
-  (C4.4), so a mid-utterance stream failure can replay the utterance through the one-shot
-  path instead of losing it. Protocol constraint now; client code v4.1.
+  application-vs-connection split v2.1 established. Notes: the client-bug classes
+  (`protocol_violation`, `frame_too_large`, `unsupported_format`, `unsupported_version`)
+  degrade *silently* — loud `console.error`, never a user-facing error state (losing
+  dictation is worse than a spurious one-shot). `model_swapping` is transient but still
+  degrades for the remainder of the session per C10.1 — deliberate, not a bug; a fresh
+  continuous activation tries streaming again.
+- **C10.3** *(amended v4.1)* Client retains the PCM of **each flushed-but-unfinalized
+  utterance** until its `final` (C4.4) — in continuous dictation the user may start
+  utterance N+1 while N's `final` is outstanding, so the retention surface is a FIFO, not a
+  single buffer. Bound, stated §6-style: at most 8 entries, drop-oldest with a loud
+  `console.error` (worst case 8 × ≤ 120 s float32 mono 16 kHz ≈ 58 MB; realistic depth is
+  0–1 entries of a few seconds). Deleted on `final` for that `utterance_id`, on degrade
+  (after replay through the one-shot path), and on session end. The *in-progress* utterance
+  is not separately retained: the client relies on vad-web's internal segment accumulation
+  to re-deliver the full utterance at `onSpeechEnd` — this reliance is load-bearing and
+  becomes real per-frame retention if the capture source ever changes.
 
 ## 11. Contract artifact obligations (v4.0, not deferrable)
 
@@ -304,13 +357,27 @@ stays 1.
 - **Flush decode floor:** flush decodes shorter than `MIN_FLUSH_DECODE_S = 0.1 s` are skipped
   (sub-frame tails reliably hallucinate); the `final` still fires with committed text.
 
-**Deferred to v4.1 (clause-vs-code reconciliation, to settle with the client design):**
-- **C2.4** second half: the frames-after-`stop` counter is structurally always 0 in the current
-  single-pass stop handling — either drain briefly before the ack or drop the field.
-- **C2.5**: implemented as a cumulative lead allowance (`received > 2 × elapsed + 10 s`), not a
-  5 s sliding window. Amend the clause or implement the window.
-- **C4.6**: pin which `utterance_id` the `stop` ack carries (reset acks the closed utterance;
-  stop currently acks the post-bump id).
-- **Close-code taxonomy:** 4408/4409 are coarse buckets; `error.code` is the classification
-  surface (now stated in the contract doc). Decide at v4.1 whether `session_timeout` and
-  `model_swapping` deserve distinct close codes.
+**Deferred-to-v4.1 reconciliations — resolved 2026-08-01 (v4.1 step 2; wire-visible changes
+carry the C11 obligations in the same commit):**
+- **C2.4** — resolved: field dropped (see amended C2.4). Structurally 0; draining to count
+  buys nothing at the cost of stop latency.
+- **C2.5** — resolved by code change, the third option: neither the doc's sliding window nor
+  the implemented unbounded-lead form survives keepalive; the clamp
+  (`received > elapsed + BURST_CREDIT_S`) is two lines and kills the accumulation while
+  keeping the pre-roll burst legal (see amended C2.5).
+- **C4.6** — resolved: uniform post-bump rule; reset changed to match stop (see amended C4.6).
+- **Close-code taxonomy** — **closed decision, not a deferral:** 4408/4409 stay coarse.
+  `error.code` is the single classification surface; C1.2 already forbids clients from
+  keying on close codes, and distinct codes would create a second surface to get wrong.
+  Do not reopen at v4.2.
+
+**First-partial measurement anchor (v4.1 field-test-review addition (3), pinned here):**
+the gate number (`stream_bench`, roadmap gate list) is measured from **`first_frame_sent`**
+on the client wire clock — backend-comparable, and the clock the v4.2 tunables
+(`STREAM_MIN_DECODE_S`, tick interval) actually move. The user-perceived number is a
+separate, additive client-side figure: wire number **plus VAD detection lag** (measured by
+the v4.1 spike harness) **minus the pre-roll head start** — the ~0.9 s pre-roll burst
+front-loads `MIN_DECODE_S` (C7.10), so the first tick fires after ~0.2 s of live speech
+rather than 1.0 s; the sign matters because the v4.2 `STREAM_MIN_DECODE_S 1.0 → 0.8`
+projection was computed without it. Reports carry `first_partial_anchor` so every number is
+attributable to its clock.

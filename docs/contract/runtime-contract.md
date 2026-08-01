@@ -216,7 +216,7 @@ Field semantics match `POST /transcribe` — see table above.
 
 Persistent streaming session: the client sends raw PCM frames while the user speaks; the server decodes on a paced tick and emits text incrementally. **The normative specification is `docs/v4/protocol.md` (protocol version 1)** — session tests enforce it clause by clause. Summary for consumers:
 
-**Session shape:** JSON `start` (with `protocol_version: 1`, `sample_format: "pcm_f32le"`, `sample_rate: 16000`, optional `language`) → server `ready` (echoes config and the serving tunables in force) → binary PCM frames interleaved with JSON control (`flush` = utterance boundary, many per session; `stop` = session end; `reset` = destructive drop of the current utterance, acked) → server messages, each carrying `seq` and `utterance_id`.
+**Session shape:** JSON `start` (with `protocol_version: 1`, `sample_format: "pcm_f32le"`, `sample_rate: 16000`, optional `language`) → server `ready` (echoes config and the serving tunables in force, including `idle_timeout_s`) → binary PCM frames interleaved with JSON control (`flush` = utterance boundary, many per session; `ping` = optional keepalive, protocol C3.8 — send only when `ready` carried `idle_timeout_s`, no ack; `stop` = session end; `reset` = destructive drop of the current utterance, acked) → server messages, each carrying `seq` and `utterance_id`. Acks carry the `utterance_id` in force *after* the control was applied (uniform for `stop` and `reset`). The former `frames_dropped_after_stop` ack field was removed in v4.1 — legal without a major bump because the contract has not shipped as a tagged release (`v4.0-dev`); frames after `stop` are dropped silently.
 
 **Server → client message types and how to treat them:**
 
@@ -259,8 +259,8 @@ These are enforced constraints, not configuration suggestions. Breaking them ret
 | Max uncommitted audio | 24 s (`STREAM_MAX_UNCOMMITTED_S`) | Oldest uncommitted audio dropped with an `overrun` signal — never silently. |
 | Max utterance | 120 s (`STREAM_MAX_UTTERANCE_S`) | Server-side forced flush (`final.forced: true`). |
 | Max session | 30 min (`STREAM_MAX_SESSION_S`) | Flush + fatal error + close. |
-| Idle timeout | 10 s (`STREAM_IDLE_TIMEOUT_S`) | Session teardown; frees the single session slot. |
-| Ingest rate | ≤ 2× real-time sustained | Fatal protocol violation — the wire is a live capture path, not a file upload. |
+| Idle timeout | 10 s (`STREAM_IDLE_TIMEOUT_S`) | Session teardown; frees the single session slot. A client sending `ping` keepalives (protocol C3.8) is not idle. |
+| Ingest lead | ≤ real-time + 10 s burst credit (`STREAM_BURST_CREDIT_S`) | Fatal protocol violation — the wire is a live capture path, not a file upload; the credit covers the client's pre-roll replay and startup jitter. |
 | Sessions per server | 1 | Second connection gets `busy` + close 4409; stale incumbents are preempted. |
 
 **MIME allowlist (HTTP only):**

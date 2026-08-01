@@ -1121,7 +1121,15 @@ utterance fires as soon as 1.0 s is buffered, which is what keeps first-partial 
 
 **Latency targets (the gate is a measurement, not an opinion):**
 
-- First partial visible ≤ 1.5 s from speech onset
+- First partial visible ≤ 1.5 s. **Anchor pinned at v4.1 (field-test-review addition (3),
+  rationale in `docs/v4/protocol.md` amendments):** the gate number is measured from
+  `first_frame_sent` on the client wire clock — the clock the v4.2 dials actually move; as
+  of v4.1 the gate line is the per-utterance **p50** (single-sample per session before).
+  The user-perceived number ("from speech onset") is separate and additive: wire number
+  plus VAD detection lag (spike-measured) minus the pre-roll head start (the ~0.9 s
+  pre-roll burst front-loads `MIN_DECODE_S`, so it *reduces* the wire number — the v4.2
+  `STREAM_MIN_DECODE_S` projection predates this term). Reports carry
+  `first_partial_anchor`.
 - Final transcript ≤ 500 ms from speech end. **Measurement origin, pinned at review:** the
   v4.0 number is measured from server receipt of `flush` (what `stream_bench` controls);
   `stream_bench` also reports it from true speech end in the source WAV. The client-side VAD
