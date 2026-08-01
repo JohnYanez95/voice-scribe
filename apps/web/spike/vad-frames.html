@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>v4.1 spike — vad-web onFrameProcessed frame fidelity</title>
+    <style>
+      body { font-family: monospace; margin: 2rem; max-width: 72rem; }
+      button { font-family: inherit; padding: 0.4rem 1rem; margin-right: 0.5rem; }
+      pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; white-space: pre-wrap; }
+      .pass { color: #0a7a0a; } .fail { color: #b00020; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <h1>vad-web 0.0.30 — onFrameProcessed de-risk spike</h1>
+    <p>
+      Verifies contiguous, undecimated 16&nbsp;kHz frame delivery (roadmap v4.1 first task).
+      Synthetic chirp + tone bursts injected via <code>getStream</code>; nothing here is part
+      of the app build. Mic/file runs persist metrics only — never audio.
+    </p>
+    <p>
+      <button id="run-synthetic">Run synthetic suite</button>
+      <button id="run-mic">Mic sanity (10 s, metrics only)</button>
+      <input type="file" id="file-input" accept="audio/*" />
+      <label for="file-input">speech file → VAD detection lag (local only)</label>
+    </p>
+    <div id="status">idle</div>
+    <pre id="out"></pre>
+    <script type="module" src="./vad-frames.ts"></script>
+  </body>
+</html>

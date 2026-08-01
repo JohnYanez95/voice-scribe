@@ -1182,6 +1182,20 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
   `onFrameProcessed` de-risk spike** (promoted from v4.0, where it did not run) — verify the
   pinned vad-web delivers contiguous, undecimated 16 kHz frames; if it decimates or drops,
   the capture source changes and the rest of v4.1 re-plans around that finding.
+  **Spike result (2026-08-01): PASS — capture source confirmed.** vad-web pinned exact
+  0.0.30; harness `apps/web/spike/vad-frames.html` (dev-only, not in the prod build;
+  synthetic chirp + tone bursts injected via `getStream`, metrics-only artifacts). Chromium
+  151 headless, AudioWorklet adapter, matrix {legacy/1536, v5/512} × {48 kHz, 44.1 kHz}:
+  sample-count ratio error −0.11 to −0.15 % (bound ±1 %), zero non-finite samples, min
+  windowed correlation 0.943–0.967 vs the analytic 16 kHz reference, tone-burst spacing
+  exact, resampler drift ≤ 29 samples (~1.8 ms over an 8 s chirp — the box resampler's
+  missing fractional carry, measured and negligible), roll-off −2.7 dB @ 7.1 kHz
+  (report-only; matches the box-filter analytic estimate, acceptable for speech). Static
+  findings recorded with the harness: `onFrameProcessed` fires on every frame while active
+  (speech and silence), `onVADMisfire` fires for < 400 ms segments (client must `reset`),
+  vad-web's internal pre-roll ring is not surfaced per-frame (hence the client ring), and
+  `startOnLoad` invokes `getStream` at construction. WebKitGTK and real-mic runs carry to
+  the v4.1 live smoke (in-library `processorType: "ScriptProcessor"` is the contingency).
   Then: persistent WS session in continuous mode, frames streamed
   via `onFrameProcessed` (**new capture plumbing** — review correction: no per-frame tap
   exists today, `useVAD.ts` exposes only `onSpeechEnd`), client-side pre-roll ring replaying
