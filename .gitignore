@@ -19,6 +19,7 @@ target/
 # Data (ephemeral and cache)
 data/tmp/
 data/cache/
+data/tests/
 
 # IDE
 .vscode/

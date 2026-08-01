@@ -54,6 +54,10 @@ python ops/scripts/stream_bench.py ~/dictation.wav --utterances 3 --baseline \
   bug ship (peer review, 2026-07-31).
 - `--baseline` runs the same audio through the one-shot path and reports
   `committed_vs_oneshot_wer` plus GPU duty cycle / peak VRAM for the cost table.
+  Recordings longer than the one-shot 60 s cap are split into even chunks under
+  the cap and sent sequentially (`oneshot_chunks` in the report) — the same
+  chunking a v3 user has to do by hand. A baseline failure no longer discards
+  the streaming stats.
 - The report contains counters and latencies only — never transcript text.
 
 ## 5. Observations to record (the open gate lines)

@@ -292,32 +292,48 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
     return stats
 
 
-def run_baseline(base_url: str, wav_path: str) -> dict:
-    """v3 one-shot path on the same audio (hardware cost comparison)."""
+ONESHOT_MAX_S = 60  # one-shot path audio cap (docs/contract/runtime-contract.md)
+
+
+def run_baseline(base_url: str, audio: np.ndarray) -> dict:
+    """v3 one-shot path on the same audio (hardware cost comparison).
+
+    The one-shot endpoint caps audio at 60 s, so longer recordings are split
+    into even chunks under the cap and sent sequentially — the same chunking a
+    v3 user has to do by hand. Wall time is the sum across chunks.
+    """
+    import io
     import urllib.request
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp.close()
-    subprocess.run(["ffmpeg", "-y", "-i", wav_path, "-ar", str(SR), "-ac", "1", tmp.name],
-                   capture_output=True, check=True)
-    data = Path(tmp.name).read_bytes()
-    Path(tmp.name).unlink(missing_ok=True)
-
+    max_samples = ONESHOT_MAX_S * SR
+    n_chunks = (len(audio) + max_samples - 1) // max_samples
     boundary = "streambenchboundary"
-    body = (
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
-        f"filename=\"bench.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
-    ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
-    req = urllib.request.Request(
-        f"{base_url}/transcribe", data=body, method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                 "Origin": ORIGIN},
-    )
-    t0 = time.monotonic()
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        payload = json.loads(resp.read())
-    latency = time.monotonic() - t0
-    return {"oneshot_wall_s": round(latency, 3), "_raw": payload["raw"]}
+    total_wall = 0.0
+    raws = []
+    for chunk in np.array_split(audio, max(1, n_chunks)):
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(SR)
+            wf.writeframes((chunk * 32767.0).astype(np.int16).tobytes())
+        body = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+            f"filename=\"bench.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
+        ).encode() + buf.getvalue() + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            f"{base_url}/transcribe", data=body, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                     "Origin": ORIGIN},
+        )
+        t0 = time.monotonic()
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            payload = json.loads(resp.read())
+        total_wall += time.monotonic() - t0
+        raws.append(payload["raw"])
+    return {"oneshot_wall_s": round(total_wall, 3),
+            "oneshot_chunks": max(1, n_chunks),
+            "_raw": " ".join(raws)}
 
 
 def main() -> None:
@@ -348,14 +364,20 @@ def main() -> None:
     if args.baseline:
         sampler = GpuSampler()
         sampler.start()
-        baseline = run_baseline(args.http_url, args.audio)
+        try:
+            baseline = run_baseline(args.http_url, audio)
+        except Exception as exc:
+            baseline = None
+            print(f"baseline failed; continuing with stream stats only: {exc}",
+                  file=sys.stderr)
         report["gpu_during_oneshot"] = sampler.stop()
-        stream_text = stream_stats.pop("_final_text")
-        report["baseline"] = {k: v for k, v in baseline.items() if not k.startswith("_")}
-        report["committed_vs_oneshot_wer"] = round(
-            wer(norm_words(baseline["_raw"]), norm_words(stream_text)), 4)
-    else:
-        stream_stats.pop("_final_text", None)
+        if baseline is not None:
+            report["baseline"] = {k: v for k, v in baseline.items()
+                                  if not k.startswith("_")}
+            report["committed_vs_oneshot_wer"] = round(
+                wer(norm_words(baseline["_raw"]),
+                    norm_words(stream_stats["_final_text"])), 4)
+    stream_stats.pop("_final_text", None)
 
     print(json.dumps(report, indent=2))
     gate = {
