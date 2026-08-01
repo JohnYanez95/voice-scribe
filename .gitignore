@@ -58,3 +58,6 @@ htmlcov/
 *.synctex.gz
 *.bbl
 *.blg
+
+# Agent working state — regenerated per milestone; durable content lives in roadmap.md
+tasks/
