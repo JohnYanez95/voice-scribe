@@ -1143,6 +1143,21 @@ and commit policy — the standing questions: swap-during-stream, disconnect mid
 buffer-slide correctness at the 30 s boundary, hallucination behavior on the buffer edge, and
 whether `partial` retraction semantics are honest in the UI.
 
+**Open questions for the design review (raised at planning, 2026-07-31 — unresolved by intent):**
+
+1. **Initial tick value.** 750 ms is a compromise, not a measurement. 500 ms halves commit lag
+   but pushes the compute premium toward the top of the 3–5× envelope. `stream_bench` decides;
+   the initial value just needs to be defensible.
+2. **Does the v4.2 command fast path apply to `clear` at all?** The v2.3.1 severity asymmetry
+   still governs: `clear` destroys the buffer unrecoverably. The plan gates fast-path `clear`
+   behind a zero-false-fire requirement on committed-partial text, but "never fast-path `clear`,
+   full-utterance confirmation only" is a defensible simpler answer. Decide at review, not at
+   implementation.
+3. **Review timing.** The protocol contract (message types, PCM-only ingestion, one-session rule)
+   is the expensive-to-change surface; the backend loop behind it is cheap to rebuild. If the
+   review must be cut for time, review the protocol before v4.0 and defer the commit-policy
+   review to the v4.0→v4.1 boundary — not the other way around.
+
 **Gate (v4 overall):** `stream_bench` reports all four targets met on GPU with `large-v3`, and
 the v3→v4 hardware cost comparison is recorded in the gate result (compute premium within the
 3–5× envelope, or the deviation explained).
