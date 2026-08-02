@@ -643,6 +643,8 @@ def test_session_ceiling_forced_final_then_timeout(mock_get_model, _name, monkey
 def test_overrun_trims_buffer_and_accounts_drops_exactly_once(monkeypatch):
     monkeypatch.setattr(settings, "STREAM_MAX_UNCOMMITTED_S", 1.0)
     monkeypatch.setattr(settings, "STREAM_LEFT_CONTEXT_S", 0.5)
+    # C7.12 validate(): flush left context may never exceed the retention bound
+    monkeypatch.setattr(settings, "STREAM_FLUSH_LEFT_CONTEXT_S", 0.5)
 
     def transcribe(audio, **kwargs):
         return iter([]), SimpleNamespace(language="en", duration=len(audio) / 16000)
@@ -836,3 +838,127 @@ def test_ingest_burst_credit_clamped(mock_get_model, _name, monkeypatch):
                 msg = ws.receive_json()
             assert msg["code"] == "protocol_violation"
             raise WebSocketDisconnect(1008)
+
+
+# C7.12 — flush-seam duplicate: the flush window opens flush_left_context_s
+# before the frontier; the residue of the LAST COMMITTED word re-decodes
+# sentence-initial just past the frontier and must be suppressed (2026-08-02
+# field finding: "very Very", one per VAD pause). C5.3 must still hold.
+def test_flush_seam_duplicate_suppressed_c712():
+    async def run():
+        ws = AsyncMock()
+        s = StreamSession(ws)
+        calls = {"n": 0}
+
+        def transcribe(audio, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                # tick decodes (window at 0): stable hypothesis; agreement
+                # commits "very cool" (frontier = cool's end, 1.2 s)
+                wl = [("very", 0.1, 0.5, 0.95), ("cool", 0.8, 1.2, 0.95),
+                      ("stuff", 1.5, 1.9, 0.95)]
+            else:
+                # flush decode (window at frontier − 1.0 s = 0.2 s): the last
+                # committed word's residue re-emits sentence-initial straddling
+                # the frontier, then the genuine tail follows
+                wl = [("Cool.", 0.95, 1.1, 0.9), ("stuff", 1.4, 1.75, 0.95)]
+            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+                     for t, st, e, p in wl]
+            return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
+                language="en", duration=len(audio) / 16000)
+
+        s.model = SimpleNamespace(transcribe=transcribe)
+        s.append_frame(pcm(2.0))
+        await s._tick_once()  # records prev hypothesis
+        await s._tick_once()  # agreement commits "very cool"
+        await s.do_flush()
+
+        payloads = [c.args[0] for c in ws.send_json.call_args_list]
+        committed = " ".join(p["text"] for p in payloads if p["type"] == "committed")
+        assert committed == "very cool"
+        final = [p for p in payloads if p["type"] == "final"][0]
+        assert final["raw"] == "very cool stuff", (
+            "frontier residue must be seam-suppressed, the genuine tail kept")
+        assert final["raw"].startswith(committed)  # C5.3 untouched
+        assert s.seam_suppressions == 1
+
+    asyncio.run(run())
+
+
+# C7.12 — the seam guard is bounded: a genuine immediate repeat starting past
+# seam_tolerance_s survives the flush.
+def test_flush_seam_genuine_repeat_past_tolerance_survives():
+    async def run():
+        ws = AsyncMock()
+        s = StreamSession(ws)
+        calls = {"n": 0}
+
+        def transcribe(audio, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                wl = [("very", 0.1, 0.5, 0.95), ("cool", 0.8, 1.2, 0.95),
+                      ("stuff", 1.5, 1.9, 0.95)]
+            else:
+                # repeat of the committed word spoken well after the frontier
+                # (abs start 1.7 s > frontier 1.2 s + tolerance 0.1 s)
+                wl = [("cool", 1.5, 1.7, 0.95), ("stuff", 1.75, 1.95, 0.95)]
+            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+                     for t, st, e, p in wl]
+            return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
+                language="en", duration=len(audio) / 16000)
+
+        s.model = SimpleNamespace(transcribe=transcribe)
+        s.append_frame(pcm(2.0))
+        await s._tick_once()
+        await s._tick_once()
+        await s.do_flush()
+
+        payloads = [c.args[0] for c in ws.send_json.call_args_list]
+        final = [p for p in payloads if p["type"] == "final"][0]
+        assert final["raw"] == "very cool cool stuff", (
+            "a genuine repeat outside the seam tolerance must never be eaten")
+        assert s.seam_suppressions == 0
+
+    asyncio.run(run())
+
+
+# C7.12 — MIN_FLUSH_DECODE_S applies to the uncommitted tail, not the window:
+# left context alone must never trigger a flush decode.
+def test_flush_skips_decode_when_only_left_context_remains():
+    async def run():
+        ws = AsyncMock()
+        s = StreamSession(ws)
+        calls = {"n": 0}
+
+        def transcribe(audio, **kwargs):
+            calls["n"] += 1
+            wl = [("very", 0.1, 0.5, 0.95), ("cool", 0.8, 1.2, 0.95),
+                  ("stuff", 1.4, 1.95, 0.95)]
+            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+                     for t, st, e, p in wl]
+            return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
+                language="en", duration=len(audio) / 16000)
+
+        s.model = SimpleNamespace(transcribe=transcribe)
+        # commit everything decodable, leaving < MIN_FLUSH_DECODE_S of tail:
+        # frontier lands at 1.95 s of a 2.0 s buffer (50 ms tail)
+        s.append_frame(pcm(2.0))
+        await s._tick_once()
+        await s._tick_once()  # commits "very cool" (edge guard holds "stuff")
+        # force the frontier to the near-edge case directly: simulate the
+        # ceiling flush arriving when only 50 ms is uncommitted
+        s.policy = s.policy.__class__(
+            committed_words=s.policy.committed_words,
+            committed_through_sample=int(1.95 * s.sr),
+            prev_hypothesis=s.policy.prev_hypothesis,
+        )
+        decode_calls_before = calls["n"]
+        await s.do_flush()
+        assert calls["n"] == decode_calls_before, (
+            "flush must not decode when the uncommitted tail is below "
+            "MIN_FLUSH_DECODE_S, even though the window now carries left context")
+        payloads = [c.args[0] for c in ws.send_json.call_args_list]
+        final = [p for p in payloads if p["type"] == "final"][0]
+        assert final["raw"] == "very cool"  # committed text only
+
+    asyncio.run(run())

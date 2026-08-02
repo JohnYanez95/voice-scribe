@@ -17,6 +17,7 @@ from app.services.stream_policy import (
     normalize_token,
     plan_window,
     retention_start_sample,
+    suppress_seam_duplicate,
 )
 
 CFG = PolicyConfig()
@@ -382,3 +383,77 @@ def test_frontier_timestamp_jitter_does_not_recommit():
     texts = [x.text for x in decision.newly_committed]
     assert "gamma" not in texts, "frontier word committed twice on timestamp jitter"
     assert texts == ["delta", "epsilon"]
+
+
+# ---------------------------------------------------------------------------
+# Flush-seam duplicate guard — C7.12 (2026-08-02 field finding: the commit
+# frontier is a DTW word-end estimate that lands early, so the flush window
+# opens on the last committed word's residue and a context-free decode
+# re-emits it sentence-initial: "very Very", one per VAD pause).
+# ---------------------------------------------------------------------------
+
+def _seam(committed_last, tail_words, frontier_s=2.0):
+    committed = hyp(w(committed_last, frontier_s - 0.4, frontier_s))
+    return suppress_seam_duplicate(committed, tail_words, sample(frontier_s), CFG)
+
+
+def test_seam_residual_duplicate_suppressed():
+    tail = hyp(w("very", 1.98, 2.15), w("cool", 2.3, 2.6))
+    out, hit = _seam("very", tail)
+    assert hit and [x.text for x in out] == ["cool"]
+
+
+def test_seam_case_and_punctuation_drift_suppressed():
+    tail = hyp(w("Very.", 2.01, 2.2), w("cool", 2.3, 2.6))
+    out, hit = _seam("very", tail)
+    assert hit and [x.text for x in out] == ["cool"]
+
+
+def test_seam_different_token_untouched():
+    tail = hyp(w("cool", 2.01, 2.2))
+    out, hit = _seam("very", tail)
+    assert not hit and out == tail
+
+
+def test_seam_non_leading_duplicate_untouched():
+    # Only the leading tail word can be frontier residue.
+    tail = hyp(w("and", 2.01, 2.2), w("very", 2.3, 2.5))
+    out, hit = _seam("very", tail)
+    assert not hit and out == tail
+
+
+def test_seam_genuine_repeat_outside_tolerance_preserved():
+    # A real repeat spoken after a beat starts past seam_tolerance_s.
+    tail = hyp(w("very", 2.0 + CFG.seam_tolerance_s + 0.05, 2.4))
+    out, hit = _seam("very", tail)
+    assert not hit and out == tail
+
+
+def test_seam_at_most_one_word_suppressed():
+    # Cardinality bound: the observed artifact is always a single duplicate;
+    # a second matching word survives even inside the tolerance.
+    tail = hyp(w("very", 1.99, 2.05), w("very", 2.06, 2.12), w("cool", 2.3, 2.6))
+    out, hit = _seam("very", tail)
+    assert hit and [x.text for x in out] == ["very", "cool"]
+
+
+def test_seam_empty_committed_or_empty_tail_noop():
+    tail = hyp(w("very", 2.01, 2.2))
+    assert suppress_seam_duplicate((), tail, sample(2.0), CFG) == (tail, False)
+    committed = hyp(w("very", 1.6, 2.0))
+    assert suppress_seam_duplicate(committed, (), sample(2.0), CFG) == ((), False)
+
+
+def test_seam_punctuation_only_lead_token_untouched():
+    # normalize_token("...") is empty — an empty key must never match.
+    committed = hyp(w("...", 1.6, 2.0))
+    tail = hyp(w("...", 2.01, 2.2))
+    out, hit = suppress_seam_duplicate(committed, tail, sample(2.0), CFG)
+    assert not hit and out == tail
+
+
+def test_seam_word_starting_before_frontier_suppressed():
+    # Residue typically straddles the frontier: starts before it, ends after.
+    tail = hyp(w("very", 1.85, 2.2), w("cool", 2.3, 2.6))
+    out, hit = _seam("very", tail)
+    assert hit and [x.text for x in out] == ["cool"]

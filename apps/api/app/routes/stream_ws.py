@@ -28,9 +28,11 @@ from app.services.stream_policy import (
     WindowPlan,
     agree,
     committed_text,
+    flush as policy_flush,
     localize,
     plan_window,
     retention_start_sample,
+    suppress_seam_duplicate,
 )
 from app.services.transcription import get_current_model_name, get_model
 
@@ -59,6 +61,8 @@ def _policy_config() -> PolicyConfig:
         word_prob_floor=settings.STREAM_WORD_PROB_FLOOR,
         edge_guard_s=settings.STREAM_EDGE_GUARD_S,
         max_holdback_ticks=settings.STREAM_MAX_HOLDBACK_TICKS,
+        flush_left_context_s=settings.STREAM_FLUSH_LEFT_CONTEXT_S,
+        seam_tolerance_s=settings.STREAM_SEAM_TOLERANCE_S,
     )
     cfg.validate()  # C7.1 — env overrides must not reintroduce silent truncation
     return cfg
@@ -107,6 +111,7 @@ class StreamSession:
         self.consecutive_overruns = 0
         self.tick_multiplier = 1
         self.ticks_skipped = 0
+        self.seam_suppressions = 0  # C7.12 — flush-seam duplicates suppressed
         self.decode_ms_samples: list[float] = []  # occupancy telemetry (C9.2-safe)
 
     # -- guard handle protocol (stream_guard.StreamSessionHandle) ----------
@@ -192,8 +197,11 @@ class StreamSession:
     # -- decode -------------------------------------------------------------
 
     def _decode_sync(self, audio: np.ndarray, generation: int, beam_size: int = 5):
-        """Runs in a worker thread. Returns (words, language) or None if the
-        tick was invalidated (flush/reset/teardown bumped the generation)."""
+        """Runs in a worker thread. Returns (words, language, seg_stats) or
+        None if the tick was invalidated (flush/reset/teardown bumped the
+        generation). seg_stats is per-segment (avg_logprob, no_speech_prob) —
+        numeric diagnostics for the flush log line (C9.2: never content);
+        getattr defaults keep model fakes without those attributes valid."""
         kwargs: dict = {
             "beam_size": beam_size,
             "word_timestamps": True,       # C7.6 — trim arithmetic needs them
@@ -204,14 +212,17 @@ class StreamSession:
             kwargs["language"] = self.language
         segments, info = self.model.transcribe(audio, **kwargs)
         words: list[tuple[str, float, float, float]] = []
+        seg_stats: list[tuple[float, float]] = []
         for seg in segments:
             if self.decode_generation != generation:
                 return None  # invalidated mid-iteration — discard hypothesis
+            seg_stats.append((float(getattr(seg, "avg_logprob", 0.0)),
+                              float(getattr(seg, "no_speech_prob", 0.0))))
             for wd in (seg.words or []):
                 words.append((wd.word, wd.start, wd.end, wd.probability))
         if self.decode_generation != generation:
             return None
-        return words, info.language
+        return words, info.language, seg_stats
 
     async def _apply_overflow(self, plan: WindowPlan, committed_edge: int) -> None:
         """C5.6: on overrun, drop the OLDEST uncommitted audio from the buffer
@@ -276,7 +287,7 @@ class StreamSession:
 
         if result is None or self.decode_generation != generation:
             return  # flush/reset invalidated this tick
-        raw_words, language = result
+        raw_words, language, _seg_stats = result
         if self.language is None and language:
             self.pin_language(language)  # C7.7: pinned from first successful decode
 
@@ -366,12 +377,26 @@ class StreamSession:
             # the emitted text disagree.
             plan = plan_window(committed_edge, self.total_samples, self.cfg)
             await self._apply_overflow(plan, committed_edge)
-            flush_start = max(plan.context_end_sample, self.base_sample)
-            audio = self._window_audio(flush_start)
+            # C7.12: the flush decodes with bounded left context past the
+            # frontier and localizes against the frontier — the same shape as
+            # a tick. A window opening exactly at the frontier decodes the
+            # acoustic residue of the last committed word (the frontier is a
+            # DTW word-end estimate that lands early) with nothing to suppress
+            # it, re-emitting that word sentence-initial (2026-08-02 field
+            # finding: "very Very").
+            frontier = max(plan.context_end_sample, self.base_sample)
+            flush_ctx = int(self.cfg.flush_left_context_s * self.sr)
+            window_start = max(frontier - flush_ctx, self.base_sample)
+            # The decode-or-skip threshold applies to the uncommitted tail,
+            # not the window — left context alone must never trigger a decode.
+            tail_samples = self.total_samples - frontier
+            audio = self._window_audio(window_start)
             tail_words = ()
             language = self.language or ""
             flush_decode_ms = 0.0
-            if len(audio) >= int(MIN_FLUSH_DECODE_S * self.sr):
+            seam_suppressed = False
+            avg_logprob = no_speech_prob = None
+            if tail_samples >= int(MIN_FLUSH_DECODE_S * self.sr):
                 generation = self.decode_generation
                 decode_start = time.monotonic()
                 try:
@@ -389,18 +414,32 @@ class StreamSession:
                     result = None
                 flush_decode_ms = (time.monotonic() - decode_start) * 1000.0
                 if result is not None:
-                    raw_words, detected = result
+                    raw_words, detected, seg_stats = result
                     if self.language is None and detected:
                         self.pin_language(detected)
                         language = detected
-                    tail_words = localize(raw_words, flush_start, flush_start, self.cfg)
+                    tail_words = localize(raw_words, window_start, frontier, self.cfg)
+                    tail_words, seam_suppressed = suppress_seam_duplicate(
+                        self.policy.committed_words, tail_words, frontier, self.cfg
+                    )
+                    if seam_suppressed:
+                        self.seam_suppressions += 1
+                    if seg_stats:
+                        # Worst segment on each axis — flush-tail hallucination
+                        # attribution for field finding (c). Numbers only (C9.2).
+                        avg_logprob = round(min(s[0] for s in seg_stats), 3)
+                        no_speech_prob = round(max(s[1] for s in seg_stats), 3)
 
             log.info("stream flush", utterance_id=self.utterance_id,
                      drain_ms=f"{drain_ms:.0f}",
                      decode_ms=f"{flush_decode_ms:.0f}",
-                     window_s=f"{len(audio) / self.sr:.1f}")
+                     window_s=f"{len(audio) / self.sr:.1f}",
+                     tail_s=f"{max(tail_samples, 0) / self.sr:.2f}",
+                     avg_logprob=avg_logprob, no_speech_prob=no_speech_prob,
+                     seam_suppressed=seam_suppressed)
             prior = committed_text(self.policy.committed_words)
-            tail = committed_text(tail_words)
+            tail_committed, self.policy = policy_flush(self.policy, tail_words)
+            tail = committed_text(tail_committed)
             raw = f"{prior} {tail}".strip() if prior and tail else (prior or tail)
             duration = (self.total_samples - self.utterance_start_sample) / self.sr
 
@@ -667,6 +706,7 @@ async def ws_stream(websocket: WebSocket) -> None:
         log.info("stream session closed", session_id=session.session_id,
                  ticks=len(samples), ticks_skipped=session.ticks_skipped,
                  tick_multiplier=session.tick_multiplier,
+                 seam_suppressions=session.seam_suppressions,
                  occupancy_p95=occupancy_p95, occupancy_max=occupancy_max,
                  decode_ms_max=round(samples[-1], 1) if samples else None,
                  decode_seconds_total=round(sum(samples) / 1000.0, 1))

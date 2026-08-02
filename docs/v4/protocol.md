@@ -169,8 +169,14 @@ message whose `utterance_id` is below the current one.
   different committed text for a given `(utterance_id, offset)` than it displayed before.
   `stream_bench` verifies zero retractions by replaying the message log through a reference
   reducer — not by inspection.
-- **C5.2** The flush decode covers the **uncommitted buffer only**. Committed audio is trimmed
-  at each commit and is never re-decoded — an invariant of the flush, not just of the tick.
+- **C5.2** *(corrected 2026-08-02 — see that amendments block)* Committed audio is never
+  re-**committed**; bounded re-**decode** of committed left context is by design on both
+  paths. Tick windows open `left_context_s` before the frontier and `localize()` suppresses
+  re-decoded committed words by timestamp; the flush window opens `flush_left_context_s`
+  before the frontier under the same suppression, plus the C7.12 seam guard. (The original
+  "never re-decoded" wording was false for the tick path by design, and it justified
+  building the flush window with no left context — which produced the frontier-residual
+  duplicate the 2026-08-02 field test observed.)
 - **C5.3** `final.raw` MUST carry the utterance's concatenated committed text as a **literal
   prefix**. Asserted by `stream_bench` on every utterance.
 - **C5.4** `cleaned` is a display derivation available only on `final`; `committed` carries raw
@@ -381,3 +387,44 @@ front-loads `MIN_DECODE_S` (C7.10), so the first tick fires after ~0.2 s of live
 rather than 1.0 s; the sign matters because the v4.2 `STREAM_MIN_DECODE_S 1.0 → 0.8`
 projection was computed without it. Reports carry `first_partial_anchor` so every number is
 attributable to its clock.
+
+## Amendments — interactive field-test review, 2026-08-02
+
+Wire-visible behavior unchanged (no C11 obligation; protocol version stays 1). Forced by
+the live real-mic finding: adjacent-word duplicates at flush boundaries ("very Very",
+~1 per VAD pause; harness classification: 3 of 8 flushes intra-`final`, 0 inter-`final`).
+
+- **C5.2 corrected** (inline above): the "never re-decoded" claim was false for the tick
+  path by design and justified a flush window with no left context — the root cause of the
+  duplicates. The invariant is *never re-committed*.
+- **C7.12 (new) — flush seam.** The flush decode window opens `flush_left_context_s`
+  (default 1.0 s; env `STREAM_FLUSH_LEFT_CONTEXT_S`; must not exceed `left_context_s`, the
+  retention bound) before the commit frontier and is localized against the frontier, the
+  same shape as a tick. After localization, `suppress_seam_duplicate()` (pure function,
+  `stream_policy`) drops the **leading** tail word iff it `normalize_token`-equals the last
+  committed word **and** starts within `seam_tolerance_s` (default 0.10 s; env
+  `STREAM_SEAM_TOLERANCE_S`) of the frontier — at most one word per flush. Rationale: the
+  frontier is a DTW word-end estimate that lands early, so the window otherwise opens on
+  the last committed word's residue, which a context-free decode re-emits sentence-initial.
+  **Accepted residual risk:** a genuine immediate repeat whose second copy starts inside
+  the tolerance is indistinguishable by any local rule and is dropped (cf. C5.5's
+  deliberate-trade form). Suppressions are counted (`seam_suppressions` on the
+  session-close line; `seam_suppressed` per flush) — counters only, never content (C9.2).
+- **C7.9 note:** the flush decode window grew by `flush_left_context_s`; the finalization
+  budget now includes it. Measured post-fix on the seam probe before/after: p50 0.319 → see
+  roadmap v4.1 record for the recorded deltas.
+- **Flush decode floor scope:** `MIN_FLUSH_DECODE_S` applies to the **uncommitted tail**,
+  not the window — left context alone must never trigger a decode.
+- **Capture-side (C2.6 companion, `useVAD.ts`):** the held-frame release now gates on
+  vad-web's **positive** speech threshold (0.30) — the redemption counter resets only
+  there, so releasing at the negative threshold (0.25) let gray-zone frames push the whole
+  held queue (~1.3 s of near-silence) into the flush decode: Whisper's most reliable
+  hallucination trigger, and the likeliest carrier of the field's suspected filler
+  insertions. VAD thresholds/pads are now passed explicitly to `MicVAD.new` and the tap's
+  constants derive from them. Held queue bounded (`HELD_MAX_FRAMES`, oldest streamed on
+  overflow), so the "≤ 192 ms trailing silence" claim holds except under sustained
+  borderline noise, where the bound is the cap.
+- **Flush diagnostics (numbers only, C9.2):** the flush log line carries `tail_s`, worst
+  per-segment `avg_logprob`/`no_speech_prob`, and `seam_suppressed` — the attribution data
+  for the deferred v4.2 flush-tail veto decision (built only if filler insertions survive
+  these fixes; any veto must withhold the whole tail, never edit words, per C5.5).

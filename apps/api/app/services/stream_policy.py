@@ -40,6 +40,17 @@ class PolicyConfig:
     # this must still be suppressed or it commits twice (append-only, so the
     # duplicate is permanent and invisible to the retraction reducer).
     frame_tolerance_s: float = 0.02
+    # Flush left context (C7.12): the flush decode opens this far before the
+    # commit frontier so localize() has a real boundary to suppress against.
+    # Deliberately smaller than left_context_s — the flush decode is the
+    # finalization-latency path, and every second here is paid there.
+    flush_left_context_s: float = 1.0
+    # Seam-suppressor bound (C7.12): a flush-tail leading word matching the
+    # last committed word is treated as frontier residue only if it starts
+    # within this of the frontier. The DTW word-end error that creates the
+    # residue is tens of ms; a genuine repeat spoken later in the tail starts
+    # well past this and is never touched.
+    seam_tolerance_s: float = 0.10
 
     def validate(self) -> None:
         """Window invariant (C7.1): pad_or_trim silently truncates past 30 s."""
@@ -49,6 +60,14 @@ class PolicyConfig:
                 f"window invariant violated: left_context ({self.left_context_s}) + "
                 f"max_uncommitted ({self.max_uncommitted_s}) + safety ({self.safety_s}) "
                 f"= {total} > 30.0"
+            )
+        if self.flush_left_context_s > self.left_context_s:
+            # Retention only guarantees left_context_s before the frontier
+            # (retention_start_sample); a larger flush context would silently
+            # clamp to the buffer base and decode with wrong-length context.
+            raise ValueError(
+                f"flush_left_context_s ({self.flush_left_context_s}) exceeds "
+                f"left_context_s ({self.left_context_s}) — retained audio cannot cover it"
             )
 
 
@@ -271,12 +290,50 @@ def agree(
     )
 
 
+def suppress_seam_duplicate(
+    committed: tuple[Word, ...],
+    tail: tuple[Word, ...],
+    frontier_sample: int,
+    cfg: PolicyConfig,
+) -> tuple[tuple[Word, ...], bool]:
+    """Flush-seam duplicate guard (C7.12).
+
+    The commit frontier is a DTW word-end estimate that routinely lands tens
+    of ms early, so the flush window can open on the acoustic residue of the
+    last committed word — which a context-free decode re-emits sentence-
+    initial ("very Very", 2026-08-02 field finding). The guard is a four-way
+    conjunction, each part bounding a specific false-positive:
+      1. only the LEADING tail word is eligible (nothing else is seam residue),
+      2. normalize_token equality with the last committed word (the existing
+         commit key — case/punctuation drift comes free),
+      3. the word starts within seam_tolerance_s of the frontier (a genuine
+         repeat spoken after a pause starts later and is never touched),
+      4. at most one word per flush (the observed artifact is always single).
+    Returns (possibly-trimmed tail, suppressed?). Accepted residual risk: a
+    genuine immediate repeat whose second copy starts inside the tolerance is
+    indistinguishable by any local rule and is dropped; suppressions are
+    counted on the session-close line so the trade stays observable.
+    """
+    if not committed or not tail:
+        return tail, False
+    lead = tail[0]
+    key = normalize_token(lead.text)
+    if not key or key != normalize_token(committed[-1].text):
+        return tail, False
+    frontier_s = frontier_sample / cfg.sample_rate
+    if lead.start > frontier_s + cfg.seam_tolerance_s:
+        return tail, False
+    return tail[1:], True
+
+
 def flush(state: PolicyState, final_hyp: tuple[Word, ...]) -> tuple[tuple[Word, ...], PolicyState]:
     """VAD flush (C3.3): silence is ground truth — commit everything remaining.
 
-    No agreement, no vetoes. Returns (newly_committed, reset-for-next-utterance
-    state). The flush decode covered the uncommitted buffer only (C5.2), so
-    final_hyp cannot contradict previously committed words.
+    No agreement, no word-level vetoes. Returns (newly_committed,
+    reset-for-next-utterance state). The flush decode re-covers bounded left
+    context past the frontier (C7.12); the caller localizes against the
+    frontier and applies suppress_seam_duplicate() before committing, so
+    final_hyp extends — never contradicts — previously committed words.
     """
     new_state = PolicyState()  # per-utterance state resets; session clock lives outside
     return final_hyp, new_state

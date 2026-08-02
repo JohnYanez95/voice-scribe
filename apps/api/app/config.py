@@ -34,6 +34,8 @@ class Settings:
     STREAM_MIN_DECODE_S: float = float(os.getenv("STREAM_MIN_DECODE_S", "1.0"))
     STREAM_MAX_UNCOMMITTED_S: float = float(os.getenv("STREAM_MAX_UNCOMMITTED_S", "24.0"))
     STREAM_LEFT_CONTEXT_S: float = float(os.getenv("STREAM_LEFT_CONTEXT_S", "3.0"))
+    STREAM_FLUSH_LEFT_CONTEXT_S: float = float(os.getenv("STREAM_FLUSH_LEFT_CONTEXT_S", "1.0"))
+    STREAM_SEAM_TOLERANCE_S: float = float(os.getenv("STREAM_SEAM_TOLERANCE_S", "0.1"))
     STREAM_WORD_PROB_FLOOR: float = float(os.getenv("STREAM_WORD_PROB_FLOOR", "0.5"))
     STREAM_EDGE_GUARD_S: float = float(os.getenv("STREAM_EDGE_GUARD_S", "0.6"))
     STREAM_MAX_HOLDBACK_TICKS: int = int(os.getenv("STREAM_MAX_HOLDBACK_TICKS", "6"))

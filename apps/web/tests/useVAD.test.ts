@@ -258,3 +258,93 @@ describe("useVAD", () => {
     expect(result.current.isListening).toBe(false);
   });
 });
+
+// 2026-08-02 field-test fix: the held-frame release must gate on vad-web's
+// POSITIVE speech threshold. vad-web's redemption counter resets only at
+// >= positiveSpeechThreshold (0.30) and advances only below
+// negativeSpeechThreshold (0.25); frames in [0.25, 0.30) freeze it — so a
+// gray-zone frame is still inside a possible redemption window, and
+// releasing the held queue on it streamed up to ~1.3 s of near-silence into
+// the flush decode (Whisper's most reliable hallucination trigger).
+describe("useVAD gray-zone gating (2026-08-02)", () => {
+  const feedGray = (f: Float32Array) =>
+    capturedOptions.onFrameProcessed?.({ isSpeech: 0.27 }, f);
+
+  it("passes explicit VAD tuning to MicVAD.new (no silent default drift)", async () => {
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    await act(async () => {
+      await result.current.startListening();
+    });
+    expect(MicVAD.new).toHaveBeenCalledWith(
+      expect.objectContaining({
+        positiveSpeechThreshold: 0.3,
+        negativeSpeechThreshold: 0.25,
+        preSpeechPadMs: 800,
+        redemptionMs: 1400,
+        minSpeechMs: 400,
+      })
+    );
+  });
+
+  it("holds gray-zone frames during speech; releases only on confirmed speech", async () => {
+    const frames: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd: vi.fn(), onSpeechFrame: (f) => frames.push(f) })
+    );
+    await act(async () => {
+      await result.current.startListening();
+    });
+    act(() => {
+      feedSpeech(frame(1));
+      capturedOptions.onSpeechStart?.();
+      feedGray(frame(2)); // [neg, pos): redemption counter frozen — held
+      feedGray(frame(3)); // held
+    });
+    expect(frames.map((f) => f[0])).toEqual([1]); // gray frames not streamed
+    act(() => {
+      feedSpeech(frame(4)); // >= pos: counter reset — release in order
+    });
+    expect(frames.map((f) => f[0])).toEqual([1, 2, 3, 4]);
+  });
+
+  it("gray-zone tail at speech end releases at most the 2-frame tail", async () => {
+    const frames: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd: vi.fn(), onSpeechFrame: (f) => frames.push(f) })
+    );
+    await act(async () => {
+      await result.current.startListening();
+    });
+    act(() => {
+      feedSpeech(frame(1));
+      capturedOptions.onSpeechStart?.();
+      [2, 3, 4].forEach((i) => feedGray(frame(i))); // gray run, then VAD ends
+      capturedOptions.onSpeechEnd?.(new Float32Array([9]));
+    });
+    expect(frames.map((f) => f[0])).toEqual([1, 2, 3]);
+  });
+
+  it("bounds the held queue: oldest frame streams on overflow past the cap", async () => {
+    const frames: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd: vi.fn(), onSpeechFrame: (f) => frames.push(f) })
+    );
+    await act(async () => {
+      await result.current.startListening();
+    });
+    // cap = floor(1400/96) * 2 = 28 held frames
+    act(() => {
+      feedSpeech(frame(0));
+      capturedOptions.onSpeechStart?.();
+      for (let i = 1; i <= 29; i++) feedGray(frame(i));
+    });
+    // frame(1) — the oldest — spilled when frame(29) exceeded the cap
+    expect(frames.map((f) => f[0])).toEqual([0, 1]);
+    act(() => {
+      feedSpeech(frame(30)); // release remaining 28 in order, then live
+    });
+    expect(frames.map((f) => f[0])).toEqual([
+      0, 1, ...Array.from({ length: 28 }, (_, k) => k + 2), 30,
+    ]);
+  });
+});

@@ -274,6 +274,13 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
         "uid_alignment_ok": True,
         "first_partial_anchor": "first_frame_sent",
         "errors": [],
+        # v4.1 field-finding (a) classification (HR-1): flush-seam duplicates.
+        # intra_final = last committed word == first flush-tail word inside one
+        # final (the frontier-residual re-decode signature). Counts legitimate
+        # immediate repeats too — it is a classification instrument, not a gate.
+        "seam_eligible_flushes": 0,
+        "seam_dup_intra_final": 0,
+        "seam_dup_utterances": [],
     }
     final_raws: list[str] = []
     # Per-utterance capture (v4.1 re-spec):
@@ -372,6 +379,16 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
                     prior = reducer.committed.get(uid, "")
                     if prior and not msg["raw"].startswith(prior):
                         stats["prefix_invariant_ok"] = False
+                    elif prior:
+                        # Seam classification: normalized last-committed word vs
+                        # first word the final appended past the committed prefix.
+                        tail_txt = msg["raw"][len(prior):].strip()
+                        if tail_txt:
+                            stats["seam_eligible_flushes"] += 1
+                            pw, tw = norm_words(prior), norm_words(tail_txt)
+                            if pw and tw and pw[-1] == tw[0]:
+                                stats["seam_dup_intra_final"] += 1
+                                stats["seam_dup_utterances"].append(uid)
                     reducer.on_final(uid, msg["raw"])
                     final_raws.append(msg["raw"])
                     final_by_utt[uid] = {"_raw": msg["raw"],
@@ -403,6 +420,15 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
 
     speech_end_wall = (t_first_frame or 0) + audio_dur
     stats["retractions"] = reducer.retractions
+    # Seam classification, inter-final side (HR-1): last word of utterance N's
+    # final vs first word of N+1's — the cross-utterance case the capture-side
+    # geometry says is impossible; a nonzero count here refutes that.
+    inter = 0
+    for a, b in zip(final_raws, final_raws[1:]):
+        wa, wb = norm_words(a), norm_words(b)
+        if wa and wb and wa[-1] == wb[0]:
+            inter += 1
+    stats["seam_dup_inter_final"] = inter
 
     # --- per-utterance latency percentiles (v4.1 harness completion) ---
     fp = [round(first_partial_per_utt[u], 3)
