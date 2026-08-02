@@ -1672,18 +1672,61 @@ veto. (d) GPU ~50 % util — expected; matches the `occupancy_p95` 0.57 paced-de
 design. **Committed-text stability held: no committed-text mutation observed (explicitly
 checked); tentative-tail flicker at utterance head/tail is as designed.**
 
+**Field-bug fix record (2026-08-02, review-mandated; commits `3666c4f` + docs):**
+executed in the review-locked order — classify, rate, fix, re-measure.
+- **HR-1 classification (stream_bench seam counters, new):** synthetic 8-utterance seam
+  probe (repo `test.mp3` ×3 per utterance, 800 ms gaps — the original gate recording is
+  deleted by privacy design) against the pre-fix server: **3 of 8 flushes intra-`final`
+  seam duplicates, 0 inter-`final`** — mechanism confirmed at the wire, cross-utterance
+  path refuted by measurement as well as geometry. Pre-fix rate recorded → fix falsifiable.
+- **Fix (a) structural:** flush window opens `STREAM_FLUSH_LEFT_CONTEXT_S` (1.0 s,
+  validate-capped ≤ `left_context_s`) before the frontier, localized against the frontier
+  — tick-shaped; `MIN_FLUSH_DECODE_S` now gates on the uncommitted tail, not the window.
+- **Fix (a) guard:** `suppress_seam_duplicate()` pure function (C7.12 four-way
+  conjunction: leading word, `normalize_token` equality, `STREAM_SEAM_TOLERANCE_S` 0.10 s,
+  ≤ 1/flush); applied in `do_flush` before `policy_flush()` (un-deads `flush()`);
+  suppressions counted (`seam_suppressions`, session-close line). Client-side dedup
+  rejected per C5.1.
+- **Fix (VAD band leak):** `useVAD` held-frame release gates on the positive threshold
+  (0.30) where vad-web's redemption counter actually resets; thresholds/pads passed
+  explicitly to `MicVAD.new`, tap constants derived; held queue bounded
+  (`HELD_MAX_FRAMES` = 2× redemption, oldest streamed on overflow). The "≤ 192 ms trailing
+  silence" claim now holds as written (cap-bounded under sustained borderline noise).
+- **Diagnostics for (c) attribution (numbers only, C9.2):** flush log line carries
+  `tail_s`, worst-segment `avg_logprob`/`no_speech_prob`, `seam_suppressed`. The v4.2
+  flush-tail veto is built only if (c) survives these fixes (OR-form or tighter — the
+  faster-whisper AND-form at defaults is a structural no-op; whole-tail withhold, never
+  word edits).
+- **Post-fix same-audio re-run:** **seam duplicates 3 → 0**, and `seam_suppressions` = 0 —
+  the structural fix alone cleared them; the guard fired never (backstop only, zero
+  observed false positives). Retractions 0, prefix invariant ok, force-commit 0.125 →
+  0.122, finalization p50 0.319 → 0.276 s / max 0.651 → 0.676 s (probe noise, no material
+  regression from the +1.0 s window). HR-8's delta-vs-2026-08-01 on the original gate
+  recording is impossible (audio deleted); the u20-equivalent gate re-run lands with the
+  fresh recording from the live-smoke sitting.
+- **Docs:** protocol C5.2 corrected ("never re-decoded" → never re-*committed*), C7.12
+  added with the accepted-residual-risk statement, 2026-08-02 amendments block. Tests
+  324 (194 fe / 130 be), tsc clean, contract unchanged (no wire change).
+
 **Still open before v4.1 sign-off (human-in-the-loop):** completing the interactive smoke —
-full ~3-min continuous dictation (committed text never mutates), kill-server-mid-stream →
-one-shot fallback with PCM replay, transcript-vs-spoken comparison for findings (b)/(c);
-`make desktop` for the WebKitGTK adapter check (ScriptProcessor is the in-library
-contingency); VAD detection lag measurement (spike page: speech-file run or mic); and the
-three-persona review of this record.
+full ~3-min continuous dictation (committed text never mutates; post-fix duplicate rate
+observed live), kill-server-mid-stream → one-shot fallback with PCM replay, `ps`/VRAM
+clean after session close, transcript-vs-spoken comparison for findings (b)/(c) (counts
+and rates only — no transcript text or audio in the repo); a fresh-recording u20
+silence-split gate run (HR-8 deltas vs 2026-08-01 stated); `make desktop` for the
+WebKitGTK adapter check (ScriptProcessor is the in-library contingency); VAD detection
+lag measurement (spike page: speech-file run or mic); and the three-persona review of
+the amended record (mechanism review completed 2026-08-02; sign-off review pending the
+smoke).
 
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial
-tail flickers but never survives incorrectly into committed text; final segments match the
-one-shot path's quality on the same audio (with the pre-roll replay in place — without it this
-line fails for capture reasons, not policy reasons). Kill the server mid-stream → frontend
+tail flickers but never survives incorrectly into committed text; streaming-vs-one-shot quality
+on the same audio judged by the **re-specified WER lines** (wer_micro reported +
+`divergence_not_boundary_concentrated` + `forced_span_wer` — see the latency-targets section;
+word-for-word equivalence was retired as a v4 claim, and this bullet previously restated the
+retired form — reconciled 2026-08-02 per PM review) (with the pre-roll replay in place —
+without it this line fails for capture reasons, not policy reasons). Kill the server mid-stream → frontend
 falls back to the one-shot path gracefully, replaying the retained utterance PCM. `ps`/VRAM
 clean after session close. Client VAD detection lag reported as its own number next to the
 server-side finalization latency.

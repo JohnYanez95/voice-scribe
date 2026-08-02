@@ -127,3 +127,40 @@ While the transcript scrolls in the report’s message flow (or when v4.1 render
   utterance (the duplicate-commit regression).
 - Note anything the numbers don't capture: odd punctuation at commit boundaries, first-word
   truncation, hallucinated words during pauses.
+
+## 7. Interactive real-mic smoke runbook (v4.1 sign-off sitting)
+
+Added 2026-08-02 (PM review flag: the smoke previously existed only as roadmap prose).
+One sitting closes every remaining human-in-the-loop gate line. **Open the record with a
+configuration line** — browser + version, model, device, server mode, commit — like every
+other run in the v4 record.
+
+Preconditions: backend bare-host GPU server (section 3) on the post-`3666c4f` code,
+`make web` (or `make desktop` for the WebKitGTK pass), microphone.
+
+1. **Three-minute continuous dictation** (Settings → continuous mode). Watch per section 6.
+   Additionally count, against your own speech: flush-boundary duplicates (expected ~0
+   after the C7.12 fix; any occurrence → note whether `seam_suppressed=True` appears on
+   the server's flush line for that utterance), suspected filler insertions at pauses
+   (finding (c)), substitutions (finding (b)).
+2. **Fresh gate recording:** save one ~3–4 min dictation WAV (outside the repo), then run
+   the section-4 pair (u20-silence + u3) against it and record HR-8 deltas vs the
+   2026-08-01 report JSONs. The seam counters (`seam_dup_intra_final`,
+   `seam_dup_inter_final`, `seam_eligible_flushes`) must be in the committed report.
+3. **Kill-server fallback:** mid-utterance, `kill` the uvicorn process → the frontend must
+   fall back to the one-shot path, replaying the retained utterance PCM; no committed text
+   lost, error surfaced non-fatally.
+4. **Post-close hygiene:** after stopping, `ps` for orphaned processes and `nvidia-smi`
+   for residual VRAM (gate line: clean after session close).
+5. **Transcript-vs-spoken comparison** for findings (b)/(c) on two utterances of the
+   recording. **Privacy rule:** the committed artifact carries counts, rates, and
+   positions relative to flush boundaries only — never transcript text, never audio.
+   Short illustrative word pairs are the ceiling (Engineering Rules; PM flag 3).
+6. **VAD detection lag** via `apps/web/spike/vad-frames.html` (mic or speech-file run) —
+   reported next to the server-side finalization number per the protocol's first-partial
+   anchor record.
+7. **WebKitGTK adapter check:** repeat a short version of step 1 under `make desktop`;
+   ScriptProcessor is the in-library contingency if the AudioWorklet path fails.
+
+Record outcomes in the roadmap v4.1 block (met / missed with named cause / deferred with
+reason), then convene the three-persona sign-off review.
