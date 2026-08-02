@@ -362,13 +362,17 @@ async function runMicSanity() {
   log("mic sanity: requesting mic…");
   let frames = 0;
   let nonFinite = 0;
+  let speechFrames = 0;
+  const rmsValues: number[] = [];
   const at: number[] = [];
   const vad = await MicVAD.new({
     baseAssetPath: "/",
     onnxWASMBasePath: "/node_modules/onnxruntime-web/dist/",
-    onFrameProcessed: (_p, frame) => {
+    onFrameProcessed: (probs, frame) => {
       frames++;
       at.push(performance.now());
+      rmsValues.push(rms(frame, 0, frame.length));
+      if (probs.isSpeech >= 0.3) speechFrames++;
       for (let i = 0; i < frame.length; i++) if (!Number.isFinite(frame[i])) nonFinite++;
     },
   });
@@ -383,12 +387,31 @@ async function runMicSanity() {
     adapter,
     frames,
     nonFinite,
+    speechFrames,
+    rms: {
+      mean: Math.round((rmsValues.reduce((a, b) => a + b, 0) / rmsValues.length) * 1e4) / 1e4,
+      max: Math.round(Math.max(...rmsValues) * 1e4) / 1e4,
+      p95: Math.round(percentile(rmsValues, 0.95) * 1e4) / 1e4,
+    },
     expectedFrames: Math.round((10_000 / 1000) * (SR / 1536)),
     meanGapMs: Math.round((gaps.reduce((a, b) => a + b, 0) / gaps.length) * 10) / 10,
     p95GapMs: Math.round(percentile(gaps, 0.95) * 10) / 10,
   };
   outEl.textContent = JSON.stringify(summary, null, 2);
   log("mic sanity done (metrics only)");
+
+  const post = new URLSearchParams(location.search).get("post");
+  if (post) {
+    try {
+      await fetch(post, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(summary),
+      });
+    } catch (e) {
+      log(`report POST failed: ${e}`);
+    }
+  }
 }
 
 /**
@@ -463,6 +486,53 @@ document.getElementById("file-input")!.addEventListener("change", (e) => {
   if (f) runFileLag(f);
 });
 
-if (new URLSearchParams(location.search).get("auto") === "1") {
-  runSyntheticSuite();
+/** Raw-mic RMS probe (diagnostic): bypasses vad-web — plain getUserMedia with
+ * audio processing disabled, 5 s of RMS via an AnalyserNode. Metrics only. */
+async function runRawMicProbe() {
+  log("raw mic probe…");
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
+  });
+  const ctx = new AudioContext();
+  await ctx.resume();
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  src.connect(analyser);
+  const buf = new Float32Array(analyser.fftSize);
+  const rmsValues: number[] = [];
+  for (let i = 0; i < 50; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    analyser.getFloatTimeDomainData(buf);
+    rmsValues.push(rms(buf as unknown as Float32Array, 0, buf.length));
+  }
+  stream.getTracks().forEach((t) => t.stop());
+  await ctx.close();
+  const summary = {
+    mode: "raw-mic-probe",
+    ctxRate: ctx.sampleRate,
+    rms: {
+      mean: Math.round((rmsValues.reduce((a, b) => a + b, 0) / rmsValues.length) * 1e4) / 1e4,
+      max: Math.round(Math.max(...rmsValues) * 1e4) / 1e4,
+    },
+  };
+  outEl.textContent = JSON.stringify(summary, null, 2);
+  const post = new URLSearchParams(location.search).get("post");
+  if (post) {
+    await fetch(post, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(summary),
+    }).catch(() => {});
+  }
+  log("raw mic probe done");
 }
+
+const autoMode = new URLSearchParams(location.search).get("auto");
+if (autoMode === "1") runSyntheticSuite();
+else if (autoMode === "mic") runMicSanity();
+else if (autoMode === "micraw") runRawMicProbe();
