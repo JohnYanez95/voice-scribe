@@ -1625,11 +1625,38 @@ mic-RMS probes) — the one detected "utterance" was a near-silence hallucinatio
 itself a live confirmation of why 4a's redemption-tail gating exists. Realistic-speech
 content validation therefore lands with the interactive smoke.
 
-**Still open before v4.1 sign-off (human-in-the-loop):** interactive browser dictation
-smoke with a real microphone (backend + Vite left running; `make desktop` for the WebKitGTK
-adapter check — ScriptProcessor is the in-library contingency), VAD detection lag
-measurement (spike page: speech-file run or mic), and the three-persona review of this
-record.
+**Interactive real-mic smoke (2026-08-01, started — partial):** live dictation against the
+real App + live GPU backend, real microphone. Findings: (a) **adjacent-word boundary
+doubling at high visible rate** — ~5 instances in one short dictated passage ("change
+change", "was was", "is is", "our our", "observe observe"); always a single immediately
+adjacent duplicate at a flush boundary — the flush-boundary re-emission signature.
+Pause-heavy live dictation makes it far more visible than the harness runs (every pause =
+VAD flush = boundary); this promotes a **boundary dedup guard** (text +
+timestamp-epsilon match at flush start) to a named v4.2 priority. Log-prob token
+stitching alone does not fix it — both duplicate occurrences are confident; it is a
+coordinate problem, not a confidence problem. **Refinement from continued live use
+(2026-08-02):** the doubling lands at phrase *ends*, and at least one observed pair
+("very Very") differs in capitalization — the second copy is sentence-initial, i.e. the
+pair straddles an utterance boundary. Mechanism hypothesis: on a short pause, the next
+utterance's 9-frame pre-roll ring reaches back into the previous phrase's tail audio, so
+the final word is decoded in both utterances' independent coordinate spaces — the dedup
+guard must therefore compare across utterance boundaries (last committed word of
+utterance N vs first word of N+1), case-insensitively, not only within-session flush
+starts. (b) Near-homophone substitution ("Pawn"
+for "upon") — one-shot same-audio comparison not yet run. (c) **Suspected
+filler→"upon" insertion at pause points** (recurred across messages at odd positions) —
+if confirmed by transcript-vs-spoken comparison, this is the hallucination-veto case:
+extend the existing word-prob floor with an `avg_logprob`/`no_speech_prob` flush-tail
+veto. (d) GPU ~50 % util — expected; matches the `occupancy_p95` 0.57 paced-decode
+design. **Committed-text stability held: no committed-text mutation observed (explicitly
+checked); tentative-tail flicker at utterance head/tail is as designed.**
+
+**Still open before v4.1 sign-off (human-in-the-loop):** completing the interactive smoke —
+full ~3-min continuous dictation (committed text never mutates), kill-server-mid-stream →
+one-shot fallback with PCM replay, transcript-vs-spoken comparison for findings (b)/(c);
+`make desktop` for the WebKitGTK adapter check (ScriptProcessor is the in-library
+contingency); VAD detection lag measurement (spike page: speech-file run or mic); and the
+three-persona review of this record.
 
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial
