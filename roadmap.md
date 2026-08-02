@@ -1636,13 +1636,34 @@ timestamp-epsilon match at flush start) to a named v4.2 priority. Log-prob token
 stitching alone does not fix it — both duplicate occurrences are confident; it is a
 coordinate problem, not a confidence problem. **Refinement from continued live use
 (2026-08-02):** the doubling lands at phrase *ends*, and at least one observed pair
-("very Very") differs in capitalization — the second copy is sentence-initial, i.e. the
-pair straddles an utterance boundary. Mechanism hypothesis: on a short pause, the next
-utterance's 9-frame pre-roll ring reaches back into the previous phrase's tail audio, so
-the final word is decoded in both utterances' independent coordinate spaces — the dedup
-guard must therefore compare across utterance boundaries (last committed word of
-utterance N vs first word of N+1), case-insensitively, not only within-session flush
-starts. (b) Near-homophone substitution ("Pawn"
+("very Very") differs in capitalization — the second copy is sentence-initial.
+**Mechanism diagnosed at the 2026-08-02 three-persona review (initial pre-roll-overlap
+hypothesis REFUTED by all three reviewers):** the pre-roll ring cannot overlap the
+previous utterance — frames enter the ring only while not speaking, `resetTapState()`
+empties it at `onSpeechEnd`, and ~12 undelivered redemption frames (~1152 ms) separate
+consecutive utterances' wire audio; overlap is structurally 0 ms. The actual mechanism
+is **server-side, intra-`final`, at the flush seam**: the flush decode window opens
+exactly at the commit frontier with no left context (`stream_ws.py` `do_flush`), its
+`localize` call passes the same value as both window start and boundary (suppression
+structurally a no-op), and `agree()` never runs on the flush path — while the frontier
+itself is a DTW word-end estimate that routinely lands tens of ms early. The residue of
+the last committed word opens the flush window and, with
+`condition_on_previous_text=False`, is re-emitted sentence-initial at position 0 —
+"very Very" exactly, one duplicate per VAD pause. Predicted by the C7.2 amendment
+record; invisible to the recorded gate runs because they exercise one flush per session.
+Fix (v4.1, review-mandated): flush left context (`FLUSH_LEFT_CONTEXT_S`, capped ~1.0 s
+to protect the finalization line) + a seam-suppressor pure function in `stream_policy`
+(leading word only, `normalize_token` equality, start within `SEAM_TOLERANCE_S` of the
+frontier, ≤ 1 word/flush, suppressions counted on the session-close line). Client-side
+dedup rejected (C5.1 — it would be a user-visible retraction invisible to the wire
+reducer). Related root cause for suspected finding (c): the flush path has no
+probability floor at all (the word-prob floor lives only in `agree()`), and a `useVAD`
+threshold-coupling leak (frames at prob ∈ [0.25, 0.30) release the full held queue —
+vad-web neither advances nor resets its redemption counter in that band) can push
+~1.3 s of near-silence into the flush decode, so the documented "at most 192 ms of
+trailing silence" guarantee does not hold as written — both fixed under v4.1; the
+flush-tail `avg_logprob`/`no_speech_prob` veto stays a v4.2 candidate only if (c)
+survives these fixes. (b) Near-homophone substitution ("Pawn"
 for "upon") — one-shot same-audio comparison not yet run. (c) **Suspected
 filler→"upon" insertion at pause points** (recurred across messages at odd positions) —
 if confirmed by transcript-vs-spoken comparison, this is the hallucination-veto case:
