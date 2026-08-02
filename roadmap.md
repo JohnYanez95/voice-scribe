@@ -1613,10 +1613,23 @@ clean. (5) Harness re-spec + **two recorded gate runs**
   regime): recorded in `stream_bench` and the gate list; gate candidate at v4.2 with a
   second recording.
 
-**Still open before v4.1 sign-off (human-in-the-loop):** live browser dictation smoke with a
-real microphone, WebKitGTK desktop run (adapter check; ScriptProcessor is the in-library
-contingency), VAD detection lag measurement (spike page has the harness — mic or file run),
-and the three-persona review of this record.
+**Automated live browser smoke (2026-08-01, headless Edge 151 vs the real App + live GPU
+backend, driver `apps/web/spike/smoke.html`):** validated end-to-end from the real UI —
+Record click opens one streaming session; ping keepalive held a zero-frame session alive
+for ~2 minutes and the slot released cleanly on close (C1.5/C3.8 observed live, twice); a
+VAD-triggered utterance streamed frames → flush → `final` → textarea; live region rendered
+a tentative tail and cleared at final; Stop drained to done; no error states. **Content
+check not closed:** Edge headless's `--use-file-for-fake-audio-capture` feeds fake-device
+noise (~0.002 RMS) instead of the WAV regardless of input level (measured via the spike's
+mic-RMS probes) — the one detected "utterance" was a near-silence hallucination, which is
+itself a live confirmation of why 4a's redemption-tail gating exists. Realistic-speech
+content validation therefore lands with the interactive smoke.
+
+**Still open before v4.1 sign-off (human-in-the-loop):** interactive browser dictation
+smoke with a real microphone (backend + Vite left running; `make desktop` for the WebKitGTK
+adapter check — ScriptProcessor is the in-library contingency), VAD detection lag
+measurement (spike page: speech-file run or mic), and the three-persona review of this
+record.
 
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial
