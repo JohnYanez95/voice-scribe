@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Voice Scribe is a local-first speech-to-text tool for development workflows. A user records speech, a GPU-accelerated backend transcribes it locally using faster-whisper, and the transcript is returned to an editable text area for review and delivery. Two runtime contexts: browser (React UI + Docker backend) and desktop (Tauri webview + bare-host Python sidecar). No cloud services are involved.
 
-**Current milestone:** v4.0 (streaming backend) complete on branch `v4-streaming` — design review 2026-07-31 (protocol locked in `docs/v4/protocol.md`), post-implementation peer review 2026-07-31 (four confirmed defect clusters, fixed same day, backend tests 102 → 114), field test 2026-08-01 (correctness gate closed on real audio; latency/cost carries in the roadmap's "v4.0 field test" record). v4.1 (frontend integration) next — first task is the `onFrameProcessed` de-risk spike; the review also mandated an idle-timeout/keepalive protocol decision before capture plumbing. Streaming ingestion is capture-layer work; the downstream-product boundary is unchanged.
+**Current milestone:** v4.1 (frontend streaming integration) built on branch `v4-streaming`, 2026-08-01 — after the three-persona plan consult. Landed in order: `onFrameProcessed` de-risk spike (PASS — harness `apps/web/spike/`, findings in the roadmap v4.1 bullet), protocol amendments (ping keepalive C3.8 with `idle_timeout_s` capability signal, C2.4/C2.5/C4.6 reconciliations, C10.2 default degrade rule, C10.3 FIFO retention, 1500 s session rotation), diagrams-before-code, capture plumbing (useVAD per-frame tap + pre-roll ring + redemption-tail gating, `streamSession.ts`, live region, App integration), and the stream_bench WER re-spec + two recorded gate runs. Remaining before v4.1 sign-off: live browser/WebKitGTK/mic smoke (human-in-the-loop), VAD detection lag measurement, and the finalization-tail latency carry (v4.2 lever). Streaming ingestion is capture-layer work; the downstream-product boundary is unchanged.
 
 **Key context:**
 - Two-service system: React frontend (host, port 5174) + FastAPI backend (port 8084) over localhost. Backend runs in Docker (browser mode) or as a Tauri-managed Python sidecar (desktop mode)
@@ -14,7 +14,7 @@ Voice Scribe is a local-first speech-to-text tool for development workflows. A u
 - Desktop clipboard + audio: HTTP server (`tiny_http` on port 8001) in the Rust process. POST `/clipboard` writes to system clipboard via `arboard`. POST `/audio/play` plays embedded WAV cues via `rodio`, bypassing WebKitGTK's unreliable audio subsystem. Both bypass WebKitGTK's user-activation requirement so voice commands work without focus. The Tauri clipboard plugin was tested and permanently rejected (crashes WebKitGTK — see progress report Triage #6)
 - Privacy-first: audio is transient (deleted after processing), transcripts are never logged or stored, API binds to localhost only
 - `roadmap.md` is the single source of truth for scope decisions
-- 248 tests (134 frontend, 114 backend), TypeScript clean, Rust clean
+- 308 tests (190 frontend, 118 backend), TypeScript clean, Rust clean
 - v2 sequence: ~~v2.0 (hotkeys + settings)~~ → ~~v2.1 (streaming + VAD)~~ → ~~v2.2 (continuous mode)~~ → ~~v2.3 (voice commands: copy, clear)~~
 - v3 sequence: ~~v3.0 (Tauri shell + sidecar)~~ → ~~v3.1 (platform.ts + native clipboard)~~ → ~~v3.2 (audio feedback, clipboard cleanup, segmentation fix)~~ → ~~v3.3 (system tray + window management)~~ → ~~v3.4 (design system + theme toggle + model selector extraction)~~. v3.4 is the last mainline milestone — Voice Scribe is the capture primitive; transformation/routing/instrumentation belongs to downstream products (see Adjacent Projects in roadmap)
 
@@ -84,6 +84,7 @@ Request flow (streaming session, v4.0+, backend only until v4.1): `16 kHz mono p
 - `src/features/model-selector/ModelSelector.tsx` — Toolbar model selector; gates fetch on `backendReady`, renders swap status inline (v3.4)
 - `src/features/settings/Settings.tsx` — Settings panel: recording mode, display options, audio mute, max recording duration (v2.0; model selection removed in v3.4)
 - `src/services/api.ts` — Typed fetch calls to localhost:8084
+- `src/services/streamSession.ts` — Persistent `/ws/stream` session client: handshake, wire framing, ping keepalive, stale-utterance filter, C10.2 degrade mapping (v4.1; never imports api.ts)
 - `src/services/platform.ts` — Platform detection (`isDesktop`), clipboard routing, submit stub (deferred), recording state emission to Rust
 - `src/services/audio.ts` — Audio cue playback: browser (HTMLAudioElement) or desktop (POST to Rust rodio server) (v3.2)
 - `src/services/voiceCommands.ts` — Command detection: copy, clear (v2.3)

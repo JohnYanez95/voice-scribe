@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>v4.1 live streaming smoke driver</title>
+    <style>
+      body { font-family: monospace; margin: 1rem; }
+      iframe { width: 100%; height: 70vh; border: 1px solid #888; }
+      pre { background: #f4f4f4; padding: 0.5rem; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h2>v4.1 streaming smoke — real App in iframe, fake-file microphone</h2>
+    <p>
+      Dev-only driver: sets continuous mode, clicks Record in the real App,
+      samples the live region while the (fake-device) mic streams, clicks Stop,
+      and reports observations. Run the browser with
+      <code>--use-fake-device-for-media-capture --use-fake-ui-for-media-capture
+      --use-file-for-fake-audio-capture=&lt;wav&gt;</code>.
+      Params: <code>?auto=1&amp;runs=90&amp;post=URL</code>.
+    </p>
+    <div id="status">idle</div>
+    <pre id="out"></pre>
+    <iframe id="app" title="app under test"></iframe>
+    <script type="module" src="./smoke.ts"></script>
+  </body>
+</html>

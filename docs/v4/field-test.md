@@ -1,9 +1,14 @@
-# v4.0 Field Test Runbook — live dictation through `stream_bench`
+# v4 Field Test Runbook — live dictation through `stream_bench`
 
 The field test closes the gate lines the 2026-07-31 gate run left open (roadmap, "Gate lines
-not closed") and produces the varied-audio WER number the repeated fixture cannot. v4.1 has
-no frontend yet, so "live dictation" means: record real speech, replay it through
-`stream_bench` at real-time pace with multiple flushes.
+not closed") and produces the varied-audio WER number the repeated fixture cannot. Without a
+frontend, "live dictation" means: record real speech, replay it through `stream_bench` at
+real-time pace with multiple flushes.
+
+**Updated for the v4.1 re-spec (2026-08-01 field-test-review additions):** per-utterance
+unchunked WER reference, `--split silence`, per-utterance latency percentiles, forced-span
+WER, and the corrected gate lines below. Reports from before the re-spec
+(`baseline_kind` absent) are not comparable on the WER or cost lines.
 
 ## 1. Prerequisites (one-time)
 
@@ -41,23 +46,31 @@ uvicorn app.main:app --port 8084
 Wait for the model-load + warmup-decode log lines before benching (the load-time warmup
 absorbs first-decode kernel setup).
 
-## 4. Run
+## 4. Run — two gate runs, both required (v4.1)
 
 ```bash
 # from the repo root, with the recording saved as e.g. ~/dictation.wav
+# (a) VAD-representative run — the numbers v4.2 tunes against:
+python ops/scripts/stream_bench.py ~/dictation.wav --utterances 20 --split silence \
+    --baseline --report docs/v4/field-test-report-<date>-u20-silence.json
+# (b) slide exerciser — the only run whose segments exceed MAX_UNCOMMITTED_S:
 python ops/scripts/stream_bench.py ~/dictation.wav --utterances 3 --baseline \
-    --report /tmp/field_test_report.json
+    --report docs/v4/field-test-report-<date>-u3.json
 ```
 
-- `--utterances 3` splits the audio into 3 segments with a flush after each. **Do not run
-  single-flush gate runs** — the single-flush harness is what let the post-flush coordinate
-  bug ship (peer review, 2026-07-31).
-- `--baseline` runs the same audio through the one-shot path and reports
-  `committed_vs_oneshot_wer` plus GPU duty cycle / peak VRAM for the cost table.
-  Recordings longer than the one-shot 60 s cap are split into even chunks under
-  the cap and sent sequentially (`oneshot_chunks` in the report) — the same
-  chunking a v3 user has to do by hand. A baseline failure no longer discards
-  the streaming stats.
+- **Do not run single-flush gate runs** — the single-flush harness is what let the
+  post-flush coordinate bug ship (peer review, 2026-07-31).
+- `--split silence` places boundaries at centers of ≥ 300 ms silences nearest the even
+  targets (parameters echoed into the report; loud fallback to even when too few qualify).
+  Even splits at ≥ 20 utterances cut mid-phrase by construction — useful as a forced-span
+  stressor, not VAD-representative.
+- `--baseline` runs the **per-utterance unchunked reference**: each streamed utterance's own
+  segment posted whole to `/transcribe` (> 60 s segments are `wer_excluded` — chunked only
+  for the wall-clock cost line, never for WER; the retired whole-recording chunked reference
+  is invalid — cuts land mid-phrase and chunk decodes hit temperature fallback). The **cost
+  table is a required output of run (a)** — `baseline_kind` records the regime; walls under
+  the new reference are **not comparable** to the 2026-08-01 chunked figure. A reference
+  failure fails the gate via `baseline_completed`, never a silent exit 0.
 - The report contains counters and latencies only — never transcript text.
 
 ## 5. Observations to record (the open gate lines)
@@ -71,16 +84,31 @@ While the run is live:
 
 After the run:
 
-- **Gate block** printed by the harness: retractions 0, prefix invariant, dropped_audio_ms 0,
-  force-commit rate < 5%, first partial ≤ 1.5 s, finalization ≤ 0.5 s (now the **max across
-  flushes**), `partials_in_every_utterance` PASS (the multi-utterance regression line).
-- **`stream session closed` server log line:** `ticks_skipped` (gate: 0 on this nominal run)
-  and `occupancy_p95` (gate: ≤ 0.7) — these are server-internal and reported only here.
+- **Gate block** printed by the harness (v4.1 lines): retractions 0, prefix invariant,
+  utterance_alignment, dropped_audio_ms 0, force-commit rate < 5%,
+  `first_partial_p50 ≤ 1.5 s` (anchor: `first_frame_sent` — the additive user-perceived
+  number is a client measurement, protocol doc amendments),
+  `finalization_max_excl_first ≤ 0.5 s` (excludes exactly the utterance-1 warm-up carry, a
+  named v4.2 item; p50 and raw max reported), `partials_in_every_utterance`,
+  `baseline_completed`, `divergence_not_boundary_concentrated` (near-boundary divergence
+  rate ≤ 2× far-field; evaluated at ≥ 20 divergences), `forced_span_wer < 10%` (evaluated
+  only at ≥ 20 forced words). `wer_micro` is **reported, never gated** — re-specified on
+  its first run (2026-08-01, evidence in the roadmap gate list): the aggregate measures
+  independent decode-regime divergence (~10–15% expected), not commit-policy damage.
+- **Divergence buckets** (`wer.divergence_buckets`): exposure-normalized divergence rates by
+  distance to the nearest commit boundary. Boundary-concentrated divergence = commit-policy
+  defect (blocks); boundary-independent = independent mishearings (the failure protocol in
+  the roadmap gate list).
+- **`stream session closed` server log line:** `ticks_skipped / ticks ≤ 1%`,
+  `tick_multiplier == 1`, `occupancy_p95 ≤ 0.7` (+ `occupancy_max`, `decode_seconds_total`
+  for the cost table) — these are **server-internal, read from this log line only**;
+  `stream_bench` never carries them (the server gains no instrumentation hooks).
 - **`nvidia-smi` + `ps` after close:** VRAM back to the idle model footprint, no stray
   processes.
-- **Cost table** from the report: `gpu_during_stream` vs `gpu_during_oneshot` duty cycle and
-  peak VRAM; decode premium stated as "X× bought Y ms" against the 3–5× envelope.
-- **WER:** `committed_vs_oneshot_wer` < 3%. Also read both transcripts yourself — WER is
+- **Cost table** from the report: `decode_seconds_total` (server log) per audio-second vs
+  `baseline.oneshot_wall_s`; decode premium stated as "X× bought Y ms" against the 3–5×
+  envelope. State `baseline_kind` next to the number.
+- **WER:** `wer_micro` + per-utterance list. Also read both transcripts yourself — WER is
   blind to "wrong but plausible" substitutions in committed text.
 
 Latency numbers from this run supersede the 2026-07-31 numbers (the tick-pacing fix changed
