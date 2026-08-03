@@ -428,3 +428,42 @@ the live real-mic finding: adjacent-word duplicates at flush boundaries ("very V
   per-segment `avg_logprob`/`no_speech_prob`, and `seam_suppressed` — the attribution data
   for the deferred v4.2 flush-tail veto decision (built only if filler insertions survive
   these fixes; any veto must withhold the whole tail, never edit words, per C5.5).
+
+**Second round, same day — live long-form dictation findings (mid-sentence duplicates
+persisted post-C7.12; senior-engineer re-review confirmed two tick-path defects):**
+
+- **C7.13 (new) — tick-path frontier residue + boundary alignment.** Two parts:
+  1. *Boundary alignment (correctness):* `agree()` now filters `prev` and `curr` at the
+     SAME coordinate the caller's `localize()` used (`alignment_boundary_sample` =
+     `plan.context_end_sample` = committed frontier **plus overflow**). Filtering at the
+     stale `committed_through` while overflow > 0 left `prev` carrying words whose audio
+     was dropped, so the prefix comparison compared different words and agreement returned
+     **0 structurally** for as long as the overflow persisted — a stall latch whose only
+     exit was the holdback ceiling force-committing and (silently, C5.6 `overrun`)
+     discarding buffered audio. Field signature: decode windows pinned at 27 s,
+     `tick_multiplier=4`, occupancy ≫ 1.
+  2. *Residue guard:* `suppress_tick_residue()` (pure function) drops the leading `curr`
+     word iff it `normalize_token`-equals the last committed word AND its **end** lies
+     within `tick_residue_tolerance_s` (default 0.20 s; env
+     `STREAM_TICK_RESIDUE_TOLERANCE_S`) of the frontier — at most one word per tick,
+     applied before `prev` is read (restoring prefix alignment on the same tick) and
+     inherited by the holdback force-commit path. END-gated, unlike C7.12's start gate:
+     a tick residue is a properly-timed re-decode whose end drifted past the frontier; a
+     genuine immediate repeat ends a full word-duration later. `prev` needs no guard — it
+     is stored post-suppression. Counted as `tick_residue_suppressions` on the
+     session-close line. The C7.2 20 ms tolerance stands for its original purpose; it was
+     never adequate for shifted-window re-decodes under tick degradation, which is what
+     the guard covers.
+- **LocalAgreement premise (doc gap, now stated):** agreement assumes two independent
+  decodes of overlapping audio converge on a stable prefix. faster-whisper's default
+  temperature ladder (0.0…1.0 on fallback) *samples* past t=0, voiding that premise on
+  exactly the windows that trip the fallback thresholds — `temperature` is therefore a
+  **policy parameter**, not a quality knob. Bounding the ladder is a v4.2 tuning decision;
+  recording the premise here is the v4.1 obligation.
+- **Client wire-capture developer mode (no protocol change; recorded for the privacy
+  posture):** `?debug=stream` URL param (deliberately not Settings/localStorage — a
+  transcript-capturing diagnostic must not survive reloads), memory-only capped buffer of
+  wire messages + client VAD markers, PCM as count/byte aggregates only, user-initiated
+  Blob export as the sole exit path, cleared on session open and page unload. Server
+  logging rules untouched. `docs/diagrams/privacy-data-flow.mmd` updated in the same
+  commit.

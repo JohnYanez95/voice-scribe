@@ -13,6 +13,7 @@ import { openStreamSession } from "../services/streamSession";
 import type { StreamSession } from "../services/streamSession";
 import { initAudio, playCopySound, playClearSound, setAudioMuted } from "../services/audio";
 import { isDesktop, writeClipboard, emitRecordingState } from "../services/platform";
+import { exportWireLog, recordWireMarker, wireDebugEnabled } from "../services/wireDebug";
 import type { RecordingMode, RecordingState, WsStreamFinalMessage } from "../types";
 
 const PARAGRAPH_BREAK_MS = 3000;
@@ -488,6 +489,7 @@ export function App() {
   const { startListening, stopListening, isListening, error: vadError } =
     useVAD({
       onSpeechStart: () => {
+        recordWireMarker("speech_start");
         speakingRef.current = true;
         if (streamingActive()) setState("streaming");
       },
@@ -497,6 +499,7 @@ export function App() {
         if (streamingActive()) streamSessionRef.current?.sendAudio(frame);
       },
       onVADMisfire: () => {
+        recordWireMarker("vad_misfire");
         speakingRef.current = false;
         if (streamingActive()) {
           // Pre-roll frames already streamed — destructive reset (C3.6);
@@ -507,6 +510,7 @@ export function App() {
         }
       },
       onSpeechEnd: (audio) => {
+        recordWireMarker("speech_end");
         speakingRef.current = false;
         const speechEndTime = Date.now();
         if (streamingActive()) {
@@ -767,6 +771,15 @@ export function App() {
         />
       </div>
       <div className="toolbar-bottom">
+        {wireDebugEnabled() && (
+          <button
+            className="wire-debug-btn"
+            onClick={exportWireLog}
+            title="Developer mode (?debug=stream): downloads the in-memory wire log. The file contains transcript text — it is never persisted or transmitted unless you export it."
+          >
+            Export wire log
+          </button>
+        )}
         <div className="hotkey-hints">
           {isDesktop()
             ? "Ctrl+Shift+Y: Copy \u00A0|\u00A0 Ctrl+Shift+X: Clear"

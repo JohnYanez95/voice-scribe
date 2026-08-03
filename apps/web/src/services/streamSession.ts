@@ -16,6 +16,7 @@ import type {
   WsStreamErrorMessage,
   WsStreamServerMessage,
 } from "../types";
+import { clearWireLog, recordWire, recordWireFrameSent } from "./wireDebug";
 
 const API_PORT = import.meta.env.VITE_API_PORT || "8084";
 const WS_BASE_URL = `ws://localhost:${API_PORT}`;
@@ -70,6 +71,7 @@ export function openStreamSession(
 ): StreamSession {
   let state: StreamSession["state"] = "connecting";
   let ready = false;
+  clearWireLog(); // dev mode: one capture per session, memory-only
   let degradeFired = false;
   let maxUtteranceId = 0;
   let lastSeq = 0;
@@ -110,10 +112,12 @@ export function openStreamSession(
   };
 
   const sendControl = (msg: Record<string, unknown>) => {
+    recordWire("out", msg);
     ws.send(JSON.stringify(msg));
   };
 
   const sendWireFrame = (samples: Float32Array) => {
+    recordWireFrameSent(samples.byteLength); // aggregate only — never PCM
     ws.send(samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength));
     lastFrameSentAt = Date.now();
   };
@@ -186,6 +190,9 @@ export function openStreamSession(
     } catch {
       return;
     }
+    // Dev mode: capture BEFORE the §4 stale filter — a message dropped as
+    // stale is exactly what the diagnostic exists to see.
+    recordWire("in", msg as unknown as Record<string, unknown>);
     if (msg.seq !== undefined) {
       if (msg.seq < lastSeq) {
         // eslint-disable-next-line no-console

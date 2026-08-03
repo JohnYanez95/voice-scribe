@@ -18,6 +18,7 @@ from app.services.stream_policy import (
     plan_window,
     retention_start_sample,
     suppress_seam_duplicate,
+    suppress_tick_residue,
 )
 
 CFG = PolicyConfig()
@@ -457,3 +458,114 @@ def test_seam_word_starting_before_frontier_suppressed():
     tail = hyp(w("very", 1.85, 2.2), w("cool", 2.3, 2.6))
     out, hit = _seam("very", tail)
     assert hit and [x.text for x in out] == ["cool"]
+
+
+# ---------------------------------------------------------------------------
+# C7.13 — tick-path frontier residue guard + localize/agree boundary alignment
+# (2026-08-02 live long-form finding: mid-sentence duplicates and the
+# agreement stall latch under overflow).
+# ---------------------------------------------------------------------------
+
+def test_tick_residue_suppressed_and_agreement_proceeds_same_tick():
+    # Residue "Very" (end drifted 50 ms past the 1.0 s frontier) must be
+    # dropped from curr BEFORE the prefix comparison — otherwise prev (already
+    # boundary-filtered) misaligns and this tick stalls.
+    state = PolicyState(
+        committed_words=hyp(w("very", 0.5, 1.0)),
+        committed_through_sample=sample(1.0),
+        prev_hypothesis=hyp(w("cool", 1.1, 1.5), w("stuff", 1.6, 2.0), w("end", 2.1, 2.5)),
+    )
+    curr = hyp(w("Very", 0.2, 1.05), w("cool", 1.1, 1.5), w("stuff", 1.6, 2.0),
+               w("end", 2.1, 2.5))
+    decision = agree(state, curr, sample(3.0), CFG)
+    assert decision.residue_suppressed
+    texts = [x.text for x in decision.newly_committed]
+    assert texts == ["cool", "stuff"], (
+        "suppressing the residue must restore prefix alignment on this tick")
+    assert "Very" not in [x.text for x in decision.state.committed_words]
+
+
+def test_tick_genuine_repeat_past_tolerance_not_suppressed():
+    # A real immediate repeat ends a full word-duration past the frontier.
+    state = PolicyState(
+        committed_words=hyp(w("very", 0.5, 1.0)),
+        committed_through_sample=sample(1.0),
+        prev_hypothesis=hyp(w("very", 1.1, 1.5), w("cool", 1.6, 2.0), w("end", 2.1, 2.5)),
+    )
+    curr = hyp(w("very", 1.1, 1.5), w("cool", 1.6, 2.0), w("end", 2.1, 2.5))
+    decision = agree(state, curr, sample(3.0), CFG)
+    assert not decision.residue_suppressed
+    assert [x.text for x in decision.newly_committed] == ["very", "cool"]
+
+
+def test_tick_residue_absent_from_holdback_force_commit():
+    # Holdback fires on this tick; force-commit iterates the suppressed curr,
+    # so the residue never reaches committed text even without agreement.
+    state = PolicyState(
+        committed_words=hyp(w("very", 0.5, 1.0)),
+        committed_through_sample=sample(1.0),
+        prev_hypothesis=hyp(w("different", 1.2, 1.6)),
+        holdback_frontier=1,
+        holdback_ticks=CFG.max_holdback_ticks - 1,
+    )
+    curr = hyp(w("Very", 0.3, 1.05), w("new", 1.2, 1.6))
+    decision = agree(state, curr, sample(3.0), CFG)
+    assert decision.holdback_fired
+    texts = [normalize_token(x.text) for x in decision.newly_committed]
+    assert texts == ["new"], "force-commit must inherit the residue guard"
+
+
+def test_suppress_tick_residue_pure_cases():
+    committed = hyp(w("very", 0.5, 1.0))
+    # end within tolerance → suppressed
+    out, hit = suppress_tick_residue(
+        committed, hyp(w("Very.", 0.2, 1.1), w("x", 1.2, 1.5)), sample(1.0), CFG)
+    assert hit and [x.text for x in out] == ["x"]
+    # end past tolerance → kept
+    out, hit = suppress_tick_residue(
+        committed, hyp(w("very", 1.1, 1.4)), sample(1.0), CFG)
+    assert not hit and len(out) == 1
+    # empty committed / empty curr → no-op
+    assert suppress_tick_residue((), hyp(w("very", 0.9, 1.05)), sample(1.0), CFG)[1] is False
+    assert suppress_tick_residue(committed, (), sample(1.0), CFG) == ((), False)
+    # different token → kept
+    out, hit = suppress_tick_residue(
+        committed, hyp(w("cool", 0.9, 1.05)), sample(1.0), CFG)
+    assert not hit
+
+
+def test_agreement_survives_frontier_overflow_slide():
+    # C7.13 boundary alignment: with overflow > 0, localize() filtered curr at
+    # the effective edge (committed_through + overflow) while agree() filtered
+    # prev at the stale committed_through — prev kept words whose audio was
+    # dropped, the prefix comparison compared different words, and agreement
+    # returned 0 structurally until holdback force-committed (the 2026-08-02
+    # stall latch). agree() must filter both at the caller's boundary.
+    effective_edge = sample(4.0)
+    state = PolicyState(
+        committed_words=hyp(w("old", 0.5, 1.0)),
+        committed_through_sample=sample(1.0),
+        # prev still carries words from before the slide (their audio is gone)
+        prev_hypothesis=hyp(w("gone", 3.0, 3.9), w("a", 4.1, 4.5),
+                            w("b", 4.6, 5.0), w("c", 5.1, 5.5)),
+    )
+    curr = hyp(w("a", 4.1, 4.5), w("b", 4.6, 5.0), w("c", 5.1, 5.5))
+    decision = agree(state, curr, sample(10.0), CFG,
+                     alignment_boundary_sample=effective_edge)
+    texts = [x.text for x in decision.newly_committed]
+    assert texts == ["a", "b"], (
+        "prev must be filtered at the effective edge or agreement stalls "
+        f"forever under overflow (got {texts})")
+
+
+def test_agree_without_alignment_boundary_unchanged():
+    # Default path (no overflow): omitting the new parameter must behave
+    # exactly as before — committed_through is the boundary.
+    state = PolicyState(
+        committed_words=hyp(w("x", 0.5, 1.0)),
+        committed_through_sample=sample(1.0),
+        prev_hypothesis=hyp(w("a", 1.1, 1.5), w("b", 1.6, 2.0), w("c", 2.1, 2.5)),
+    )
+    curr = hyp(w("a", 1.1, 1.5), w("b", 1.6, 2.0), w("c", 2.1, 2.5))
+    decision = agree(state, curr, sample(4.0), CFG)
+    assert [x.text for x in decision.newly_committed] == ["a", "b"]

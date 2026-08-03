@@ -962,3 +962,46 @@ def test_flush_skips_decode_when_only_left_context_remains():
         assert final["raw"] == "very cool"  # committed text only
 
     asyncio.run(run())
+
+
+# C7.13 — tick-path residue: a re-decode that re-times the last committed
+# word's end past the frontier must be suppressed in agree(), counted on the
+# session, and absent from committed text.
+def test_tick_residue_suppressed_and_counted_c713():
+    async def run():
+        ws = AsyncMock()
+        s = StreamSession(ws)
+        calls = {"n": 0}
+
+        def transcribe(audio, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                # stable hypothesis; tick 2 commits "very" (cool blocked by
+                # edge guard at 2.0 s buffer: limit 1.4, cool ends 1.5)
+                wl = [("very", 0.1, 1.0, 0.95), ("cool", 1.1, 1.5, 0.95),
+                      ("stuff", 1.6, 1.9, 0.95)]
+            else:
+                # re-decode re-times "very"'s end 50 ms past the frontier
+                wl = [("Very", 0.2, 1.05, 0.9), ("cool", 1.1, 1.5, 0.95),
+                      ("stuff", 1.6, 2.0, 0.95), ("more", 2.1, 2.5, 0.95)]
+            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+                     for t, st, e, p in wl]
+            return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
+                language="en", duration=len(audio) / 16000)
+
+        s.model = SimpleNamespace(transcribe=transcribe)
+        s.append_frame(pcm(2.0))
+        await s._tick_once()
+        await s._tick_once()  # commits "very"
+        s.append_frame(pcm(1.0))
+        await s._tick_once()  # residue tick: "Very" suppressed, "cool" commits
+        await s._tick_once()
+
+        assert s.tick_residue_suppressions >= 1
+        payloads = [c.args[0] for c in ws.send_json.call_args_list]
+        committed = " ".join(p["text"] for p in payloads if p["type"] == "committed")
+        words = committed.split()
+        assert "Very" not in words, f"residue re-committed: {committed!r}"
+        assert words.count("very") == 1, f"duplicate commit: {committed!r}"
+
+    asyncio.run(run())

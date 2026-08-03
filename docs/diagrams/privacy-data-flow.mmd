@@ -55,12 +55,17 @@ flowchart TD
     area -- "desktop" --> httpPost["HTTP POST :8001/clipboard"]
     httpPost --> rustClip["Rust (arboard)<br/>system clipboard"]
 
+    wsLive -. "?debug=stream ONLY<br/>(URL param, off by default,<br/>not persisted)" .-> wlog["Wire-log buffer<br/>memory-only, capped 2000,<br/>PCM as counts — never audio"]
+    wsFinal -.-> wlog
+    wlog -- "user-clicked export only<br/>(contains transcript text)" --> wfile["Local JSON download"]
+    wlog --> wclear["Cleared on session open<br/>+ page unload"]
+
     classDef sensitive fill:#ffdddd,stroke:#cc4444
     classDef ephemeral fill:#fffacc,stroke:#b8900a
     classDef output fill:#ddf5dd,stroke:#448844
     classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
 
     class mic,blob,frames,preroll,fifo sensitive
-    class vad,http,wsIn,wsStream,tmp1,tmp2,ring,httpPost ephemeral
-    class txt,stxt,resp,wsOut,wsLive,wsFinal,area,live,browserClip,rustClip output
-    class del,rdel,cdel,ldel deleted
+    class vad,http,wsIn,wsStream,tmp1,tmp2,ring,httpPost,wlog ephemeral
+    class txt,stxt,resp,wsOut,wsLive,wsFinal,area,live,browserClip,rustClip,wfile output
+    class del,rdel,cdel,ldel,wclear deleted

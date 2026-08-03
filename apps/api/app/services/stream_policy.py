@@ -51,6 +51,12 @@ class PolicyConfig:
     # residue is tens of ms; a genuine repeat spoken later in the tail starts
     # well past this and is never touched.
     seam_tolerance_s: float = 0.10
+    # Tick-residue bound (C7.13): a tick-path residue is a properly-timed
+    # re-decode whose END drifted just past the frontier — a genuine repeat
+    # ends a full word-duration later. Gated on the end, not the start (the
+    # flush seam's start gate never fires here: residue starts a whole word
+    # before the frontier).
+    tick_residue_tolerance_s: float = 0.20
 
     def validate(self) -> None:
         """Window invariant (C7.1): pad_or_trim silently truncates past 30 s."""
@@ -97,6 +103,7 @@ class CommitDecision:
     veto_prob: bool               # prob floor withheld at least one agreed word
     veto_edge: bool               # edge guard withheld at least one agreed word
     state: PolicyState
+    residue_suppressed: bool = False  # C7.13 — tick-path frontier residue dropped
 
 
 def normalize_token(text: str) -> str:
@@ -184,11 +191,42 @@ def _common_prefix_len(a: tuple[Word, ...], b: tuple[Word, ...]) -> int:
     return n
 
 
+def suppress_tick_residue(
+    committed: tuple[Word, ...],
+    curr: tuple[Word, ...],
+    frontier_sample: int,
+    cfg: PolicyConfig,
+) -> tuple[tuple[Word, ...], bool]:
+    """Tick-path frontier residue guard (C7.13).
+
+    A re-decode from a shifted window can re-time the last committed word's
+    end past the frontier by more than frame_tolerance_s; it then survives
+    the boundary filter, misaligns the prefix comparison against prev (one
+    stalled tick), and commits again on the following tick — or immediately
+    via holdback force-commit (2026-08-02 live long-form finding: mid-sentence
+    "and and", "matter matter" under tick degradation). Same conjunctive shape
+    as the C7.12 flush guard but END-gated: the residue is a properly-timed
+    word whose end sits just past the frontier, while a genuine immediate
+    repeat ends a full word-duration later. Applied to curr only — prev is
+    stored post-suppression, so residue never enters it.
+    """
+    if not committed or not curr:
+        return curr, False
+    lead = curr[0]
+    key = normalize_token(lead.text)
+    if not key or key != normalize_token(committed[-1].text):
+        return curr, False
+    if lead.end > frontier_sample / cfg.sample_rate + cfg.tick_residue_tolerance_s:
+        return curr, False
+    return curr[1:], True
+
+
 def agree(
     state: PolicyState,
     curr: tuple[Word, ...],
     buffer_end_sample: int,
     cfg: PolicyConfig,
+    alignment_boundary_sample: int | None = None,
 ) -> CommitDecision:
     """One tick of LocalAgreement-2 (C7.3–C7.5).
 
@@ -208,16 +246,37 @@ def agree(
     frontier and resets only when the frontier advances. When it fires, the
     newest hypothesis is committed WITHOUT agreement or the probability floor,
     but still behind the edge guard (never commit ungrounded edge words).
+
+    alignment_boundary_sample (C7.13 correction, 2026-08-02): the caller's
+    localize() boundary — plan.context_end_sample, which is committed_through
+    PLUS overflow. Both hypotheses must be filtered at the coordinate localize
+    used: filtering at the stale committed_through while overflow > 0 left
+    prev carrying words whose audio was dropped, so _common_prefix_len
+    compared different words and agreement returned 0 structurally for as
+    long as the overflow persisted — the stall latch behind the 2026-08-02
+    27 s pinned windows. Words behind the effective edge will never commit;
+    they must not participate in the comparison either.
     """
     buffer_end_s = buffer_end_sample / cfg.sample_rate
     edge_limit_s = buffer_end_s - cfg.edge_guard_s
 
-    # Align both hypotheses to the current committed boundary (C5.1): any word
-    # ending at or before it is already-committed audio — comparing or
-    # re-committing it would duplicate text. This also re-aligns prev when the
-    # previous tick committed words out of it.
-    boundary_s = state.committed_through_sample / cfg.sample_rate + cfg.frame_tolerance_s
+    # Align both hypotheses to the effective committed boundary (C5.1/C7.13):
+    # any word ending at or before it is already-committed (or dropped) audio
+    # — comparing or re-committing it would duplicate text. This also
+    # re-aligns prev when the previous tick committed words out of it.
+    frontier_sample = max(
+        state.committed_through_sample,
+        alignment_boundary_sample if alignment_boundary_sample is not None else 0,
+    )
+    boundary_s = frontier_sample / cfg.sample_rate + cfg.frame_tolerance_s
     curr = tuple(x for x in curr if x.end > boundary_s)
+    # C7.13: drop a frontier residue BEFORE prev is read — this both prevents
+    # the duplicate and restores prefix alignment on the same tick. The
+    # holdback force-commit below iterates the suppressed curr, so it
+    # inherits the guard.
+    curr, residue_suppressed = suppress_tick_residue(
+        state.committed_words, curr, frontier_sample, cfg
+    )
     prev = state.prev_hypothesis
     if prev is not None:
         prev = tuple(x for x in prev if x.end > boundary_s)
@@ -287,6 +346,7 @@ def agree(
         veto_prob=veto_prob,
         veto_edge=veto_edge,
         state=new_state,
+        residue_suppressed=residue_suppressed,
     )
 
 

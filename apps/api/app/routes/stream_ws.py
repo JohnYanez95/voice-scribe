@@ -63,6 +63,7 @@ def _policy_config() -> PolicyConfig:
         max_holdback_ticks=settings.STREAM_MAX_HOLDBACK_TICKS,
         flush_left_context_s=settings.STREAM_FLUSH_LEFT_CONTEXT_S,
         seam_tolerance_s=settings.STREAM_SEAM_TOLERANCE_S,
+        tick_residue_tolerance_s=settings.STREAM_TICK_RESIDUE_TOLERANCE_S,
     )
     cfg.validate()  # C7.1 — env overrides must not reintroduce silent truncation
     return cfg
@@ -112,6 +113,7 @@ class StreamSession:
         self.tick_multiplier = 1
         self.ticks_skipped = 0
         self.seam_suppressions = 0  # C7.12 — flush-seam duplicates suppressed
+        self.tick_residue_suppressions = 0  # C7.13 — tick-path residues dropped
         self.decode_ms_samples: list[float] = []  # occupancy telemetry (C9.2-safe)
 
     # -- guard handle protocol (stream_guard.StreamSessionHandle) ----------
@@ -300,8 +302,14 @@ class StreamSession:
                 "text": committed_text(hyp),
             })
             return
-        decision = agree(self.policy, hyp, decoded_end_sample, self.cfg)
+        # C7.13: agree() must filter at the same boundary localize() used —
+        # context_end includes the overflow slide; the stale committed_through
+        # is what latched agreement at 0 while overflow persisted.
+        decision = agree(self.policy, hyp, decoded_end_sample, self.cfg,
+                         alignment_boundary_sample=plan.context_end_sample)
         self.policy = decision.state
+        if decision.residue_suppressed:
+            self.tick_residue_suppressions += 1
 
         if decision.newly_committed:
             u0 = self.utterance_start_sample / self.sr
@@ -707,6 +715,7 @@ async def ws_stream(websocket: WebSocket) -> None:
                  ticks=len(samples), ticks_skipped=session.ticks_skipped,
                  tick_multiplier=session.tick_multiplier,
                  seam_suppressions=session.seam_suppressions,
+                 tick_residue_suppressions=session.tick_residue_suppressions,
                  occupancy_p95=occupancy_p95, occupancy_max=occupancy_max,
                  decode_ms_max=round(samples[-1], 1) if samples else None,
                  decode_seconds_total=round(sum(samples) / 1000.0, 1))
