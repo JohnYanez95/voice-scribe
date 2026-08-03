@@ -1287,6 +1287,26 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
   depends on the v4.1 re-specified reference landing first. The 500 ms tick is empirically
   closed: all three of its stated preconditions failed at the field test (p95 occupancy
   0.57–0.59 > 0.50, ticks skipped 2 > 0, premium well above 3.3×) — do not re-litigate.
+  **Carried inputs from the 2026-08-02 field session:** (1) **flush-tail hallucination
+  veto** — only if suspected filler insertions survive the C7.12 + VAD-band fixes at the
+  smoke; OR-form or tighter (the faster-whisper AND-form at defaults is a structural
+  no-op), short-tail gated, whole-tail withhold — never word edits (C5.5); thresholds from
+  the new flush-line `avg_logprob`/`no_speech_prob` distributions, not copied defaults.
+  (2) **Explicit language setting** — Settings dropdown (auto/en/ja/…) threaded into
+  `streamSession` opts and the one-shot calls; plumbing already exists end-to-end (C3.1,
+  `transcribe.py` `language` field), UI is the only missing mile. Field evidence: a
+  session mispinned to Polish on the first decode's misdetection (C7.7) transcribed an
+  entire English dictation as Polish phoneme-mapping, with English tokens leaking through
+  ("…w tym this point it's doing coś…") — the pin biases, it does not constrain.
+  (3) **Per-utterance language re-detection with hysteresis** — keep
+  `info.language_probability` (currently discarded in `_decode_sync`), refuse to pin below
+  a confidence floor, re-detect at utterance boundaries, switch the pin only after K
+  consecutive confident utterances (a language flip also flips commit mode via C7.11 —
+  it must not flicker); design pass required, touches C7.7/C7.11. Mid-utterance
+  code-switching is explicitly out (one language per decode window is a Whisper property;
+  the utterance is the unit of language focus). Note for the smoke: wrong-language decode
+  instability produces A-x-A force-commit stutter ("Prawdopodobnie nie Prawdopodobnie") —
+  distinct mechanism from the C7.12 seam duplicate; do not conflate the counts.
 
 **Scope guardrails (named at review so creep is visible when it knocks):**
 - `stream_bench` stays in `ops/scripts/`, manually invoked, never imported by runtime code,
