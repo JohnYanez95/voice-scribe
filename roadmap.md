@@ -1728,6 +1728,47 @@ executed in the review-locked order — classify, rate, fix, re-measure.
   added with the accepted-residual-risk statement, 2026-08-02 amendments block. Tests
   324 (194 fe / 130 be), tsc clean, contract unchanged (no wire change).
 
+**Second round, same day (commit `f7f5004`) — live long-form dictation (user, ~4.5 min
+ML script) showed mid-sentence duplicates persisting post-C7.12; senior-engineer
+re-review confirmed the flush fix and found two TICK-path defects (C7.13):**
+- **Boundary asymmetry stall latch (the escalated finding):** `agree()` filtered
+  `prev`/`curr` at the stale `committed_through` while `localize()` used
+  `context_end` (= frontier + overflow) — once uncommitted audio crossed the 24 s cap,
+  the prefix comparison compared different words and agreement returned **0
+  structurally** until holdback force-committed, silently discarding buffered audio
+  (C5.6 overrun with only a console warning). Field signature confirmed in the session
+  log: 194 tick overruns, windows pinned at 27.0 s, `tick_multiplier=4`,
+  `occupancy_p95` 2.2–2.4, decodes to 7.9 s (temperature-fallback re-decodes real speech
+  triggers and the clean probe never did). Fixed: `agree()` takes
+  `alignment_boundary_sample` and filters both hypotheses at the caller's boundary.
+- **Tick-path frontier residue:** a shifted-window re-decode re-times the last committed
+  word's end > 20 ms past the frontier; it survives the boundary filter, misaligns the
+  prefix (one stalled tick), then re-commits — or commits immediately via holdback.
+  Fixed: `suppress_tick_residue()` — same conjunctive shape as C7.12 but **END-gated**
+  (`STREAM_TICK_RESIDUE_TOLERANCE_S` 0.20 s; a genuine repeat ends a full word later),
+  applied to `curr` before `prev` is read (restores alignment same-tick, inherited by
+  force-commit); `tick_residue_suppressions` on the session-close line. The C7.2 20 ms
+  tolerance stands for its original same-window purpose.
+- **LocalAgreement temperature premise** recorded as a protocol clause (sampling past
+  t=0 voids prefix stability — `temperature` is a policy parameter; ladder bounding is
+  v4.2 tuning).
+- **Developer mode (user-requested):** `?debug=stream` wire capture — memory-only capped
+  buffer of wire messages + client VAD markers (speech_start/end/misfire), PCM as
+  count/byte aggregates only, user-initiated Blob export as the sole exit, cleared on
+  session open + unload; deliberately a URL param, never Settings/localStorage.
+  `privacy-data-flow.mmd` updated + re-rendered in the same commit. Classifies every
+  duplicate mechanism from the client side (committed-join vs final-join vs
+  cross-utterance, forced vs agreed).
+- **Verification:** post-fix probe — all duplicate counters 0 (intra-final, inter-final,
+  commit-join, within-delta), retractions 0, prefix invariant ok,
+  **`force_commit_rate` 0.122 → 0.0** and committed words 123 → 148 on identical audio
+  (residue misalignment had been stalling agreement on ordinary audio too, forcing
+  holdback commits — the fix improves commit quality, not just duplicates). User's
+  interim live run (VAD fix loaded, tick fix not yet deployed): passage that previously
+  showed 3+ duplicates showed exactly one — the tick-residue class, as predicted. Tests
+  331 (194 fe / 137 be), tsc clean, contract unchanged. `stream_bench` gained
+  commit-join/within-delta classification counters.
+
 **Still open before v4.1 sign-off (human-in-the-loop):** completing the interactive smoke —
 full ~3-min continuous dictation (committed text never mutates; post-fix duplicate rate
 observed live), kill-server-mid-stream → one-shot fallback with PCM replay, `ps`/VRAM
