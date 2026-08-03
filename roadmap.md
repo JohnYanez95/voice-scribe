@@ -1759,6 +1759,17 @@ re-review confirmed the flush fix and found two TICK-path defects (C7.13):**
   `privacy-data-flow.mmd` updated + re-rendered in the same commit. Classifies every
   duplicate mechanism from the client side (committed-join vs final-join vs
   cross-utterance, forced vs agreed).
+- **Live confirmation (user, ~3-min full-script dictation on the all-fixes build):** zero
+  visible duplicates end-to-end; session counters: `tick_residue_suppressions=7` (the
+  C7.13 guard caught seven residues live), `seam_suppressions=0` (flush handled
+  structurally), `tick_multiplier=1` / `occupancy_p95` 0.566 / max decode 0.80 s / 1 tick
+  overrun — versus 4× / 2.4 / 7.9 s / 194 pre-fix on comparable dictation: the stall
+  latch is gone. Remaining transcription errors were speaker-side (mispronounced/slurred
+  words) — the finding-(b) class, to be measured against the one-shot path per the PM
+  scope ruling, not a streaming defect. This satisfies the duplicate-rate and
+  committed-stability observations of the §7 smoke's step 1; the sitting's remaining
+  steps (fresh gate recording, kill-server fallback, `ps`/VRAM, (b)/(c) comparison, VAD
+  lag, WebKitGTK) still stand.
 - **Verification:** post-fix probe — all duplicate counters 0 (intra-final, inter-final,
   commit-join, within-delta), retractions 0, prefix invariant ok,
   **`force_commit_rate` 0.122 → 0.0** and committed words 123 → 148 on identical audio
