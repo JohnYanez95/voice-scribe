@@ -281,6 +281,15 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
         "seam_eligible_flushes": 0,
         "seam_dup_intra_final": 0,
         "seam_dup_utterances": [],
+        # 2026-08-02 live-dictation follow-up: mid-utterance duplicates land at
+        # TICK commit boundaries, which the flush-seam counter cannot see.
+        # commit_join = last word already committed == first word of the next
+        # committed delta (the tick-path frontier-residue signature);
+        # within_delta = adjacent normalized pair inside one delta. Both count
+        # legitimate repeats too — classification instruments, not gates.
+        "seam_dup_commit_join": 0,
+        "seam_dup_commit_join_utterances": [],
+        "adjacent_dup_within_delta": 0,
     }
     final_raws: list[str] = []
     # Per-utterance capture (v4.1 re-spec):
@@ -350,6 +359,14 @@ async def run_stream(url: str, audio: np.ndarray, language: str | None,
                             first_partial_per_utt[uid] = now - anchor
                 elif mtype == "committed":
                     uid = msg["utterance_id"]
+                    prior_committed = reducer.committed.get(uid, "")
+                    pw = norm_words(prior_committed)
+                    dw = norm_words(msg["text"])
+                    if pw and dw and pw[-1] == dw[0]:
+                        stats["seam_dup_commit_join"] += 1
+                        stats["seam_dup_commit_join_utterances"].append(uid)
+                    stats["adjacent_dup_within_delta"] += sum(
+                        1 for a, b in zip(dw, dw[1:]) if a == b)
                     reducer.on_committed(uid, msg["text"])
                     words = norm_words(msg["text"])
                     n = len(msg["text"].split())
