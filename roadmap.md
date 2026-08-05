@@ -1780,16 +1780,74 @@ re-review confirmed the flush fix and found two TICK-path defects (C7.13):**
   331 (194 fe / 137 be), tsc clean, contract unchanged. `stream_bench` gained
   commit-join/within-delta classification counters.
 
-**Still open before v4.1 sign-off (human-in-the-loop):** completing the interactive smoke —
-full ~3-min continuous dictation (committed text never mutates; post-fix duplicate rate
-observed live), kill-server-mid-stream → one-shot fallback with PCM replay, `ps`/VRAM
-clean after session close, transcript-vs-spoken comparison for findings (b)/(c) (counts
-and rates only — no transcript text or audio in the repo); a fresh-recording u20
-silence-split gate run (HR-8 deltas vs 2026-08-01 stated); `make desktop` for the
-WebKitGTK adapter check (ScriptProcessor is the in-library contingency); VAD detection
-lag measurement (spike page: speech-file run or mic); and the three-persona review of
-the amended record (mechanism review completed 2026-08-02; sign-off review pending the
-smoke).
+**Still open before v4.1 sign-off:** the three-persona sign-off review of the amended
+record (mechanism review completed 2026-08-02). The interactive smoke that was the other
+open item was completed 2026-08-04 — full record below.
+
+**Interactive smoke sitting record (2026-08-04, §7 runbook).** Config: Brave 1.93.129
+(browser passes) + WebKitGTK/Tauri (step 7), `large-v3`, CUDA (RTX 3090), bare-host GPU
+uvicorn (sidecar-managed for step 7), commit `9876d50`. Outcomes in runbook order:
+
+- **Step 1 — 3-min continuous dictation: met.** Committed text never visibly changed;
+  flush-boundary duplicates observed 0; filler insertions 0. The C7.12 seam guard
+  recorded its **first live catches**: `seam_suppressed=True` twice during natural-use
+  sessions the same evening and once in the step-7 desktop pass — zero visible duplicates
+  in every case (on 2026-08-02 the guard had never fired). C7.13 residue guard active
+  (2–14 suppressions/session). All session close counters in gate (`ticks_skipped`
+  ≤ 0.85%, `tick_multiplier` 1, `occupancy_p95` ≤ 0.671). One 3.4 s decode outlier
+  (temperature-fallback suspect) noted for v4.2.
+- **Step 2 — fresh gate recording: run, with named fails.** 237.8 s **impromptu**
+  dictation — the first genuinely unscripted gate audio. Reports committed (`404ece5`),
+  seam counters present. u20-silence 7/10, u3 9/10 (slide lines all pass: 3 × 79 s
+  utterances > 24 s cap, retractions 0, prefix ok, dropped 0). Fails, all
+  disfluency-driven and **reproduced identically under contended and clean runs**:
+  `force_commit_rate` 8.6% (u3: 5.7%) vs 5% gate; `forced_span_wer` 14.3% vs 10% — its
+  **first-ever evaluation** (2026-08-01 had 14 forced words, under the 20-word
+  threshold); `finalization_max_excl_first` 0.544 s — second consecutive miss of the
+  0.5 s gate (2026-08-01: 0.573). Improvements vs 2026-08-01: `wer_micro` 12.4% → 4.6%;
+  boundary divergence **no longer boundary-concentrated** (near 0.034 < far 0.055 —
+  the 08-01 defect signature inverted). Cost premium 7.0× (08-01: 6.5×) — beam-1 lever
+  (> 5×) remains triggered. Method note: the first run pair was invalidated and re-run —
+  the web app had been left open, lost the stream lock to the bench, and degraded to
+  one-shot mic posts per **C10.2, exactly as designed** (an unplanned live pass of the
+  degrade chain against a healthy server); clean re-runs are the committed numbers.
+- **Step 3 — kill-server fallback: missed on the headline line.** Error surfaced
+  non-fatally, app stayed interactive, degrade chain fired (one-shot connect attempted),
+  recovery after restart clean — but **committed text was lost**. Named cause:
+  `degradeStream` (App.tsx) clears the live-region committed text before the
+  retained-FIFO replay resolves; the clear-then-replay bet holds when the stream path
+  fails against a healthy server (proven by the step-2 incident) and fails when the
+  server itself is dead. v4.2 item: defer/restore the live region until replay resolves
+  (naive promote-then-replay would duplicate utterance text).
+- **Step 4 — post-close hygiene: met.** No orphaned processes, 8084/8001 released,
+  VRAM back to idle baseline, temp dir empty throughout (zero-persistence line observed
+  live during the bench runs as well).
+- **Step 5 — transcript-vs-spoken, full read vs rehearsed script: met, with findings.**
+  Substitutions 3 ("Psychic Learn" ← "Scikit-learn", "epics" ← "epochs",
+  "skew" ← "skewed"); deletions 2 (function words); engine insertions **0** — including
+  zero fillers at pauses (finding (c) not reproduced); the speaker's own inserted word
+  was transcribed faithfully. ≈ 1.8% word-level divergence from script. Punctuation:
+  3 missing sentence-final breaks, **all at commit boundaries** — mechanism confirmed
+  from the user-exported wire log: the partial tail carried the period; the committed
+  delta dropped it; the next commit strands a capital. New named v4.2 item
+  (commit-boundary sentence-final punctuation loss).
+- **Step 6 — VAD detection lag: met.** File run (222 s, 54 utterances): p50 **0 ms**,
+  p95/max 96 ms (one-frame granularity). Mic sanity: 104/104 frames, cadence 95.9 ms
+  mean / 100.6 ms p95 vs the 96 ms contract. Per the first-partial anchor record:
+  perceived first partial ≈ capture (≤ 1 frame) + server 1.25 s p50 — server-dominated.
+- **Step 7 — WebKitGTK adapter: met.** AudioWorklet path confirmed in the webview
+  console (no ScriptProcessor fallback); sidecar lifecycle clean (small load → large-v3
+  swap 3.7 s, backend-ready emitted); WASM single-threaded under WebKitGTK (benign);
+  one live seam-guard catch during the desktop dictation.
+
+**v4.2 candidates raised by the sitting:** degrade-path committed-text loss on server
+death (step 3); commit-boundary sentence-final punctuation loss (step 5);
+forced-commit behavior under disfluent speech (`force_commit_rate` / `forced_span_wer`
+fails, step 2); the u20 utterance-16 cluster (intra-final seam dup + 10/15 forced words
++ slow-lag stretch coincide); the finalization tail (2-for-2 over gate); the beam-1
+cost lever (premium 7.0×). **Scope question for the sign-off review:** user inclination
+(2026-08-04) to pause Tauri desktop development — no WSL-perspective advantage over the
+web app yet; step 7 passed clean, so a pause freezes a working artifact.
 
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial
