@@ -14,6 +14,7 @@ from app.services.stream_policy import (
     committed_text,
     flush,
     localize,
+    merge_glued_words,
     normalize_token,
     plan_window,
     retention_start_sample,
@@ -569,3 +570,56 @@ def test_agree_without_alignment_boundary_unchanged():
     curr = hyp(w("a", 1.1, 1.5), w("b", 1.6, 2.0), w("c", 2.1, 2.5))
     decision = agree(state, curr, sample(4.0), CFG)
     assert [x.text for x in decision.newly_committed] == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# C7.14 — decoder-edge token merge (2026-08-04 sign-off review finding:
+# "K -fold" / "95 %" join artifacts contaminating wer_micro/forced_span_wer;
+# 9 artifact tokens per 412 words live).
+# ---------------------------------------------------------------------------
+
+def test_merge_leading_space_separates_words():
+    raw = [(" hello", 0.0, 0.4, 0.9), (" world", 0.5, 0.9, 0.8)]
+    assert merge_glued_words(raw) == raw
+
+
+def test_merge_glues_hyphenated_fragment():
+    raw = [(" K", 0.0, 0.2, 0.9), ("-fold", 0.2, 0.5, 0.7)]
+    assert merge_glued_words(raw) == [(" K-fold", 0.0, 0.5, 0.7)]
+
+
+def test_merge_glues_percent_sign():
+    raw = [(" 95", 1.0, 1.3, 0.95), ("%", 1.3, 1.4, 0.6)]
+    assert merge_glued_words(raw) == [(" 95%", 1.0, 1.4, 0.6)]
+
+
+def test_merge_multi_fragment_cluster():
+    # "1,000" arrives as three fragments; span covers first start → last end.
+    raw = [(" 1", 0.0, 0.1, 0.9), (",", 0.1, 0.15, 0.8), ("000", 0.15, 0.4, 0.85)]
+    assert merge_glued_words(raw) == [(" 1,000", 0.0, 0.4, 0.8)]
+
+
+def test_merge_first_fragment_without_marker_stands_alone():
+    # A window can open mid-word; the orphan fragment must not vanish.
+    raw = [("tion", 0.0, 0.3, 0.5), (" next", 0.4, 0.8, 0.9)]
+    assert merge_glued_words(raw) == [("tion", 0.0, 0.3, 0.5), (" next", 0.4, 0.8, 0.9)]
+
+
+def test_merge_probability_is_min_of_fragments():
+    raw = [(" a", 0.0, 0.2, 0.4), ("b", 0.2, 0.4, 0.9)]
+    assert merge_glued_words(raw)[0][3] == 0.4
+
+
+def test_merge_drops_whitespace_only_fragments():
+    raw = [(" hello", 0.0, 0.4, 0.9), ("  ", 0.4, 0.5, 0.1), (" world", 0.5, 0.9, 0.8)]
+    assert merge_glued_words(raw) == [(" hello", 0.0, 0.4, 0.9), (" world", 0.5, 0.9, 0.8)]
+
+
+def test_merged_cluster_straddles_localize_boundary_as_a_unit():
+    # A merged word straddling the context boundary survives whole — localize
+    # never sees the bare "-fold" fragment, so it can neither suppress half a
+    # cluster nor emit one.
+    merged = merge_glued_words([(" K", 2.9, 3.05, 0.9), ("-fold", 3.05, 3.4, 0.8)])
+    words = localize(merged, 0, sample(3.0), CFG)
+    assert [x.text for x in words] == ["K-fold"]
+    assert words[0].start == 2.9 and words[0].end == 3.4

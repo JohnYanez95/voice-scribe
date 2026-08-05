@@ -467,3 +467,26 @@ persisted post-C7.12; senior-engineer re-review confirmed two tick-path defects)
   Blob export as the sole exit path, cleared on session open and page unload. Server
   logging rules untouched. `docs/diagrams/privacy-data-flow.mmd` updated in the same
   commit.
+
+**Amendments (2026-08-04, v4.1 sign-off review — word-join artifact found at review):**
+
+- **C7.14 (new) — decoder-edge token merge.** faster-whisper marks word-initial tokens
+  with a leading space and emits glued continuations (hyphenated suffixes, percent
+  signs, digit groups) without one: `" K"`, `"-fold"`, `" 95"`, `"%"`. The streaming
+  path previously stripped that signal (`localize()`) and re-joined committed words
+  with plain spaces, fabricating `"K -fold"` / `"95 %"` — 9 artifact tokens per 412
+  words in the 2026-08-04 live session, each scoring ≈ 1 substitution + 1 insertion
+  against the space-preserving one-shot reference (contaminating `wer_micro` and
+  `forced_span_wer`). Fix: `merge_glued_words()` (pure function, stream_policy) runs on
+  the raw decoder tuples inside `_decode_sync` — before `localize()`, covering tick and
+  flush paths at one site. A fragment starting with whitespace begins a new word;
+  anything else concatenates onto the previous word (span = first start → last end,
+  probability = min — conservative for the C7.4 floor); whitespace-only fragments drop.
+  Consequences: a glued cluster is one `Word`, so a commit boundary can never split it
+  — every downstream space-join (`committed_text`, flush assembly, wire, client-side
+  delta join, bench tokenizer) is correct by construction, and no wire-contract change
+  is needed (C4.x/C5.x untouched; the rejected alternative — carrying native spacing
+  through `Word.text` — would have made C5.3 prefix checks fail whenever a commit
+  boundary split a cluster). C7.11 interaction: flush-only languages whose tokens carry
+  no leading spaces (ja/zh/th) merge to one `Word` per utterance — acceptable at flush,
+  where no per-word vetoes apply and partials were already whole-utterance.

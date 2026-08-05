@@ -122,6 +122,37 @@ def normalize_token(text: str) -> str:
     return t[start:end]
 
 
+def merge_glued_words(
+    raw_words: list[tuple[str, float, float, float]],
+) -> list[tuple[str, float, float, float]]:
+    """Decoder-edge token merge (C7.14).
+
+    faster-whisper marks word-initial tokens with a leading space and emits
+    glued continuations (hyphenated suffixes, percent signs, digit groups)
+    without one: " K", "-fold", " 95", "%". Committing fragments separately
+    and re-joining with spaces fabricates "K -fold" / "95 %" — 2026-08-04
+    field finding: 9 artifact tokens in 412 words, each scoring ~2 WER errors
+    against the space-preserving one-shot reference. Merging at the decoder
+    edge makes each cluster one Word, so a commit boundary can never split it
+    and every downstream space-join is correct by construction.
+
+    A fragment starting with whitespace begins a new word; anything else glues
+    onto the previous word (concatenated text; span = first start → last end;
+    probability = min — conservative for the C7.4 floor). A leading fragment
+    without the space marker stands alone. Whitespace-only fragments drop.
+    """
+    out: list[tuple[str, float, float, float]] = []
+    for text, start, end, prob in raw_words:
+        if not text.strip():
+            continue
+        if out and not text[:1].isspace():
+            ptext, pstart, _pend, pprob = out[-1]
+            out[-1] = (ptext + text, pstart, end, min(pprob, prob))
+        else:
+            out.append((text, start, end, prob))
+    return out
+
+
 def plan_window(
     committed_through_sample: int,
     total_samples: int,

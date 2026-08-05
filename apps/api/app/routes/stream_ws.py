@@ -30,6 +30,7 @@ from app.services.stream_policy import (
     committed_text,
     flush as policy_flush,
     localize,
+    merge_glued_words,
     plan_window,
     retention_start_sample,
     suppress_seam_duplicate,
@@ -224,7 +225,9 @@ class StreamSession:
                 words.append((wd.word, wd.start, wd.end, wd.probability))
         if self.decode_generation != generation:
             return None
-        return words, info.language, seg_stats
+        # C7.14: merge glued decoder fragments ("-fold", "%") into whole words
+        # before any policy sees them — one site covers tick and flush paths.
+        return merge_glued_words(words), info.language, seg_stats
 
     async def _apply_overflow(self, plan: WindowPlan, committed_edge: int) -> None:
         """C5.6: on overrun, drop the OLDEST uncommitted audio from the buffer

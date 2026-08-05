@@ -39,7 +39,7 @@ def make_model(word_tuples):
     """Model whose transcribe() returns the given (text, start, end, prob)
     words on every call — fresh iterators each time."""
     def transcribe(audio, **kwargs):
-        words = [SimpleNamespace(word=t, start=s, end=e, probability=p)
+        words = [SimpleNamespace(word=f" {t}", start=s, end=e, probability=p)
                  for t, s, e, p in word_tuples]
         segs = iter([SimpleNamespace(words=words, text="")])
         info = SimpleNamespace(language="en", duration=len(audio) / 16000)
@@ -688,7 +688,7 @@ def test_edge_guard_anchored_to_decoded_audio():
 
         def transcribe(audio, **kwargs):
             s.append_frame(pcm(0.75))  # ingest continues mid-decode
-            wlist = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+            wlist = [SimpleNamespace(word=f" {t}", start=st, end=e, probability=p)
                      for t, st, e, p in words]
             return iter([SimpleNamespace(words=wlist, text="")]), SimpleNamespace(
                 language="en", duration=len(audio) / 16000)
@@ -862,7 +862,7 @@ def test_flush_seam_duplicate_suppressed_c712():
                 # committed word's residue re-emits sentence-initial straddling
                 # the frontier, then the genuine tail follows
                 wl = [("Cool.", 0.95, 1.1, 0.9), ("stuff", 1.4, 1.75, 0.95)]
-            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+            words = [SimpleNamespace(word=f" {t}", start=st, end=e, probability=p)
                      for t, st, e, p in wl]
             return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
                 language="en", duration=len(audio) / 16000)
@@ -902,7 +902,7 @@ def test_flush_seam_genuine_repeat_past_tolerance_survives():
                 # repeat of the committed word spoken well after the frontier
                 # (abs start 1.7 s > frontier 1.2 s + tolerance 0.1 s)
                 wl = [("cool", 1.5, 1.7, 0.95), ("stuff", 1.75, 1.95, 0.95)]
-            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+            words = [SimpleNamespace(word=f" {t}", start=st, end=e, probability=p)
                      for t, st, e, p in wl]
             return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
                 language="en", duration=len(audio) / 16000)
@@ -934,7 +934,7 @@ def test_flush_skips_decode_when_only_left_context_remains():
             calls["n"] += 1
             wl = [("very", 0.1, 0.5, 0.95), ("cool", 0.8, 1.2, 0.95),
                   ("stuff", 1.4, 1.95, 0.95)]
-            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+            words = [SimpleNamespace(word=f" {t}", start=st, end=e, probability=p)
                      for t, st, e, p in wl]
             return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
                 language="en", duration=len(audio) / 16000)
@@ -984,7 +984,7 @@ def test_tick_residue_suppressed_and_counted_c713():
                 # re-decode re-times "very"'s end 50 ms past the frontier
                 wl = [("Very", 0.2, 1.05, 0.9), ("cool", 1.1, 1.5, 0.95),
                       ("stuff", 1.6, 2.0, 0.95), ("more", 2.1, 2.5, 0.95)]
-            words = [SimpleNamespace(word=t, start=st, end=e, probability=p)
+            words = [SimpleNamespace(word=f" {t}", start=st, end=e, probability=p)
                      for t, st, e, p in wl]
             return iter([SimpleNamespace(words=words, text="")]), SimpleNamespace(
                 language="en", duration=len(audio) / 16000)
@@ -1005,3 +1005,36 @@ def test_tick_residue_suppressed_and_counted_c713():
         assert words.count("very") == 1, f"duplicate commit: {committed!r}"
 
     asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# C7.14 — decoder-edge token merge: glued fragments commit as whole words
+# (2026-08-04 sign-off review: "K -fold" / "95 %" join artifacts)
+# ---------------------------------------------------------------------------
+
+@patch("app.routes.stream_ws.get_current_model_name", return_value="large-v3")
+@patch("app.routes.stream_ws.get_model")
+def test_glued_fragments_commit_as_whole_words(mock_get_model, _name):
+    # Raw decoder surface: word-initial tokens carry the leading space,
+    # glued continuations do not — the real faster-whisper shape, bypassing
+    # make_model's uniform " {t}" wrapper on purpose.
+    def transcribe(audio, **kwargs):
+        words = [SimpleNamespace(word=t, start=s, end=e, probability=p)
+                 for t, s, e, p in [(" K", 0.1, 0.2, 0.9), ("-fold", 0.2, 0.5, 0.8),
+                                    (" cross", 0.6, 1.0, 0.9)]]
+        segs = iter([SimpleNamespace(words=words, text="")])
+        info = SimpleNamespace(language="en", duration=len(audio) / 16000)
+        return segs, info
+    m = MagicMock()
+    m.transcribe.side_effect = transcribe
+    mock_get_model.return_value = m
+    with connect() as ws:
+        start_session(ws)
+        for _ in range(3):
+            ws.send_bytes(pcm(0.5))
+        ws.send_text(json.dumps({"type": "flush"}))
+        msg = ws.receive_json()
+        while msg["type"] != "final":
+            msg = ws.receive_json()
+    assert "K-fold cross" in msg["raw"]
+    assert "K -fold" not in msg["raw"]
