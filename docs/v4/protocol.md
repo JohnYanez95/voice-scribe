@@ -490,3 +490,18 @@ persisted post-C7.12; senior-engineer re-review confirmed two tick-path defects)
   boundary split a cluster). C7.11 interaction: flush-only languages whose tokens carry
   no leading spaces (ja/zh/th) merge to one `Word` per utterance — acceptable at flush,
   where no per-word vetoes apply and partials were already whole-utterance.
+- **C9.3 (new) — server-side per-tick hypothesis trace.** The sanctioned, opt-in-only
+  server twin of the client wire-capture mode: `STREAM_TRACE_DIR` env var (empty
+  default — no shipped launcher sets it; operator opt-in per process) writes one JSONL
+  per session (`stream-trace-<session_id>.jsonl`) carrying per-tick hypothesis words,
+  commit decisions, stall diagnostics (`agreed_n`/`eligible_n`/veto flags), holdback
+  state, and flush records. **Content-bearing by design** — the header record says so;
+  the file exists so `ops/scripts/policy_replay.py` can re-run the pure commit policy
+  offline (`--verify` reproduces recorded decisions bit-exactly; `--set`/`--surface`
+  run counterfactuals). C9.2's logging rules are untouched: transcript content never
+  passes through structlog (the only enable-time log line carries the directory and
+  session id), and the recommended target is a gitignored path. Companion close-line
+  counters (always on, C9.2-safe): `stall_agreed_zero` / `stall_eligible_zero` /
+  `stall_veto_edge` / `stall_veto_prob` — zero-commit ticks with a compared prev
+  hypothesis, classified by cause; these decide which lever the v4.2 tuning pass
+  actually has (hypothesis churn → holdback; edge stalls → edge guard).

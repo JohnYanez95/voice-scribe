@@ -35,6 +35,7 @@ from app.services.stream_policy import (
     retention_start_sample,
     suppress_seam_duplicate,
 )
+from app.services.stream_trace import maybe_trace
 from app.services.transcription import get_current_model_name, get_model
 
 log = structlog.get_logger()
@@ -94,6 +95,13 @@ class StreamSession:
         self.flush_only = False  # C7.11 — set when a flush-only language is pinned
 
         self.policy = PolicyState()
+        # C9.3 content-bearing trace — None unless the operator set the env
+        # switch; the header is emitted once the model is resolved.
+        self.trace = maybe_trace(settings.STREAM_TRACE_DIR, self.session_id)
+        self.trace_header_written = False
+        if self.trace:
+            log.warning("stream trace enabled", dir=settings.STREAM_TRACE_DIR,
+                        session_id=self.session_id)
         self.send_lock = asyncio.Lock()
         self.decode_lock = asyncio.Lock()
         self.decode_generation = 0  # bumped to invalidate an in-flight tick
@@ -116,6 +124,12 @@ class StreamSession:
         self.seam_suppressions = 0  # C7.12 — flush-seam duplicates suppressed
         self.tick_residue_suppressions = 0  # C7.13 — tick-path residues dropped
         self.decode_ms_samples: list[float] = []  # occupancy telemetry (C9.2-safe)
+        # Stall-reason counters (2026-08-04 review): zero-commit ticks where a
+        # prev hypothesis was actually compared, classified by cause (C9.2-safe).
+        self.stall_agreed_zero = 0    # hypotheses diverged at the frontier
+        self.stall_eligible_zero = 0  # agreed but terminal-guard withheld all
+        self.stall_veto_edge = 0      # edge guard stopped the commit scan
+        self.stall_veto_prob = 0      # probability floor stopped the commit scan
 
     # -- guard handle protocol (stream_guard.StreamSessionHandle) ----------
 
@@ -308,11 +322,24 @@ class StreamSession:
         # C7.13: agree() must filter at the same boundary localize() used —
         # context_end includes the overflow slide; the stale committed_through
         # is what latched agreement at 0 while overflow persisted.
+        prev_compared = self.policy.prev_hypothesis is not None
         decision = agree(self.policy, hyp, decoded_end_sample, self.cfg,
                          alignment_boundary_sample=plan.context_end_sample)
         self.policy = decision.state
         if decision.residue_suppressed:
             self.tick_residue_suppressions += 1
+        if prev_compared and hyp and not decision.newly_committed:
+            # Stall classification, most-specific first: a veto means the scan
+            # ran and stopped; eligible_zero means the terminal guard withheld
+            # everything agreed; agreed_zero means the hypotheses diverged.
+            if decision.veto_edge:
+                self.stall_veto_edge += 1
+            elif decision.veto_prob:
+                self.stall_veto_prob += 1
+            elif decision.agreed_n > 0 and decision.eligible_n == 0:
+                self.stall_eligible_zero += 1
+            else:
+                self.stall_agreed_zero += 1
 
         if decision.newly_committed:
             u0 = self.utterance_start_sample / self.sr
@@ -332,6 +359,49 @@ class StreamSession:
             "utterance_id": self.utterance_id,
             "text": committed_text(decision.tentative),
         })
+        if self.trace:
+            self._trace_header_once()
+            self.trace.tick(
+                tick_index=len(self.decode_ms_samples),
+                utterance_id=self.utterance_id,
+                window_start_sample=window_start,
+                context_end_sample=plan.context_end_sample,
+                decoded_end_sample=decoded_end_sample,
+                overflow_drop_samples=plan.overflow_drop_samples,
+                # post-merge (C7.14), window-relative — enough to re-run
+                # localize()+agree() offline; merge itself already applied
+                words_raw=[[t, round(s, 3), round(e, 3), round(p, 3)]
+                           for t, s, e, p in raw_words],
+                hyp=[[x.text, round(x.start, 3), round(x.end, 3),
+                      round(x.probability, 3)] for x in hyp],
+                prev_compared=prev_compared,
+                commit_n=len(decision.newly_committed),
+                agreed_n=decision.agreed_n,
+                eligible_n=decision.eligible_n,
+                veto_prob=decision.veto_prob,
+                veto_edge=decision.veto_edge,
+                residue_suppressed=decision.residue_suppressed,
+                holdback_fired=decision.holdback_fired,
+                holdback_frontier=self.policy.holdback_frontier,
+                holdback_ticks=self.policy.holdback_ticks,
+                committed_delta=[x.text for x in decision.newly_committed],
+                tentative_n=len(decision.tentative),
+                committed_through_sample=self.policy.committed_through_sample,
+            )
+
+    def _trace_header_once(self) -> None:
+        if not self.trace or self.trace_header_written:
+            return
+        self.trace_header_written = True
+        self.trace.header(
+            model_name=self.model_name,
+            language=self.language,
+            policy_config=self.cfg,
+            stream_settings={
+                "decode_tick_ms": settings.STREAM_DECODE_TICK_MS,
+                "min_decode_s": settings.STREAM_MIN_DECODE_S,
+            },
+        )
 
     async def decode_loop(self) -> None:
         tick_s = settings.STREAM_DECODE_TICK_MS / 1000.0
@@ -453,6 +523,19 @@ class StreamSession:
             tail = committed_text(tail_committed)
             raw = f"{prior} {tail}".strip() if prior and tail else (prior or tail)
             duration = (self.total_samples - self.utterance_start_sample) / self.sr
+            if self.trace:
+                self._trace_header_once()
+                self.trace.flush_record(
+                    utterance_id=self.utterance_id,
+                    frontier_sample=frontier,
+                    window_start_sample=window_start,
+                    tail_samples=tail_samples,
+                    decode_ms=round(flush_decode_ms, 1),
+                    tail_committed=[x.text for x in tail_committed],
+                    seam_suppressed=seam_suppressed,
+                    final_raw=raw,
+                    forced=forced,
+                )
 
             await self.send({
                 "type": "final",
@@ -699,6 +782,8 @@ async def ws_stream(websocket: WebSocket) -> None:
             except Exception:
                 pass
         session.chunks = []
+        if session.trace:
+            session.trace.close()
         if acquired:
             stream_guard.release_stream(session)
         session.closed_event.set()
@@ -719,6 +804,10 @@ async def ws_stream(websocket: WebSocket) -> None:
                  tick_multiplier=session.tick_multiplier,
                  seam_suppressions=session.seam_suppressions,
                  tick_residue_suppressions=session.tick_residue_suppressions,
+                 stall_agreed_zero=session.stall_agreed_zero,
+                 stall_eligible_zero=session.stall_eligible_zero,
+                 stall_veto_edge=session.stall_veto_edge,
+                 stall_veto_prob=session.stall_veto_prob,
                  occupancy_p95=occupancy_p95, occupancy_max=occupancy_max,
                  decode_ms_max=round(samples[-1], 1) if samples else None,
                  decode_seconds_total=round(sum(samples) / 1000.0, 1))

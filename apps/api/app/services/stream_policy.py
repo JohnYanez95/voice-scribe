@@ -104,6 +104,10 @@ class CommitDecision:
     veto_edge: bool               # edge guard withheld at least one agreed word
     state: PolicyState
     residue_suppressed: bool = False  # C7.13 — tick-path frontier residue dropped
+    # Stall diagnostics (2026-08-04 review): why commit_n was 0 on a compared
+    # tick — the session classifies these into close-line counters (C9.2-safe).
+    agreed_n: int = 0    # length of the normalized common prefix
+    eligible_n: int = 0  # agreed minus the terminal-word guard, floored at 0
 
 
 def normalize_token(text: str) -> str:
@@ -315,10 +319,12 @@ def agree(
 
     veto_prob = veto_edge = False
     commit_n = 0
+    agreed_n = eligible_n = 0
     if prev is not None and curr:
         agreed = _common_prefix_len(prev, curr)
         # terminal-word guard: eligible only if non-terminal in both hypotheses
         eligible = min(agreed, len(prev) - 1, len(curr) - 1)
+        agreed_n, eligible_n = agreed, max(0, eligible)
         commit_n = 0
         for i in range(max(0, eligible)):
             w = curr[i]
@@ -378,6 +384,8 @@ def agree(
         veto_edge=veto_edge,
         state=new_state,
         residue_suppressed=residue_suppressed,
+        agreed_n=agreed_n,
+        eligible_n=eligible_n,
     )
 
 

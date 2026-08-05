@@ -623,3 +623,39 @@ def test_merged_cluster_straddles_localize_boundary_as_a_unit():
     words = localize(merged, 0, sample(3.0), CFG)
     assert [x.text for x in words] == ["K-fold"]
     assert words[0].start == 2.9 and words[0].end == 3.4
+
+
+# ---------------------------------------------------------------------------
+# Stall diagnostics (2026-08-04 review) — agreed_n / eligible_n on
+# CommitDecision so the session can classify zero-commit ticks.
+# ---------------------------------------------------------------------------
+
+def test_stall_counts_divergence_reports_agreed_zero():
+    s = PolicyState()
+    d1 = agree(s, hyp(w("aaa", 0.0, 0.4), w("tail", 0.4, 0.8)),
+               buffer_end_sample=sample(3.0), cfg=CFG)
+    d2 = agree(d1.state, hyp(w("bbb", 0.0, 0.4), w("tail", 0.4, 0.8)),
+               buffer_end_sample=sample(3.0), cfg=CFG)
+    assert d2.newly_committed == ()
+    assert d2.agreed_n == 0
+
+
+def test_stall_counts_terminal_guard_as_eligible_zero():
+    # Single agreed word, terminal in both → agreed_n 1, eligible_n 0.
+    s = PolicyState()
+    d1 = agree(s, hyp(w("stop", 0.0, 0.4)), buffer_end_sample=sample(2.0), cfg=CFG)
+    d2 = agree(d1.state, hyp(w("stop", 0.0, 0.4)), buffer_end_sample=sample(2.0), cfg=CFG)
+    assert d2.newly_committed == ()
+    assert d2.agreed_n == 1 and d2.eligible_n == 0
+
+
+def test_stall_veto_scan_populates_counts_and_flags():
+    # Full agreement, first eligible word under the prob floor → veto_prob with
+    # agreed/eligible counts still reported for classification priority.
+    s = PolicyState()
+    words = hyp(w("alpha", 0.0, 0.3, prob=0.3), w("beta", 0.3, 0.6), w("tail", 0.6, 0.9))
+    d1 = agree(s, words, buffer_end_sample=sample(3.0), cfg=CFG)
+    d2 = agree(d1.state, words, buffer_end_sample=sample(3.0), cfg=CFG)
+    assert d2.newly_committed == ()
+    assert d2.veto_prob
+    assert d2.agreed_n == 3 and d2.eligible_n == 2

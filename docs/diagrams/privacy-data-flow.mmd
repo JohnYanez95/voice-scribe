@@ -60,12 +60,14 @@ flowchart TD
     wlog -- "user-clicked export only<br/>(contains transcript text)" --> wfile["Local JSON download"]
     wlog --> wclear["Cleared on session open<br/>+ page unload"]
 
+    stxt -. "STREAM_TRACE_DIR ONLY<br/>(env opt-in, empty default,<br/>never set by any launcher)" .-> strace["Per-session trace JSONL (C9.3)<br/>hypothesis + committed text<br/>gitignored path, operator-deleted"]
+
     classDef sensitive fill:#ffdddd,stroke:#cc4444
     classDef ephemeral fill:#fffacc,stroke:#b8900a
     classDef output fill:#ddf5dd,stroke:#448844
     classDef deleted fill:#e0e0e0,stroke:#999999,color:#777777
 
     class mic,blob,frames,preroll,fifo sensitive
-    class vad,http,wsIn,wsStream,tmp1,tmp2,ring,httpPost,wlog ephemeral
+    class vad,http,wsIn,wsStream,tmp1,tmp2,ring,httpPost,wlog,strace ephemeral
     class txt,stxt,resp,wsOut,wsLive,wsFinal,area,live,browserClip,rustClip,wfile output
     class del,rdel,cdel,ldel,wclear deleted

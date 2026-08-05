@@ -1038,3 +1038,62 @@ def test_glued_fragments_commit_as_whole_words(mock_get_model, _name):
             msg = ws.receive_json()
     assert "K-fold cross" in msg["raw"]
     assert "K -fold" not in msg["raw"]
+
+
+# ---------------------------------------------------------------------------
+# C9.3 — per-tick hypothesis trace (content-bearing, operator opt-in only)
+# ---------------------------------------------------------------------------
+
+@patch("app.routes.stream_ws.get_current_model_name", return_value="large-v3")
+@patch("app.routes.stream_ws.get_model")
+def test_trace_disabled_by_default_writes_nothing(mock_get_model, _name, tmp_path, monkeypatch):
+    # STREAM_TRACE_DIR is empty by default — a session must create no files
+    # anywhere, even with a directory available to write into.
+    assert settings.STREAM_TRACE_DIR == ""
+    mock_get_model.return_value = make_model([("hi", 0.1, 0.3, 0.9)])
+    with connect() as ws:
+        start_session(ws)
+        ws.send_bytes(pcm(0.5))
+        ws.send_text(json.dumps({"type": "flush"}))
+        while ws.receive_json()["type"] != "final":
+            pass
+    assert list(tmp_path.iterdir()) == []
+
+
+@patch("app.routes.stream_ws.get_current_model_name", return_value="large-v3")
+@patch("app.routes.stream_ws.get_model")
+def test_trace_enabled_writes_header_tick_and_flush_records(
+        mock_get_model, _name, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "STREAM_TRACE_DIR", str(tmp_path))
+    mock_get_model.return_value = make_model([("hello", 0.1, 0.4, 0.9),
+                                              ("world", 0.5, 0.9, 0.9)])
+    with connect() as ws:
+        start_session(ws)
+        for _ in range(4):
+            ws.send_bytes(pcm(0.5))
+            time.sleep(0.05)  # let the 20 ms test tick fire between frames
+        ws.send_text(json.dumps({"type": "flush"}))
+        while ws.receive_json()["type"] != "final":
+            pass
+        ws.send_text(json.dumps({"type": "stop"}))
+        while True:
+            msg = ws.receive_json()
+            if msg["type"] in ("ack", "final"):
+                break
+    files = list(tmp_path.glob("stream-trace-*.jsonl"))
+    assert len(files) == 1
+    records = [json.loads(line) for line in files[0].read_text().splitlines()]
+    kinds = [r["kind"] for r in records]
+    assert kinds[0] == "session"
+    assert records[0]["trace_version"] == 1
+    assert "transcript text" in records[0]["note"]
+    assert records[0]["policy_config"]["max_holdback_ticks"] == settings.STREAM_MAX_HOLDBACK_TICKS
+    assert "flush" in kinds
+    flush_rec = next(r for r in records if r["kind"] == "flush")
+    assert "hello world" in flush_rec["final_raw"]
+    tick_recs = [r for r in records if r["kind"] == "tick"]
+    if tick_recs:  # tick cadence is timing-dependent under test; shape-check when present
+        t = tick_recs[0]
+        for field in ("window_start_sample", "context_end_sample", "hyp",
+                      "commit_n", "agreed_n", "eligible_n", "prev_compared"):
+            assert field in t

@@ -45,6 +45,10 @@ class Settings:
     STREAM_IDLE_TIMEOUT_S: float = float(os.getenv("STREAM_IDLE_TIMEOUT_S", "10"))
     STREAM_BURST_CREDIT_S: float = float(os.getenv("STREAM_BURST_CREDIT_S", "10"))
     STREAM_PREEMPT_GRACE_S: float = float(os.getenv("STREAM_PREEMPT_GRACE_S", "2.0"))
+    # Per-tick hypothesis trace (C9.3) — CONTENT-BEARING diagnostic. Empty =
+    # disabled (the only switch; never set by any shipped launcher — operator
+    # opt-in per session/process only). Point at a gitignored path.
+    STREAM_TRACE_DIR: str = os.getenv("STREAM_TRACE_DIR", "")
 
     @property
     def cors_origins(self) -> list[str]:
