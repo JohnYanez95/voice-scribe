@@ -90,7 +90,24 @@ vi.mock("../src/hooks/useVAD", () => ({
   ),
 }));
 
-const mockStreamTranscribeAudio = vi.fn(() => vi.fn());
+// Captured per-call one-shot callbacks so tests can drive success/failure
+// (existing tests only assert call counts — callbacks never auto-fire).
+interface CapturedStreamCall {
+  blob: Blob;
+  onSegment: (t: string) => void;
+  onComplete: (r: { raw: string; cleaned: string }) => void;
+  onConnectionFail: () => void;
+  onAppError: (d: string) => void;
+}
+const streamCalls: CapturedStreamCall[] = [];
+const mockStreamTranscribeAudio = vi.fn(
+  (blob: Blob, onSegment: (t: string) => void,
+   onComplete: (r: { raw: string; cleaned: string }) => void,
+   onConnectionFail: () => void, onAppError: (d: string) => void) => {
+    streamCalls.push({ blob, onSegment, onComplete, onConnectionFail, onAppError });
+    return vi.fn();
+  }
+);
 vi.mock("../src/services/api", () => ({
   streamTranscribeAudio: (...args: unknown[]) => mockStreamTranscribeAudio(...args),
   transcribeAudio: vi.fn(),
@@ -189,6 +206,7 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("voice-scribe-recording-mode", "continuous");
   sessions.length = 0;
+  streamCalls.length = 0;
   sessionAge = 0;
   seq = 0;
   mockIsListening = false;
@@ -507,5 +525,138 @@ describe("App streaming — model selector guard", () => {
     const select = document.querySelector(".model-selector select") as HTMLSelectElement;
     expect(select.disabled).toBe(true);
     expect(select.title).toBe("Stop recording to change models");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("App streaming — recovery queue (degrade with dead server)", () => {
+  it("queues the utterance non-fatally when the degrade replay fails", () => {
+    const entry = startContinuous();
+    speakUtterance(entry, 0); // FIFO entry + outstanding flush
+    act(() => {
+      entry.cb.onDegrade({ kind: "fatal_error", code: "session_timeout", detail: "x" });
+    });
+    expect(mockStreamTranscribeAudio).toHaveBeenCalledTimes(1); // FIFO replayed
+    act(() => {
+      streamCalls[0].onConnectionFail();
+    });
+    expect(screen.getByTestId("recovery-bar").textContent).toContain(
+      "1 utterance"
+    );
+    // No transcript mutation: the textarea either doesn't render yet or is empty.
+    const ta = screen.queryByRole("textbox") as HTMLTextAreaElement | null;
+    expect(ta?.value ?? "").toBe("");
+    expect(mockEmitRecordingState).toHaveBeenCalledWith("listening");
+    expect(mockEmitRecordingState).not.toHaveBeenCalledWith("error");
+  });
+
+  it("retry lands the utterance text exactly once and clears the bar", () => {
+    const entry = startContinuous();
+    speakUtterance(entry, 0);
+    act(() => {
+      entry.cb.onDegrade({ kind: "fatal_error", code: "session_timeout", detail: "x" });
+    });
+    act(() => {
+      streamCalls[0].onConnectionFail();
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId("recovery-retry"));
+    });
+    expect(mockStreamTranscribeAudio).toHaveBeenCalledTimes(2);
+    expect(streamCalls[1].blob).toBe(streamCalls[0].blob); // same retained WAV
+    act(() => {
+      streamCalls[1].onComplete({ raw: "hello world", cleaned: "Hello world." });
+    });
+    expect(getTextarea().value).toBe("Hello world.");
+    expect(screen.queryByTestId("recovery-bar")).toBeNull();
+  });
+
+  it("healthy-server degrade replays without a bar and without duplication", () => {
+    const entry = startContinuous();
+    speakUtterance(entry, 0);
+    act(() => {
+      entry.cb.onDegrade({ kind: "fatal_error", code: "session_timeout", detail: "x" });
+    });
+    act(() => {
+      streamCalls[0].onComplete({ raw: "all good", cleaned: "All good." });
+    });
+    expect(getTextarea().value).toBe("All good.");
+    expect(screen.queryByTestId("recovery-bar")).toBeNull();
+  });
+
+  it("bounds the queue at 8 with drop-oldest", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const entry = startContinuous();
+    act(() => {
+      entry.cb.onDegrade({ kind: "connect_failed" }); // FIFO empty — degrade only
+    });
+    for (let i = 0; i < 9; i++) {
+      act(() => {
+        capturedOnSpeechEnd?.(new Float32Array([0.1])); // degraded one-shot path
+      });
+      act(() => {
+        streamCalls[i].onConnectionFail();
+      });
+    }
+    expect(screen.getByTestId("recovery-bar").textContent).toContain(
+      "8 utterances"
+    );
+    expect(
+      errSpy.mock.calls.some((c) => String(c[0]).includes("[recovery]"))
+    ).toBe(true);
+  });
+
+  it("partial retry success re-queues only the failed remainder", () => {
+    const entry = startContinuous();
+    act(() => {
+      entry.cb.onDegrade({ kind: "connect_failed" });
+    });
+    for (let i = 0; i < 2; i++) {
+      act(() => {
+        capturedOnSpeechEnd?.(new Float32Array([0.1]));
+      });
+      act(() => {
+        streamCalls[i].onConnectionFail();
+      });
+    }
+    act(() => {
+      fireEvent.click(screen.getByTestId("recovery-retry"));
+    });
+    expect(mockStreamTranscribeAudio).toHaveBeenCalledTimes(4);
+    act(() => {
+      streamCalls[2].onComplete({ raw: "first", cleaned: "First." });
+    });
+    act(() => {
+      streamCalls[3].onConnectionFail();
+    });
+    expect(getTextarea().value).toBe("First.");
+    expect(screen.getByTestId("recovery-bar").textContent).toContain(
+      "1 utterance"
+    );
+  });
+
+  it("retry completing after the VAD stopped lands at done, not listening", () => {
+    const entry = startContinuous();
+    act(() => {
+      entry.cb.onDegrade({ kind: "connect_failed" });
+    });
+    act(() => {
+      capturedOnSpeechEnd?.(new Float32Array([0.1]));
+    });
+    act(() => {
+      streamCalls[0].onConnectionFail();
+    });
+    mockIsListening = false; // VAD stopped before the retry resolves
+    act(() => {
+      fireEvent.click(screen.getByTestId("recovery-retry"));
+    });
+    mockEmitRecordingState.mockClear();
+    act(() => {
+      streamCalls[1].onComplete({ raw: "late", cleaned: "Late." });
+    });
+    expect(getTextarea().value).toBe("Late.");
+    expect(mockEmitRecordingState).toHaveBeenLastCalledWith("done");
+    expect(mockEmitRecordingState).not.toHaveBeenCalledWith("listening");
   });
 });

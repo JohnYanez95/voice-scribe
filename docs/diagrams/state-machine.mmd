@@ -28,7 +28,8 @@ stateDiagram-v2
     streaming --> streaming : forced final (120 s)<br/>text appends, FIFO untouched
     streaming --> listening : final received<br/>(utterance complete)
     streaming --> listening : VAD misfire → reset<br/>(live text cleared)
-    streaming --> listening : fatal stream error<br/>→ silent degrade, FIFO replayed
+    streaming --> processing : fatal stream error, FIFO retained<br/>→ silent degrade, replay via one-shot
+    streaming --> listening : fatal stream error, FIFO empty<br/>→ silent degrade
     streaming --> done : final + stop requested
     streaming --> error : decode_failure<br/>(surface — never falls back)
 
@@ -41,7 +42,11 @@ stateDiagram-v2
 
     processing --> done : complete<br/>(push-to-talk /<br/>final segment)
     processing --> listening : complete<br/>(continuous)
-    processing --> error : error
+    processing --> error : application error<br/>(inference / decode — never retried)
+    processing --> listening : connection failure (continuous, VAD live)<br/>utterance WAV → recovery queue ≤ 8<br/>retry affordance · non-fatal
+    processing --> done : connection failure (continuous,<br/>stop requested or VAD stopped)<br/>utterance queued · affordance persists
+    listening --> processing : Retry — recovery queue<br/>replayed in order (manual only)
+    done --> processing : Retry — recovery queue<br/>replayed in order (manual only)
 
     done --> idle : record
     error --> idle : record

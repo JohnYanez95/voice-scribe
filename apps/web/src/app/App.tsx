@@ -87,6 +87,16 @@ export function App() {
   const speakingRef = useRef(false);
   const [liveCommitted, setLiveCommitted] = useState("");
   const [liveTail, setLiveTail] = useState("");
+  // Recovery queue (step-3 fix, 2026-08-04 review): WAV of utterances whose
+  // one-shot replay failed — the server may be dead, and this audio is the
+  // only vehicle for the text behind it. Same C10.3 bound as the pending
+  // FIFO (the FIFO is idle while degraded, so total retention stays ≤ 8).
+  // Nothing promotes into the transcript until a transcription succeeds.
+  const recoveryQueueRef = useRef<Array<{ blob: Blob; speechEndTime: number }>>([]);
+  const [recoveryCount, setRecoveryCount] = useState(0);
+  // Live isListening for callbacks that outlive their closure (a retry can
+  // complete after the VAD stopped — landing at "listening" then would lie).
+  const isListeningRef = useRef(false);
 
   // Stable ref to current transcript so "copy" inside
   // triggerTranscription's closure always reads the latest value.
@@ -234,8 +244,12 @@ export function App() {
       // Timestamp update runs after both command and non-command paths.
       // Stores the speech-end time of this segment so the next segment's
       // elapsed comparison measures the gap between when the user spoke,
-      // not between when the GPU finished.
-      lastSegmentTimestampRef.current = speechEndTime ?? Date.now();
+      // not between when the GPU finished. Clamped: a retried recovery
+      // segment carries an old timestamp and must not regress the ref (the
+      // next live utterance would see a spurious paragraph-break gap).
+      lastSegmentTimestampRef.current = Math.max(
+        lastSegmentTimestampRef.current, speechEndTime ?? Date.now()
+      );
 
       if (stateTransition === "none") return;
 
@@ -244,7 +258,10 @@ export function App() {
         stopRequestedRef.current = false;
         setState("done"); // drain complete — explicit stop
       } else if (append) {
-        setState("listening"); // normal cycle — mic stays open
+        // Normal cycle: mic stays open. A retry completing after the VAD
+        // stopped lands at done — "listening" would block the settings gear
+        // with no mic actually running.
+        setState(isListeningRef.current ? "listening" : "done");
       } else {
         setState("done"); // push-to-talk always lands at done
       }
@@ -315,9 +332,26 @@ export function App() {
                 setState("error");
               });
           } else {
-            // Continuous: same error will recur on retry — surface immediately
-            setError("Transcription connection failed");
-            setState("error");
+            // Continuous: queue the WAV for manual retry — against a dead
+            // server the replay has nowhere to land, and this audio is the
+            // only recovery vehicle for its text (step-3 gate line). Bounded
+            // drop-oldest like the C10.3 FIFO. Non-fatal: dictation continues.
+            const queue = recoveryQueueRef.current;
+            queue.push({ blob, speechEndTime: speechEndTime ?? Date.now() });
+            if (queue.length > MAX_PENDING_UTTERANCES) {
+              queue.shift();
+              console.error("[recovery] queue over bound — oldest utterance dropped");
+            }
+            setRecoveryCount(queue.length);
+            setError(
+              "Transcription connection failed — audio saved, retry when the server is back"
+            );
+            if (stopRequestedRef.current) {
+              stopRequestedRef.current = false;
+              setState("done"); // drain "completed" — the text is safe in the queue
+            } else {
+              setState(isListeningRef.current ? "listening" : "done");
+            }
           }
         },
         (detail) => {
@@ -531,6 +565,9 @@ export function App() {
       },
     });
 
+  // Keep the mirror in sync for callbacks that fire after closures go stale.
+  useEffect(() => { isListeningRef.current = isListening; });
+
   // Handle VAD errors
   useEffect(() => {
     if (vadError) {
@@ -576,6 +613,8 @@ export function App() {
       } else {
         // Fresh activation: a new session tries streaming again even after a
         // degraded previous activation (C10.1 — degrade is per session).
+        // recoveryQueueRef is deliberately NOT reset — it holds user speech,
+        // not activation state; it empties on retry success / clear / bound.
         streamDegradedRef.current = false;
         pendingUtterancesRef.current = [];
         outstandingFlushesRef.current = 0;
@@ -648,7 +687,26 @@ export function App() {
     });
     setTranscript("");
     setRawTranscript("");
+    // Clear is the explicit user-discard intent — the privacy-correct
+    // release point for retained recovery audio.
+    recoveryQueueRef.current = [];
+    setRecoveryCount(0);
     setState("idle");
+  }, []);
+
+  const handleRetryRecovery = useCallback(() => {
+    const entries = recoveryQueueRef.current;
+    if (entries.length === 0) return;
+    recoveryQueueRef.current = [];
+    setRecoveryCount(0);
+    setError("");
+    // Burst replay in order — completions arrive in server order (single
+    // GPU), the same assumption the degrade replay documents. A still-dead
+    // server sends every entry back through the failure branch, which
+    // re-queues them in order and re-surfaces the affordance.
+    for (const entry of entries) {
+      triggerTranscriptionRef.current(entry.blob, true, entry.speechEndTime);
+    }
   }, []);
 
   const handleToggleSettings = useCallback(() => {
@@ -759,6 +817,21 @@ export function App() {
       </div>
       <div className="main-area">
         {error && <p className="error">{error}</p>}
+        {recoveryCount > 0 && (
+          <div className="recovery-bar" data-testid="recovery-bar">
+            <span>
+              {recoveryCount} utterance{recoveryCount === 1 ? "" : "s"} awaiting
+              transcription
+            </span>
+            <button
+              data-testid="recovery-retry"
+              onClick={handleRetryRecovery}
+              disabled={state === "processing"}
+            >
+              Retry
+            </button>
+          </div>
+        )}
         <Transcript
           text={transcript}
           rawText={rawTranscript}
