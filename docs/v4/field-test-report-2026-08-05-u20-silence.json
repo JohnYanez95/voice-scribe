@@ -1,0 +1,538 @@
+{
+  "split_mode": "silence",
+  "split_params": {
+    "win_s": 0.02,
+    "min_silence_s": 0.3,
+    "rms_factor": 0.02
+  },
+  "stream": {
+    "audio_seconds": 237.76,
+    "frame_ms": 96,
+    "utterances": 20,
+    "retractions": 0,
+    "committed_words_total": 404,
+    "committed_words_forced": 35,
+    "commit_lag_s": [
+      1.244,
+      1.326,
+      1.407,
+      1.427,
+      1.384,
+      1.381,
+      1.376,
+      1.452,
+      1.48,
+      1.508,
+      1.257,
+      1.808,
+      1.644,
+      2.848,
+      1.519,
+      1.974,
+      2.563,
+      2.475,
+      1.95,
+      1.681,
+      1.164,
+      1.762,
+      0.815,
+      1.554,
+      1.54,
+      1.396,
+      2.534,
+      2.178,
+      1.409,
+      1.337,
+      1.841,
+      1.978,
+      1.234,
+      2.482,
+      1.521,
+      1.86,
+      2.083,
+      2.105,
+      1.414,
+      1.767,
+      1.577,
+      1.898,
+      1.184,
+      1.264,
+      1.329,
+      1.448,
+      1.895,
+      2.365,
+      1.547,
+      1.511,
+      1.613,
+      1.767,
+      1.832,
+      1.607,
+      1.633,
+      1.533,
+      1.761,
+      1.36,
+      1.676,
+      1.78,
+      1.519,
+      1.597,
+      1.891,
+      2.136,
+      1.398,
+      1.865,
+      2.005,
+      1.478,
+      1.832,
+      1.398,
+      1.227,
+      1.611,
+      3.557,
+      1.422,
+      2.018,
+      1.481,
+      1.903,
+      1.782,
+      1.559,
+      1.834,
+      2.218,
+      2.051,
+      1.381,
+      1.542,
+      1.834,
+      1.797,
+      1.714,
+      2.702,
+      2.079,
+      1.823,
+      3.019,
+      1.367,
+      1.388,
+      2.494,
+      2.101,
+      1.096,
+      1.23,
+      1.645,
+      1.559,
+      1.316,
+      1.642,
+      1.652,
+      1.685,
+      1.447,
+      2.747,
+      1.812,
+      2.196,
+      1.505,
+      1.451,
+      1.743,
+      2.043,
+      1.558,
+      1.811,
+      1.538,
+      1.679,
+      1.349,
+      1.78,
+      1.371,
+      1.355,
+      1.744,
+      1.783,
+      1.682,
+      1.224,
+      1.413,
+      1.629,
+      1.409,
+      1.829,
+      2.47,
+      3.095,
+      1.848,
+      1.402,
+      2.519,
+      1.517,
+      1.571,
+      1.422,
+      1.943,
+      1.626,
+      1.603,
+      1.368,
+      1.914,
+      1.347,
+      1.614,
+      1.603,
+      1.58,
+      1.447,
+      4.185,
+      3.436,
+      1.307,
+      1.406,
+      1.122,
+      1.468,
+      1.832,
+      1.547,
+      1.087,
+      1.688,
+      1.944,
+      1.601,
+      1.564,
+      3.644,
+      1.4,
+      1.794,
+      1.618,
+      1.316,
+      1.869,
+      2.132,
+      3.217,
+      2.908
+    ],
+    "partials": 291,
+    "dropped_audio_ms": 0.0,
+    "prefix_invariant_ok": true,
+    "uid_alignment_ok": true,
+    "first_partial_anchor": "first_frame_sent",
+    "errors": [],
+    "seam_eligible_flushes": 19,
+    "seam_dup_intra_final": 1,
+    "seam_dup_utterances": [
+      16
+    ],
+    "seam_dup_commit_join": 0,
+    "seam_dup_commit_join_utterances": [],
+    "adjacent_dup_within_delta": 0,
+    "tunables": {
+      "decode_tick_ms": 750,
+      "max_uncommitted_s": 24.0,
+      "max_holdback_ticks": 6
+    },
+    "seam_dup_inter_final": 0,
+    "first_partial_s": {
+      "p50": 1.228,
+      "max": 1.686,
+      "max_excl_first": 1.291,
+      "per_utterance": [
+        1.686,
+        1.224,
+        1.29,
+        1.215,
+        1.28,
+        1.233,
+        1.243,
+        1.161,
+        1.194,
+        1.191,
+        1.291,
+        1.241,
+        1.207,
+        1.193,
+        1.189,
+        1.179,
+        1.165,
+        1.237,
+        1.252,
+        1.265
+      ]
+    },
+    "finalization_s": {
+      "p50": 0.31,
+      "max": 0.513,
+      "max_excl_first": 0.513,
+      "per_utterance": [
+        0.444,
+        0.314,
+        0.294,
+        0.31,
+        0.213,
+        0.377,
+        0.416,
+        0.265,
+        0.378,
+        0.427,
+        0.502,
+        0.291,
+        0.218,
+        0.221,
+        0.31,
+        0.257,
+        0.222,
+        0.391,
+        0.513,
+        0.232
+      ]
+    },
+    "utterances_with_nonempty_partials": 20,
+    "finalization_from_speech_end_s": 0.233,
+    "commit_lag_p50_s": 1.618,
+    "commit_lag_max_s": 4.185,
+    "force_commit_rate": 0.0866
+  },
+  "gpu_during_stream": {
+    "available": true,
+    "duty_cycle": 0.635306553911205,
+    "mean_util_pct": 34.0,
+    "peak_vram_mib": 6109.0
+  },
+  "gpu_during_oneshot": {
+    "available": true,
+    "duty_cycle": 1.0,
+    "mean_util_pct": 64.4,
+    "peak_vram_mib": 6108.0
+  },
+  "baseline": {
+    "oneshot_wall_s": 14.289,
+    "oneshot_posts": 20,
+    "baseline_kind": "per_utterance_unchunked",
+    "per_utterance": [
+      {
+        "duration_s": 7.98,
+        "wall_s": 0.639,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 18.2,
+        "wall_s": 1.077,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 9.8,
+        "wall_s": 0.502,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 11.28,
+        "wall_s": 0.652,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 9.02,
+        "wall_s": 0.56,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 10.3,
+        "wall_s": 0.707,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 18.44,
+        "wall_s": 1.057,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 8.4,
+        "wall_s": 0.616,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 14.7,
+        "wall_s": 0.757,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 9.32,
+        "wall_s": 0.533,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 12.54,
+        "wall_s": 0.58,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 10.38,
+        "wall_s": 0.661,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 14.12,
+        "wall_s": 0.815,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 6.08,
+        "wall_s": 0.443,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 30.52,
+        "wall_s": 1.745,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 2.2,
+        "wall_s": 0.443,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 10.52,
+        "wall_s": 0.597,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 12.54,
+        "wall_s": 0.741,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 10.08,
+        "wall_s": 0.631,
+        "wer_excluded": false
+      },
+      {
+        "duration_s": 11.34,
+        "wall_s": 0.535,
+        "wer_excluded": false
+      }
+    ],
+    "wer_excluded_seconds": 0.0
+  },
+  "wer": {
+    "wer_micro": 0.0368,
+    "wer_reference": "per_utterance_unchunked_oneshot",
+    "wer_ref_words_total": 462,
+    "wer_analysis_evaluated": true,
+    "boundary_divergence_near_rate": 0.0286,
+    "boundary_divergence_far_rate": 0.0811,
+    "boundary_divergences_total": 17,
+    "per_utterance": [
+      {
+        "wer": 0.0,
+        "ref_words": 14,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 42,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 7,
+        "wer_excluded": false,
+        "forced_words": 1
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 16,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 14,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 23,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0196,
+        "ref_words": 51,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 19,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.1111,
+        "ref_words": 27,
+        "wer_excluded": false,
+        "forced_words": 9
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 13,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 15,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0455,
+        "ref_words": 22,
+        "wer_excluded": false,
+        "forced_words": 11
+      },
+      {
+        "wer": 0.0588,
+        "ref_words": 34,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.4,
+        "ref_words": 5,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 95,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 3,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.2667,
+        "ref_words": 15,
+        "wer_excluded": false,
+        "forced_words": 10
+      },
+      {
+        "wer": 0.1905,
+        "ref_words": 21,
+        "wer_excluded": false,
+        "forced_words": 4
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 17,
+        "wer_excluded": false,
+        "forced_words": 0
+      },
+      {
+        "wer": 0.0,
+        "ref_words": 9,
+        "wer_excluded": false,
+        "forced_words": 0
+      }
+    ],
+    "divergence_buckets": {
+      "0.00-0.25": {
+        "divergences": 6,
+        "hyp_words": 210
+      },
+      "0.25-0.50": {
+        "divergences": 1,
+        "hyp_words": 102
+      },
+      "0.50-1.00": {
+        "divergences": 4,
+        "hyp_words": 77
+      },
+      "1.00-inf": {
+        "divergences": 6,
+        "hyp_words": 74
+      }
+    },
+    "divergence_bucket_note": "word times interpolated within commit spans \u2014 estimates",
+    "forced_words_total": 35,
+    "forced_span_wer": 0.1429,
+    "forced_span_gate_evaluated": true,
+    "forced_span_excluded_utterances": 0
+  }
+}

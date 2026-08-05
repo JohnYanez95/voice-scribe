@@ -706,6 +706,11 @@ def main() -> None:
                     help="Also run the per-utterance unchunked one-shot reference "
                          "(WER lines + cost comparison)")
     ap.add_argument("--report", default=None, help="Write JSON report (counters only)")
+    ap.add_argument("--dump-text", default=None, metavar="DIR",
+                    help="Write per-utterance stream finals + one-shot reference raws "
+                         "as JSON into DIR (contains transcript text — gitignored "
+                         "paths only, per C9.2's text-diffing allowance; the report "
+                         "stays counters-only)")
     args = ap.parse_args()
 
     audio = load_audio_f32(args.audio)
@@ -752,6 +757,20 @@ def main() -> None:
             else:
                 print("WER analysis skipped: utterance alignment broken",
                       file=sys.stderr)
+    if args.dump_text:
+        dump_dir = Path(args.dump_text)
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        finals = {str(u): d["_raw"]
+                  for u, d in stream_stats.get("_final_by_utt", {}).items()}
+        (dump_dir / "stream-finals.json").write_text(
+            json.dumps(finals, indent=2, ensure_ascii=False) + "\n")
+        if reference is not None:
+            refs = {str(u): r for u, r in enumerate(reference["_raws"])
+                    if r is not None}
+            (dump_dir / "oneshot-refs.json").write_text(
+                json.dumps(refs, indent=2, ensure_ascii=False) + "\n")
+        print(f"text dump written to {dump_dir} (transcript text — do not commit)",
+              file=sys.stderr)
     for key in [k for k in stream_stats if k.startswith("_")]:
         stream_stats.pop(key, None)
 
