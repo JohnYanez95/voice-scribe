@@ -1274,7 +1274,11 @@ is a tuning finding (tick too fast, buffer trim not working), not a number to qu
   single sample per session) and one gate run at a VAD-representative utterance count
   (≥ 20 over the same recording) — the 3–4-utterance runs stay too, as the only exerciser of
   the > 24 s slide.
-- **v4.2 — Voice command fast path + tuning pass.** `detectVoiceCommand` runs on committed text
+- **v4.2 — Stabilization pass** *(re-chartered at the 2026-08-04 sign-off review, PM
+  recommendation accepted: v4.2 is stabilization only — no new user-facing behavior — so
+  its definition of done is "gate lines close or they don't." The voice-command `copy`
+  fast path and the explicit language setting move to **v4.3**.)* The original fast-path
+  text below stands as the v4.3 charter: `detectVoiceCommand` runs on committed text
   as it lands instead of waiting for utterance completion — **`copy` only** (resolved question
   2 below: `clear` never fast-paths). Tunables adjusted against `stream_bench` numbers and
   real dictation; `redemptionMs` reduction evaluated here, gated on false-finalization rate.
@@ -1878,6 +1882,26 @@ at `data/tests/test-2.m4a` (gitignored, outside history) and is the pinned v4.2 
 fixture; utterance 16's sample range is addressable through the committed report. **Scope question for the sign-off review:** user inclination
 (2026-08-04) to pause Tauri desktop development — no WSL-perspective advantage over the
 web app yet; step 7 passed clean, so a pause freezes a working artifact.
+
+**Scope decision (2026-08-04, sign-off review — all three personas concur, user
+initiated): the Tauri desktop shell is FROZEN, paused with intent to return.**
+Freeze state: step-7-green SHA `9876d50`; rustc 1.94.1; tauri 2.10.3 (Cargo.lock);
+host libwebkit2gtk-4.1 2.50.4 (Ubuntu 22.04). *Frozen:* new desktop features (tray,
+window management, global-hotkey re-add, clipboard/audio enhancements),
+WebKitGTK-specific tuning, desktop-only bug hunts. *Maintenance that remains:*
+`platform.ts` stays the single routing surface; any capture-layer change (useVAD,
+streamSession, AudioWorklet path, audio cues) carries a `make desktop` pass in its
+gate; §7 step 7 stays in every milestone sitting; **working rule — any change to
+ports, allowed origins, or the `/ws/stream` URL requires a `tauri.conf.json` CSP
+review** (the CSP pins 8084/8001 and is the one silent-break vector); the
+`desktop-check` CI job (cargo check, freeze insurance) proves the crate keeps
+compiling — drop it if it exceeds ~2 min cached. *Un-pause triggers:* (a) move to
+native Linux (global hotkeys work there; the dictate-without-focus loop is the
+shell's actual reason to exist and is unreachable on WSLg); (b) the labeling app's
+scoping review chooses a native shell and wants a live reference; (c) a distribution
+need. The labeling app's shell decision is its own and does not require this shell
+to stay warm — the sidecar pattern is captured as working code at the frozen SHA.
+Deferred by design, not by omission.
 
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial
