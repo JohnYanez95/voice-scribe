@@ -144,8 +144,10 @@ Preconditions: backend bare-host GPU server (section 3) on the post-`3666c4f` co
    the server's flush line for that utterance), suspected filler insertions at pauses
    (finding (c)), substitutions (finding (b)).
 2. **Fresh gate recording:** save one ~3–4 min dictation WAV (outside the repo), then run
-   the section-4 pair (u20-silence + u3) against it and record HR-8 deltas vs the
-   2026-08-01 report JSONs. The seam counters (`seam_dup_intra_final`,
+   the section-4 pair (u20-silence + u3) against it and record the HR-8 delta table
+   (HR-8 = the hard-requirement key-metric deltas — latency, force rate, WER lines,
+   seam counters — vs the 2026-08-01 report JSONs; the ID came from the
+   2026-08-02 review numbering and is defined here so the runbook stands alone). The seam counters (`seam_dup_intra_final`,
    `seam_dup_inter_final`, `seam_eligible_flushes`) must be in the committed report.
 3. **Kill-server fallback:** mid-utterance, `kill` the uvicorn process → the frontend must
    fall back to the one-shot path, replaying the retained utterance PCM; no committed text

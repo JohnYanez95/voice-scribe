@@ -1811,14 +1811,33 @@ uvicorn (sidecar-managed for step 7), commit `9876d50`. Outcomes in runbook orde
   the web app had been left open, lost the stream lock to the bench, and degraded to
   one-shot mic posts per **C10.2, exactly as designed** (an unplanned live pass of the
   degrade chain against a healthy server); clean re-runs are the committed numbers.
+  Review annotations (2026-08-04 sign-off): u3's `seam_dup_commit_join = 2` (utts 0/1)
+  is the classifier counting legitimate impromptu-speech repeats at tick boundaries,
+  not a defect. `forced_span_wer` 14.3% ≈ 5 errors over 35 forced words concentrated
+  in ~5 utterances (u16 plausibly dominant) — a first observation with known
+  concentration, not a run-level rate. **And a share of both WER numbers is a
+  text-assembly artifact (new finding at review):** the streaming path loses
+  faster-whisper's native word-join spacing (`localize()` strips it,
+  `committed_text()` space-joins → "K -fold", "95 %"; 9 artifact tokens / 412 words in
+  the live session) while the one-shot reference preserves it — each artifact scores
+  ≈ 1 substitution + 1 insertion in the bench. Fix and re-run both gates before tuning
+  against these numbers.
 - **Step 3 — kill-server fallback: missed on the headline line.** Error surfaced
   non-fatally, app stayed interactive, degrade chain fired (one-shot connect attempted),
-  recovery after restart clean — but **committed text was lost**. Named cause:
-  `degradeStream` (App.tsx) clears the live-region committed text before the
-  retained-FIFO replay resolves; the clear-then-replay bet holds when the stream path
-  fails against a healthy server (proven by the step-2 incident) and fails when the
-  server itself is dead. v4.2 item: defer/restore the live region until replay resolves
-  (naive promote-then-replay would duplicate utterance text).
+  recovery after restart clean — but **committed text was lost**. Named cause
+  (code-verified at review): `degradeStream` (App.tsx:369) clears the live-region
+  committed text, and the replay's failure branch (App.tsx:317-321) surfaces the error
+  and discards the blob — no restore path, no re-queue. Mechanism correction vs the
+  sitting-time reading: the mid-utterance PCM **survives the degrade** (useVAD still
+  delivers it at speech end) and is destroyed by the *failed replay* — any fix hooks
+  replay failure, not the degrade event. Clarification: continuous mode's "one-shot
+  path" is `/ws/transcribe`; there is no HTTP leg. The clear-then-replay design is
+  proven against a healthy server (step-2 incident) and fails only when the server is
+  dead. Loss bound: the in-flight utterance's live region only — completed segments in
+  the transcript survive. Fix shapes reviewed: preserve-and-restore on replay failure
+  (Principal) vs retry-FIFO that promotes nothing until a transcription succeeds
+  (Senior — makes the duplicate class structurally impossible); naive
+  promote-then-replay confirmed to duplicate on the healthy path (blocked).
 - **Step 4 — post-close hygiene: met.** No orphaned processes, 8084/8001 released,
   VRAM back to idle baseline, temp dir empty throughout (zero-persistence line observed
   live during the bench runs as well).
@@ -1827,10 +1846,14 @@ uvicorn (sidecar-managed for step 7), commit `9876d50`. Outcomes in runbook orde
   "skew" ← "skewed"); deletions 2 (function words); engine insertions **0** — including
   zero fillers at pauses (finding (c) not reproduced); the speaker's own inserted word
   was transcribed faithfully. ≈ 1.8% word-level divergence from script. Punctuation:
-  3 missing sentence-final breaks, **all at commit boundaries** — mechanism confirmed
-  from the user-exported wire log: the partial tail carried the period; the committed
-  delta dropped it; the next commit strands a capital. New named v4.2 item
-  (commit-boundary sentence-final punctuation loss).
+  sentence-final breaks lost **at commit boundaries** — mechanism corrected at review:
+  ONE event per word, not two. The committed surface form is taken from the newer
+  hypothesis (`stream_policy.py:328`, the deliberate C7.3 choice), which by commit time
+  renders the word mid-sentence — period dropped and capital re-cased on the same
+  token. Rate: 3 in the scripted read; ≥ 6 across 9 utterances in the same evening's
+  live session (the scripted count is a floor, not the rate). Named v4.2 item; fix
+  direction (prev-vs-curr surface form) undecided pending the offline policy-replay
+  trace the review specified.
 - **Step 6 — VAD detection lag: met.** File run (222 s, 54 utterances): p50 **0 ms**,
   p95/max 96 ms (one-frame granularity). Mic sanity: 104/104 frames, cadence 95.9 ms
   mean / 100.6 ms p95 vs the 96 ms contract. Per the first-partial anchor record:
@@ -1845,7 +1868,14 @@ death (step 3); commit-boundary sentence-final punctuation loss (step 5);
 forced-commit behavior under disfluent speech (`force_commit_rate` / `forced_span_wer`
 fails, step 2); the u20 utterance-16 cluster (intra-final seam dup + 10/15 forced words
 + slow-lag stretch coincide); the finalization tail (2-for-2 over gate); the beam-1
-cost lever (premium 7.0×). **Scope question for the sign-off review:** user inclination
+cost lever (premium 7.0×); word-join spacing loss (added at the sign-off review —
+measurement-contaminating, fix first and re-run both gates). Dispositions from the
+review: finding **(c) not reproduced** (engine insertions 0) → the conditional
+flush-tail hallucination veto is **retired by evidence**; finding **(b) closed** — the
+same-audio comparison has now run (`wer_micro` 4.6%, divergence
+boundary-independent). **Gate fixture:** the 237.8 s impromptu recording is retained
+at `data/tests/test-2.m4a` (gitignored, outside history) and is the pinned v4.2 A/B
+fixture; utterance 16's sample range is addressable through the committed report. **Scope question for the sign-off review:** user inclination
 (2026-08-04) to pause Tauri desktop development — no WSL-perspective advantage over the
 web app yet; step 7 passed clean, so a pause freezes a working artifact.
 
@@ -1860,6 +1890,17 @@ without it this line fails for capture reasons, not policy reasons). Kill the se
 falls back to the one-shot path gracefully, replaying the retained utterance PCM. `ps`/VRAM
 clean after session close. Client VAD detection lag reported as its own number next to the
 server-side finalization latency.
+
+**Open-line markers (2026-08-04 sitting, so silence never reads as met):** the
+kill-server line above **missed** — committed text lost when the server is dead (the
+"one-shot path" is `/ws/transcribe`; continuous mode has no HTTP leg). Close condition
+(review-specified): replay failure restores the committed text or retains the PCM for
+retry, covered by a frontend test that also asserts no duplication on the
+healthy-server degrade; fix timing (v4.1 completion vs explicit v4.2 deferral) is the
+sign-off decision. `forced_span_wer < 10%` evaluated for the first time and **missed**
+(14.3%, concentration caveat in the sitting record) — open, owned by the v4.2 tuning
+pass after the word-join fix re-baselines it. All other lines: met, evidence in the
+sitting record above.
 
 ---
 
