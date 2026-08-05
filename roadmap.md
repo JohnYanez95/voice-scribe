@@ -1903,6 +1903,45 @@ need. The labeling app's shell decision is its own and does not require this she
 to stay warm — the sidecar pattern is captured as working code at the frozen SHA.
 Deferred by design, not by omission.
 
+**Resolution-pass record (2026-08-04/05, executed per the approved plan after the
+sign-off review; commits `3f3f672`…):**
+
+- **Word-join fix (C7.14) landed and re-measured.** `merge_glued_words()` glues
+  no-leading-space decoder fragments into atomic Words before `localize()` — commit
+  boundaries can no longer split "K-fold"/"95%" clusters; no wire-contract change.
+  Post-fix gate pair on the pinned fixture: **`wer_micro` 4.55% → 3.68%**, divergence
+  further boundary-independent (near 0.029 < far 0.081), **u3 finalization line now
+  PASS** (0.289 s), u20 `fin_max_excl_first` 0.544 → 0.513 (13 ms over). Reports
+  committed (`791f2fd`). `force_commit_rate` 8.66% / `forced_span_wer` 14.29%
+  reproduce identically on clean measurement — pure content regime.
+- **Instruments landed (C9.3).** Stall counters on every session close; trace +
+  `policy_replay.py` verified **drift 0 over 291 live GPU ticks** (bit-exact offline
+  reproduction of production decisions).
+- **Disfluency mechanism NAMED by the counters:** of 96 zero-commit stalls in the
+  u20 run, 55 `eligible_zero` (agreement reaches only the terminal word), 20
+  prob-floor, 18 divergence, 3 edge. The v4.2 tunable question is now specific:
+  short-agreement/terminal-guard behavior, not generic churn.
+- **u16 cluster DIAGNOSED (trace replay):** one low-confidence word (p 0.28–0.34)
+  held a 9-word agreed prefix behind the prob floor for 3 consecutive ticks →
+  holdback burst-committed all 10 → the burst frontier's DTW end landed early and
+  the flush re-decode re-emitted the last committed word starting past C7.12's
+  100 ms start-gate (`seam_suppressed=False` — guard declined per design). The
+  intra-final dup, the forced words, and the slow lag are ONE event. v4.2 lever:
+  frontier handling after holdback bursts (evaluate on the replay harness).
+- **Punctuation surface decision: measured, current behavior stands** (protocol
+  C7.3 amendment, 2026-08-05: prev-correct 11 vs prev-spurious 6 over 18 divergent
+  commits — no clear dominance; defect is cut-position-dependent). Hybrid
+  punctuation-aware selection parked for v4.2 with the evidence.
+- **Degrade-path fix landed (frontend):** recovery queue + retry affordance —
+  replay failure queues the utterance WAV (bounded ≤ 8) instead of discarding it;
+  non-fatal error; manual retry; healthy-path degrade pinned against duplication by
+  test. Diagrams updated first. 200 frontend / 151 backend tests, tsc clean.
+  **Remaining to close the kill-server gate line: the §7 step-3 live re-sitting**
+  (user on mic) — automated coverage is in place, the runbook observation is not.
+- **Open after this pass:** step-3 re-sitting (above); `force_commit_rate` and
+  `forced_span_wer` lines — now clean-measured, mechanism-named, owned by the v4.2
+  stabilization pass with the replay harness as the evaluation instrument.
+
 **Gate (v4 overall, at v4.1/v4.2):** everything above still holding, plus:
 Three-minute live continuous dictation session: committed text never visibly changes; partial
 tail flickers but never survives incorrectly into committed text; streaming-vs-one-shot quality

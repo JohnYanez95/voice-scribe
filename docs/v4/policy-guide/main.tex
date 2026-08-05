@@ -13,7 +13,7 @@
 \large Every tuning parameter of \texttt{stream\_policy.py}: the failure without it,
 and what the tuned value buys}
 \author{}
-\date{2026-08-04 (policy as of commit \texttt{9876d50})}
+\date{2026-08-05 (policy as of the post-review resolution pass; C7.14 + C9.3 included)}
 
 % ---------- shared visual language ----------
 \tikzset{
@@ -174,6 +174,13 @@ structural defense (C7.4): distance from the edge, not confidence, is the test.
 the word stays tentative and re-tries next tick with more audio behind it.
 Vetoes only withhold --- they never edit --- so the retraction guarantee holds.
 
+\emph{Field note (2026-08-05 trace diagnosis):} the floor's own failure mode is
+\textbf{hostage-taking} --- on utterance 16 of the gate fixture, one word at
+$p \approx 0.3$ held a nine-word agreed prefix behind it for three consecutive
+ticks, until the holdback valve (\S6) burst-committed all ten unverified. One
+low word can convert a healthy agreement run into a forced commit; the
+per-tick stall counters (\S6) now make this visible per session.
+
 \begin{center}
 \begin{tikzpicture}[x=1cm]
   \panelrow{without}
@@ -199,6 +206,14 @@ form of the \emph{newer} hypothesis. Field note (2026-08-04 wire log): this is
 exactly why sentence-final punctuation drops when a commit boundary lands on a
 sentence end --- the period existed only while the word was terminal.
 
+\emph{Measured and settled (2026-08-05, offline replay on the gate fixture):}
+committing the \emph{older} surface instead was evaluated against the one-shot
+reference --- 18 divergent commits, prev-correct 11 vs prev-spurious 6. Both
+hypotheses fabricate punctuation in both directions, and the same word commits
+\emph{with} its period when the cut lands after the sentence boundary: the
+defect is cut-position-dependent, not hypothesis-choice-dependent. Current
+behavior stands; a punctuation-aware hybrid is parked for v4.2.
+
 \begin{center}
 \begin{tikzpicture}[x=1cm]
   \panelrow{tick $n$}
@@ -222,10 +237,15 @@ agreed prefix stops growing and the frontier stalls \emph{forever} --- unbounded
 commit lag. \textbf{With:} after 6 stalled ticks ($6\times750\,\mathrm{ms} =
 4.5$\,s) the newest hypothesis force-commits without agreement or the
 probability floor --- but never past the edge guard. The valve's ledger from the
-2026-08-04 field run (impromptu speech): \texttt{force\_commit\_rate} 8.6\% ---
-how often it fired; \texttt{forced\_span\_wer} 14.3\% --- the quality price of
-committing unagreed text; \texttt{commit\_lag\_max} 4.1--6.1\,s --- the bound at
-work. This trade is the primary v4.2 tuning surface.
+2026-08-04/05 field runs (impromptu speech, clean measurement):
+\texttt{force\_commit\_rate} 8.7\% --- how often it fired;
+\texttt{forced\_span\_wer} 14.3\% --- the quality price of committing unagreed
+text; \texttt{commit\_lag\_max} 4.1--6.1\,s --- the bound at work. The
+stall-reason counters (C9.3, landed 2026-08-05) decompose \emph{why} the valve
+gets armed: of 96 zero-commit ticks on the gate fixture, 55 were the terminal
+guard (agreement reaching only the last word), 20 the probability floor, 18
+genuine divergence, 3 the edge guard. The v4.2 tuning question is therefore
+short-agreement behavior --- not generic hypothesis churn.
 
 \begin{center}
 \begin{tikzpicture}[x=1cm]
@@ -331,14 +351,50 @@ so every suppression is counted on the session-close log line, keeping the
 trade observable. 2026-08-04 field ledger: 3 seam catches, 2--14 tick-residue
 suppressions per session, zero visible duplicates.
 
-\section*{Coda --- how the knobs met the field on 2026-08-04}
+\section*{10. \texttt{merge\_glued\_words} --- the decoder-edge merge (C7.14, new)}
+
+Runs \emph{before} everything above, at the decoder edge. faster-whisper marks
+word-initial tokens with a leading space and emits glued continuations
+(\texttt{"-fold"}, \texttt{"\%"}) without one. The policy previously stripped
+that signal and re-joined committed words with plain spaces --- fabricating
+\texttt{"K -fold"} and \texttt{"95 \%"} (9 artifact tokens per 412 words live,
+each scoring $\approx$2 WER errors against the space-preserving one-shot
+reference). The merge makes each glued cluster \emph{one} Word, so a commit
+boundary can never split it and every downstream space-join is correct by
+construction.
+
+\begin{center}
+\begin{tikzpicture}[x=1cm]
+  \panelrow{without}
+  \node[committed] at (0,0.25) {K};
+  \node[committed, anchor=west] at (1.0,0.25) {-fold};
+  \node[note, anchor=west] at (2.6,0.25)
+    {fragments commit separately $\rightarrow$ ``K -fold'' forever};
+  \begin{scope}[yshift=-1.2cm]
+  \panelrow{with}
+  \node[committed] at (0,0.25) {K-fold};
+  \node[note, anchor=west] at (2.6,0.25)
+    {one atomic Word --- span = first start $\rightarrow$ last end, prob = min};
+  \end{scope}
+\end{tikzpicture}
+\end{center}
+
+Measured effect on the gate fixture: \texttt{wer\_micro} 4.55\% $\rightarrow$
+3.68\% --- that share of the ``streaming quality gap'' was an assembly
+artifact, not recognition.
+
+\section*{Coda --- how the knobs met the field on 2026-08-04/05}
 
 One recording of disfluent, self-correcting impromptu speech exercised every
-mechanism above in a single afternoon: the holdback valve fired at 8.6\% (its
-ledger, \S6), the slide handled $3\times79$\,s utterances without dropping a
-sample (\S7), the twin guards caught every frontier residue (\S9), the
-terminal-word rule explained the missing sentence periods (\S5), and the flush
-context sat 44\,ms over its latency gate (\S8). Tuning any one knob moves a
-number you can now name.
+mechanism above: the holdback valve fired at 8.7\% (its ledger, \S6), the slide
+handled $3\times79$\,s utterances without dropping a sample (\S7), the twin
+guards caught frontier residue while one burst-commit landed past the C7.12
+start-gate (\S9's accepted residual, now diagnosed --- see \S4's hostage note),
+the terminal-word rule explained the missing sentence periods (\S5, measured
+and settled), and the flush context closed to 13\,ms over its latency gate
+(\S8) once the decoder-edge merge (\S10) cleaned the measurement. Every number
+above is now reproducible offline: the C9.3 trace + \texttt{policy\_replay.py}
+re-ran 291 live GPU ticks with zero drift. Tuning any one knob moves a number
+you can now name --- and test in milliseconds.
 
 \end{document}

@@ -505,3 +505,17 @@ persisted post-C7.12; senior-engineer re-review confirmed two tick-path defects)
   `stall_veto_edge` / `stall_veto_prob` — zero-commit ticks with a compared prev
   hypothesis, classified by cause; these decide which lever the v4.2 tuning pass
   actually has (hypothesis churn → holdback; edge stalls → edge guard).
+- **C7.3 surface-form choice: MEASURED AND RETAINED (2026-08-05 replay evidence).**
+  The candidate change — commit the *older* hypothesis's surface for agreed words, to
+  recover sentence-final punctuation lost when a commit boundary lands on a sentence
+  end — was evaluated offline against the pinned fixture (`policy_replay.py --surface
+  prev --reference`, one-shot raws as ground truth): 18 surface-divergent commits;
+  prev-correct 11, **prev-spurious 6**, neutral 1. Both hypotheses fabricate
+  punctuation in both directions, and the same word commits *with* its period when
+  the cut lands after the sentence boundary — the defect is cut-position-dependent,
+  not hypothesis-choice-dependent. The pre-committed decision rule (adopt prev only
+  on clear dominance with ~0 regressions) fails → **curr surface stands**. Parked for
+  the v4.2 tuning pass with this evidence: punctuation-aware selection (prefer
+  whichever surface carries sentence-final punctuation when the commit cut coincides
+  with a sentence boundary), to be evaluated on the same replay harness before any
+  code change.
