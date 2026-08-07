@@ -1784,9 +1784,12 @@ re-review confirmed the flush fix and found two TICK-path defects (C7.13):**
   331 (194 fe / 137 be), tsc clean, contract unchanged. `stream_bench` gained
   commit-join/within-delta classification counters.
 
-**Still open before v4.1 sign-off:** the three-persona sign-off review of the amended
-record (mechanism review completed 2026-08-02). The interactive smoke that was the other
-open item was completed 2026-08-04 — full record below.
+**v4.1 SIGNED OFF 2026-08-07.** The three-persona review (2026-08-04) returned
+conditional sign-off with one condition — fix the degrade-path committed-text loss and
+re-run §7 step 3. The fix landed 2026-08-05 (recovery queue, `9d845a1`); the live
+re-sitting ran 2026-08-07 and passed every line (record below). The one line still
+open in the v4-overall gate (`forced_span_wer`) is explicitly owned by the v4.2
+stabilization pass and was ruled non-blocking at the review.
 
 **Interactive smoke sitting record (2026-08-04, §7 runbook).** Config: Brave 1.93.129
 (browser passes) + WebKitGTK/Tauri (step 7), `large-v3`, CUDA (RTX 3090), bare-host GPU
@@ -1936,8 +1939,14 @@ sign-off review; commits `3f3f672`…):**
   replay failure queues the utterance WAV (bounded ≤ 8) instead of discarding it;
   non-fatal error; manual retry; healthy-path degrade pinned against duplication by
   test. Diagrams updated first. 200 frontend / 151 backend tests, tsc clean.
-  **Remaining to close the kill-server gate line: the §7 step-3 live re-sitting**
-  (user on mic) — automated coverage is in place, the runbook observation is not.
+  **Closed 2026-08-07 by the §7 step-3 live re-sitting** (Brave, bare-host GPU
+  uvicorn at `9dc3f92`, kill 13 ticks (~10 s) into a live utterance): non-fatal
+  "audio saved" surface + recovery bar ("1 utterance awaiting transcription");
+  server restarted; Retry landed the text **exactly once**; committed text intact;
+  dictation resumed on the one-shot path (C10.1 permanent-degrade confirmed live);
+  Stop→Record restored full live streaming. UX note filed for v4.3: after a
+  successful retry the UI doesn't announce it is in per-utterance mode until the
+  next activation — a one-line hint on the recovery bar's success path.
 - **Open after this pass:** step-3 re-sitting (above); `force_commit_rate` and
   `forced_span_wer` lines — now clean-measured, mechanism-named, owned by the v4.2
   stabilization pass with the replay harness as the evaluation instrument.
@@ -1954,16 +1963,14 @@ falls back to the one-shot path gracefully, replaying the retained utterance PCM
 clean after session close. Client VAD detection lag reported as its own number next to the
 server-side finalization latency.
 
-**Open-line markers (2026-08-04 sitting, so silence never reads as met):** the
-kill-server line above **missed** — committed text lost when the server is dead (the
-"one-shot path" is `/ws/transcribe`; continuous mode has no HTTP leg). Close condition
-(review-specified): replay failure restores the committed text or retains the PCM for
-retry, covered by a frontend test that also asserts no duplication on the
-healthy-server degrade; fix timing (v4.1 completion vs explicit v4.2 deferral) is the
-sign-off decision. `forced_span_wer < 10%` evaluated for the first time and **missed**
-(14.3%, concentration caveat in the sitting record) — open, owned by the v4.2 tuning
-pass after the word-join fix re-baselines it. All other lines: met, evidence in the
-sitting record above.
+**Open-line markers (updated 2026-08-07):** the kill-server line — **MET, closed
+2026-08-07** (was missed at the 2026-08-04 sitting; recovery-queue fix `9d845a1` per
+the review-specified close condition — PCM retained for retry, frontend tests cover
+replay-failure and healthy-path no-duplication — then verified live at the step-3
+re-sitting, record in the resolution-pass block). `forced_span_wer < 10%` — still
+open by design: 14.3% on clean measurement, mechanism named (terminal-guard stalls +
+prob-floor hostage), owned by the v4.2 stabilization pass with the replay harness as
+the instrument. All other lines: met, evidence in the sitting record above.
 
 ---
 
