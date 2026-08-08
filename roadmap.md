@@ -1,13 +1,29 @@
 # Voice Scribe — Roadmap
 
-**Last Updated:** August 1, 2026
-**Status:** v4.0 implemented, peer-reviewed, and field-tested (2026-08-01); v4.1 next
+**Last Updated:** August 7, 2026
+**Status:** v4.1 signed off (2026-08-07, tag `v4.1.0`); v4.2 stabilization pass next
 
 ---
 
 ## What This Document Is
 
 This is the single source of truth for building Voice Scribe. It consolidates the original design spec, review feedback, and execution directives into one reference. If something in this document contradicts an earlier draft, this document wins.
+
+**It is a working notebook, not documentation.** It records decisions with the
+evidence that produced them — including hypotheses that were wrong, gate runs
+that were invalidated and redone, and features retired because a measurement
+said so. For the maintained specifications, see [`docs/README.md`](docs/README.md).
+
+**Working method.** Voice Scribe is built by one developer using agent-assisted
+development (Claude Code — hence the `Co-Authored-By` trailers in the commit
+history). Before every milestone gate, the work goes through a structured
+adversarial review by three defined reviewer roles, each with a standing brief:
+a **Principal** who owns architectural standards and sign-off authority, a **PM**
+who owns scope and delivery discipline, and a **Senior Engineer** who verifies
+that claimed mechanisms match the code. Their findings are recorded here with
+their dispositions — accepted, deferred with a named owner, or refuted by
+evidence. Reviews that disagreed with each other are recorded as disagreements.
+The persona names appearing throughout this document refer to those roles.
 
 ---
 

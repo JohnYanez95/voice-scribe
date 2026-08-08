@@ -62,3 +62,9 @@ htmlcov/
 
 # Agent working state — regenerated per milestone; durable content lives in roadmap.md
 tasks/
+
+# Labeling-app design material (separate repo — never part of Voice Scribe)
+docs/labeling/
+
+# WSL alternate-data-stream files (carry download-source URLs)
+*:Zone.Identifier

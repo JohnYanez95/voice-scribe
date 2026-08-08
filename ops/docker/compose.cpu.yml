@@ -5,7 +5,8 @@ services:
       dockerfile: Dockerfile.cpu
     user: "${UID:-1000}:${GID:-1000}"
     ports:
-      - "${API_PORT:-8084}:8000"
+      # Host-IP prefix is load-bearing — see compose.dev.yml note.
+      - "127.0.0.1:${API_PORT:-8084}:8000"
     environment:
       - WHISPER_MODEL=small
       - WHISPER_AVAILABLE_MODELS=small

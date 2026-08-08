@@ -2,8 +2,15 @@
 
 A local voice input system for developer workflows. Runs [faster-whisper](https://github.com/SYSTRAN/faster-whisper) on a local GPU, streams transcription over WebSocket to a browser UI, and supports both push-to-talk and continuous dictation with client-side voice activity detection. No cloud services, no stored audio, no retained transcripts.
 
+Speech arrives as partial text within ~1.3 s and stabilizes into committed text
+that never rewrites itself — a LocalAgreement commit policy over a paced
+re-decode loop, specified clause-by-clause in
+[`docs/v4/protocol.md`](docs/v4/protocol.md) and enforced by tests that cite the
+clause they check.
+
 ## What it does
 
+- **Real-time streaming transcription (v4)** — a persistent `/ws/stream` session decodes as you speak: a flickering partial tail resolves into committed text that is append-only and never revised. Zero retractions is a property of the commit policy, not a hope — see [`docs/v4/protocol.md`](docs/v4/protocol.md) §5.
 - **Push-to-talk** — record an utterance, get a transcript, copy it.
 - **Continuous dictation** — mic stays open, client-side VAD ([Silero v4](https://github.com/snakers4/silero-vad), ONNX/WASM) gates speech, transcripts accumulate with automatic paragraph breaks based on speech timing.
 - **Voice commands** — say "copy" or "clear" during continuous dictation. Exact-segment detection, stripped from output.
@@ -28,11 +35,14 @@ Frontend (localhost:5174)               API (localhost:8084)
 
 Desktop mode adds a Rust HTTP server on port 8001 for native clipboard writes (`arboard`) and audio cue playback (`rodio`), bypassing WebKitGTK's unreliable media subsystem.
 
-Audio is transient — deleted in a `finally` block after processing. Transcripts exist only in browser/webview state and vanish on refresh. Nothing is logged, stored, or sent off-machine.
+Audio is transient: the one-shot path deletes its temp file in a `finally` block, and the streaming path never writes audio to disk at all. Transcripts exist only in browser/webview state and vanish on refresh. Nothing is logged, stored, or sent off-machine by default — two diagnostic modes can capture content locally and are off unless you turn them on; both are documented in [docs/privacy.md](docs/privacy.md).
 
 ## Quick start
 
 ```bash
+# One-time: install frontend dependencies
+npm install --prefix apps/web
+
 # Browser mode — GPU (requires NVIDIA GPU + Container Toolkit)
 make gpu-check   # verify GPU + container readiness
 make dev         # start API container (CUDA) + frontend dev server
@@ -45,7 +55,11 @@ make desktop     # start Tauri desktop app (GPU)
 make desktop-cpu # start Tauri desktop app (CPU fallback)
 ```
 
-Frontend: `http://localhost:5174` | API: `http://localhost:8084`
+Frontend: `http://localhost:5174` | API: `http://localhost:8084` (both bound to loopback only)
+
+First run downloads the model from HuggingFace — `large-v3` is ~3 GB, so the
+initial startup takes a few minutes on a normal connection. Subsequent starts
+read from the cache (`data/cache/` in Docker, `~/.cache/voice-scribe/` bare-host).
 
 See [docs/docker-setup.md](docs/docker-setup.md) for browser mode setup and [docs/v3/host-setup.md](docs/v3/host-setup.md) for desktop mode setup.
 
@@ -99,6 +113,9 @@ make test         # Run all tests (backend + frontend)
 make gpu-check    # Verify GPU/container readiness
 ```
 
+Backend tests run on the host and mock model loading — no GPU required. Install
+the Python dependencies once with `pip install -e 'apps/api[dev]'`.
+
 ```bash
 # Run tests individually
 cd apps/api && python -m pytest tests/ -v         # Backend
@@ -118,20 +135,63 @@ ops/
   scripts/      Smoke test, GPU bootstrap check
 docs/
   docker-setup.md  Docker/browser mode setup and troubleshooting
-  v1/           Delivery report and presentation (frozen, v1 historical)
-  v2/           Presentation and delivery report (frozen, v2 complete)
-  v3/           Host setup, progress report, presentation (living)
+  README.md     Documentation map — what is current, frozen, or a working note
+  contract/     Runtime contract for downstream consumers (+ generated schema)
+  v4/           Streaming protocol spec, commit-policy guide, field-test runbook
+  v1/ v2/ v3/   Delivery reports, sign-offs, presentations (frozen snapshots)
   diagrams/     Mermaid source files for all diagrams
 ```
 
 ## Current state
 
-v3.4 — feature-complete. Voice Scribe captures speech, transcribes locally, and delivers text through an editable transcript pane with clipboard integration. Both push-to-talk and continuous dictation with voice commands work in browser and desktop modes. The desktop app runs in the system tray with close-to-minimize, recording-state tooltip, and sidecar lifecycle management. The UI ships a coherent design system — self-hosted fonts, CSS custom properties, light/dark theme — with model selection in the toolbar and a raw/cleaned comparison pane. 178 tests pass (134 frontend, 44 backend), TypeScript clean, Rust clean.
+**v4.1**, signed off 2026-08-07 (tag `v4.1.0`). Voice Scribe captures speech,
+transcribes locally, and delivers text through an editable transcript pane with
+clipboard integration. v4 added the real-time streaming path: a persistent
+WebSocket session with a LocalAgreement commit policy, so text stabilizes
+incrementally instead of arriving all at once. Push-to-talk, continuous
+dictation, and voice commands work in browser and desktop modes. 351 tests pass
+(200 frontend, 151 backend), TypeScript clean, Rust clean.
 
-Both browser and desktop modes share the same backend code and web UI. Desktop mode adds native OS access (clipboard via `arboard`, audio via `rodio`) through a Rust HTTP server, bypassing WebKitGTK limitations.
+The desktop (Tauri) shell is **frozen** at a verified-green state — it works,
+and it is not under active development; the reasons and the conditions that
+would un-freeze it are recorded in `roadmap.md`.
 
-Voice Scribe is the capture primitive. Transformation, routing, and instrumentation belong to downstream products. See `roadmap.md` for scope boundaries and adjacent projects.
+Both modes share the same backend code and web UI. Desktop mode adds native OS
+access (clipboard via `arboard`, audio via `rodio`) through a Rust HTTP server,
+bypassing WebKitGTK limitations.
+
+Voice Scribe is the capture primitive. Transformation, routing, and
+instrumentation belong to downstream products. See `roadmap.md` for scope
+boundaries and adjacent projects.
+
+## How this was built
+
+The engineering artifacts are the point of the repository as much as the app is:
+
+- [`docs/v4/protocol.md`](docs/v4/protocol.md) — the streaming wire protocol as numbered, individually-amendable clauses; session tests name the clause they enforce, and amendments carry the date and evidence that produced them.
+- [`docs/contract/runtime-contract.md`](docs/contract/runtime-contract.md) — the downstream interface, with a generated JSON schema and a drift test that fails CI if the two diverge.
+- [`ops/scripts/policy_replay.py`](ops/scripts/policy_replay.py) — offline replay of the commit policy against recorded traces; `--verify` reproduces production decisions bit-exactly, so tuning questions become unit tests instead of GPU sweeps.
+- [`ops/scripts/stream_bench.py`](ops/scripts/stream_bench.py) + [`docs/v4/field-test.md`](docs/v4/field-test.md) — the WER/latency harness and its runbook, with the committed report JSONs behind every number quoted above.
+- [`roadmap.md`](roadmap.md) — the decision log: scope calls, measured results, and hypotheses retired by evidence.
+
+## Contributing
+
+Voice Scribe is a personal research vehicle. I'm not accepting pull requests and
+I'm not maintaining it as a community project — the architecture reflects
+specific scope decisions (see `roadmap.md`) that I intend to keep making
+unilaterally.
+
+**Issues are welcome for bugs and questions.** If you run it and something
+breaks, tell me — reports from hardware I don't own are genuinely useful. I read
+them; I don't promise to fix them.
+
+**Forks are encouraged.** Apache-2.0, no strings. If you build something on top
+of it, I'd like to hear about it.
 
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+Redistributed third-party artifacts (Silero VAD weights, the vad-web worklet
+bundle, and the self-hosted fonts) carry their own licenses — see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

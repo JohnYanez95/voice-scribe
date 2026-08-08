@@ -39,7 +39,9 @@
 
 ## Most likely operational failures
 
-1. **Accidental LAN exposure**: If someone changes the bind address from localhost to 0.0.0.0 in the compose file, the API becomes network-accessible. The compose file ships with localhost binding only.
+1. **Accidental LAN exposure**: If someone removes the `127.0.0.1:` host-IP prefix from the compose port mapping, Docker binds `0.0.0.0` — and because Docker inserts its own iptables chain, a host firewall does not stop it. Both compose files ship with the loopback prefix and a comment saying why. Note that origin enforcement does not substitute for it: the WebSocket endpoints check `Origin` (which stops browsers, not `curl`), and `POST /transcribe` has no origin check at all, since CORS omits response headers rather than rejecting requests.
+
+5. **Desktop clipboard/audio server (port 8001)**: In desktop mode the Rust process runs an unauthenticated HTTP server on `127.0.0.1:8001`; `POST /clipboard` writes the body to the system clipboard, `POST /audio/play` plays an embedded cue. This exists because WebKitGTK gates all IPC on user activation, which would break voice commands issued without focus — the bypass is deliberate and documented at the call site. Residual risk, accepted: a `text/plain` POST is a CORS *simple* request, so any web page open in any local browser can overwrite the clipboard (or trigger a sound) while the app runs. It cannot read the response, so this is defacement rather than exfiltration, and it requires code already running on the machine. Mitigation if taken: an `Origin`/`Host` allowlist check on the request side (~6 lines). Not taken while the desktop shell is frozen (see roadmap scope decision, 2026-08-04).
 2. **Temp audio not cleaned up**: Container crash or OOM kill during transcription. Mitigation: monitor `data/tmp/` size.
 3. **Transcript in logs**: A code change that logs the transcription result. Mitigation: code review, structured logging pattern that separates operational events from content.
 4. **GPU setup confusion**: Contributors unable to get GPU passthrough working. Mitigation: `docker-setup.md` guide and `bootstrap_gpu_check.sh` script.
