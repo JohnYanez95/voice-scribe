@@ -40,7 +40,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install .[dev]
+      # Install from the pinned lock, not the >= floors: unpinned installs made
+      # "passes locally" meaningless (2026-08-08 — local sat below its own
+      # declared minimums while CI ran two majors ahead).
+      - run: pip install -r requirements-dev.lock
+      - run: pip install -e . --no-deps
       - run: python -m pytest tests/ -v
 
   docker-build:

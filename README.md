@@ -113,8 +113,11 @@ make test         # Run all tests (backend + frontend)
 make gpu-check    # Verify GPU/container readiness
 ```
 
-Backend tests run on the host and mock model loading — no GPU required. Install
-the Python dependencies once with `pip install -e 'apps/api[dev]'`.
+Backend tests run on the host and mock model loading — no GPU required. Build the
+project environment once with `make venv`: it creates `apps/api/.venv` on Python
+3.12 from `apps/api/requirements-dev.lock`, which is the exact pinned set CI
+installs — so a local pass and a CI pass mean the same thing. `make test` uses
+that venv automatically, and the Tauri sidecar picks it up as well.
 
 ```bash
 # Run tests individually

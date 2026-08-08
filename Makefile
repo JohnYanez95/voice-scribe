@@ -1,5 +1,19 @@
 .PHONY: dev dev-cpu build test gpu-check api web desktop desktop-cpu
 
+# Prefer the project venv (apps/api/.venv) — the same interpreter the Tauri
+# sidecar picks up (main.rs) and the same version the Docker image runs (3.12).
+# Falls back to whatever `python` is on PATH if the venv has not been built.
+API_PY := $(shell [ -x $(CURDIR)/apps/api/.venv/bin/python ] && echo $(CURDIR)/apps/api/.venv/bin/python || echo python)
+
+.PHONY: venv
+venv:  ## Build apps/api/.venv from the pinned lock (matches CI exactly)
+	cd apps/api && uv venv --python 3.12 .venv && \
+		uv pip install -r requirements-dev.lock && \
+		uv pip install -e . --no-deps && \
+		uv pip install -e '.[gpu]' --no-deps
+	@echo "venv ready — bare-host GPU runs need:"
+	@echo "  export LD_LIBRARY_PATH=$$(pwd)/apps/api/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:$$(pwd)/apps/api/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib"
+
 COMPOSE := docker compose -f ops/docker/compose.dev.yml
 export PATH := $(HOME)/.cargo/bin:$(PATH)
 
@@ -21,7 +35,7 @@ build:
 	$(COMPOSE) build
 
 test:
-	cd apps/api && python -m pytest tests/ -v
+	cd apps/api && $(API_PY) -m pytest tests/ -v
 	cd apps/web && npm test -- --run
 
 gpu-check:

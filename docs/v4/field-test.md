@@ -12,15 +12,19 @@ WER, and the corrected gate lines below. Reports from before the re-spec
 
 ## 1. Prerequisites (one-time)
 
-- **`websockets`** (the harness's only non-project dependency):
-  `pip install websockets`
+- **`websockets`** (the harness's only non-project dependency): already present
+  in the project venv (`make venv`) as a `uvicorn[standard]` dependency;
+  otherwise `pip install websockets`.
 - **Bare-host GPU runs need `LD_LIBRARY_PATH`** pointed at the pip nvidia libs. Model *load*
   succeeds without it; the first *decode* fails with "Library libcublas.so.12 is not found".
   The Tauri sidecar sets this itself (`cuda_ld_library_path()`); Docker has the libs in the
   image; only manual `uvicorn` runs need it by hand:
 
   ```bash
-  export LD_LIBRARY_PATH=$HOME/.local/lib/python3.11/site-packages/nvidia/cublas/lib:$HOME/.local/lib/python3.11/site-packages/nvidia/cuda_nvrtc/lib
+  # Paths follow the project venv built by `make venv` (Python 3.12, the same
+  # version the Docker image and CI run). `make venv` prints this line too.
+  VENV=apps/api/.venv/lib/python3.12/site-packages/nvidia
+  export LD_LIBRARY_PATH=$PWD/$VENV/cublas/lib:$PWD/$VENV/cuda_nvrtc/lib
   ```
 - `ffmpeg` on PATH (the harness transcodes the recording client-side).
 
