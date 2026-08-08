@@ -777,25 +777,29 @@ async def ws_stream(websocket: WebSocket) -> None:
         # C1.7/C8.2 — teardown order: invalidate decode, await the task, THEN
         # release the slot; clear the buffer on every exit path.
         session.decode_generation += 1
-        if session.decode_task is not None:
-            session.decode_task.cancel()
-            try:
-                # Bounded: a cancelled decode task can still be parked in an
-                # await that never returns on a dead socket (observed under
-                # starlette >= 1.x). Teardown must not hang on it — the slot
-                # release below is what lets the next session connect at all.
-                await asyncio.wait_for(
-                    asyncio.gather(session.decode_task, return_exceptions=True),
-                    timeout=TEARDOWN_DRAIN_S,
-                )
-            except Exception:
-                pass
-        session.chunks = []
-        if session.trace:
-            session.trace.close()
-        if acquired:
-            stream_guard.release_stream(session)
-        session.closed_event.set()
+        try:
+            if session.decode_task is not None:
+                session.decode_task.cancel()
+                # Bounded drain: a cancelled decode task can still be parked in
+                # an await that never returns on a dead socket (starlette >= 1.x
+                # disconnect). asyncio.wait is used rather than wait_for/gather
+                # because it reports the timeout by returning, never by raising
+                # — the raising forms differ across interpreter versions (3.12
+                # surfaces the timeout as CancelledError, a BaseException that
+                # `except Exception` does not catch).
+                await asyncio.wait({session.decode_task}, timeout=TEARDOWN_DRAIN_S)
+        finally:
+            # C1.7/C8.2 — the slot release is unconditional by construction: it
+            # sits in its own finally so no exception class, Exception or
+            # BaseException, can skip it. A leaked slot refuses every future
+            # session with `busy` until the process restarts; an orphaned decode
+            # task is collected by the loop. The former is strictly worse.
+            session.chunks = []
+            if session.trace:
+                session.trace.close()
+            if acquired:
+                stream_guard.release_stream(session)
+            session.closed_event.set()
         # Occupancy and skip counters are server-internal; this line is how a
         # gate/field-test run observes them (counters only — C9.2).
         samples = sorted(session.decode_ms_samples)
