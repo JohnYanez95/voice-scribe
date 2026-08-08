@@ -2,6 +2,12 @@
 
 A local voice input system for developer workflows. Runs [faster-whisper](https://github.com/SYSTRAN/faster-whisper) on a local GPU, streams transcription over WebSocket to a browser UI, and supports both push-to-talk and continuous dictation with client-side voice activity detection. No cloud services, no stored audio, no retained transcripts.
 
+![Voice Scribe transcribing speech in real time: committed sentences accumulate in the transcript while a live region below shows the current utterance, its tentative tail in gray italic resolving into solid committed text](docs/assets/demo.gif)
+
+*Live capture, unedited. The top pane is the transcript; the strip below it is the
+utterance in progress. Gray italic is the tentative tail — still settling. Solid
+text is committed: it is append-only and never rewrites itself.*
+
 Speech arrives as partial text within ~1.3 s and stabilizes into committed text
 that never rewrites itself — a LocalAgreement commit policy over a paced
 re-decode loop, specified clause-by-clause in
