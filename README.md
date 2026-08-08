@@ -188,6 +188,20 @@ them; I don't promise to fix them.
 **Forks are encouraged.** Apache-2.0, no strings. If you build something on top
 of it, I'd like to hear about it.
 
+## Citation and prior work
+
+Voice Scribe implements published research. The model is
+**Whisper** (Radford et al., ICML 2023); the incremental commit policy is
+**local agreement** (Liu, Spanakis & Niehues, Interspeech 2020), applied to
+Whisper as demonstrated by **Whisper-Streaming** (Macháček et al., 2023). Speech
+gating uses **Silero VAD**, and inference runs through **faster-whisper** on
+**CTranslate2**.
+
+Full citations, and a plain statement of which parts of the streaming design are
+original to this repository and which are not, are in
+[`docs/references.md`](docs/references.md). A [`CITATION.cff`](CITATION.cff) is
+provided if you need to cite the software itself.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).

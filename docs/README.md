@@ -13,6 +13,7 @@ whether what you're reading is a specification or a lab notebook.
 | [`v4/policy-guide/main.pdf`](v4/policy-guide/) | The commit policy explained by intuition: every tuning parameter drawn as the failure it prevents versus the behavior it buys. |
 | [`privacy.md`](privacy.md) | Data flow, what is and isn't logged, and the opt-in diagnostic modes that can capture content locally. |
 | [`threat-model.md`](threat-model.md) | Assets, trust boundaries, accepted risks. |
+| [`references.md`](references.md) | The papers behind the model and the commit policy, with citations — and a statement of what in the streaming design is original here and what is not. |
 | [`docker-setup.md`](docker-setup.md) · [`v3/host-setup.md`](v3/host-setup.md) | Getting a GPU environment working (Docker; bare-host sidecar). |
 
 ## Working documents — internal, not specifications

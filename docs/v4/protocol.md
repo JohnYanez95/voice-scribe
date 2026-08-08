@@ -226,8 +226,11 @@ correct claim is "bounded", not "brief".
   timestamp** (`word.end` inside the left-context region), never by string matching. All
   hypothesis comparison happens in absolute sample coordinates (session clock), so hypotheses
   from different window positions align.
-- **C7.3** Agreement (LocalAgreement-2): longest common prefix of the two most recent
-  hypotheses, compared on a normalized key (NFKC → casefold → strip edge punctuation, keep
+- **C7.3** Agreement (LocalAgreement-2 — the policy is Liu, Spanakis & Niehues,
+  Interspeech 2020, applied to Whisper by Macháček et al. 2023; see
+  [`../references.md`](../references.md). Everything below the first sentence is this
+  implementation's own and is evidenced in the amendment blocks): longest common prefix
+  of the two most recent hypotheses, compared on a normalized key (NFKC → casefold → strip edge punctuation, keep
   word-internal apostrophes/hyphens); the **raw surface form from the newer hypothesis** is
   what gets committed. A word is commit-eligible only if non-terminal in both hypotheses
   (terminal words carry unstable punctuation/casing).

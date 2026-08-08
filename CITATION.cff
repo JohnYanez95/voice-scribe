@@ -1,0 +1,107 @@
+cff-version: 1.2.0
+title: "Voice Scribe: a local-first real-time speech-to-text capture primitive"
+message: >-
+  If you use this software, please cite it along with the works it
+  implements — particularly Radford et al. (Whisper) and Liu et al.
+  (the local agreement policy). See docs/references.md.
+type: software
+authors:
+  - family-names: Yanez
+    given-names: Johnraymond
+    alias: JohnYanez95
+repository-code: "https://github.com/JohnYanez95/voice-scribe"
+abstract: >-
+  A local-first speech-to-text system for developer workflows. Runs
+  faster-whisper on a local GPU and streams transcription over a
+  WebSocket session in which text stabilizes incrementally: a partial
+  tail resolves into committed text that is append-only and never
+  revised, under a LocalAgreement-2 commit policy specified
+  clause-by-clause and enforced by tests that cite the clause they
+  check. No cloud services, no stored audio, no retained transcripts.
+keywords:
+  - speech-to-text
+  - automatic-speech-recognition
+  - streaming
+  - whisper
+  - local-first
+  - privacy
+  - voice-activity-detection
+license: Apache-2.0
+version: 4.1.0
+date-released: "2026-08-07"
+
+references:
+  - type: conference-paper
+    title: "Robust Speech Recognition via Large-Scale Weak Supervision"
+    authors:
+      - family-names: Radford
+        given-names: Alec
+      - family-names: Kim
+        given-names: "Jong Wook"
+      - family-names: Xu
+        given-names: Tao
+      - family-names: Brockman
+        given-names: Greg
+      - family-names: Mcleavey
+        given-names: Christine
+      - family-names: Sutskever
+        given-names: Ilya
+    collection-title: "Proceedings of the 40th International Conference on Machine Learning"
+    volume: 202
+    start: 28492
+    end: 28518
+    year: 2023
+    publisher:
+      name: PMLR
+    url: "https://proceedings.mlr.press/v202/radford23a.html"
+    notes: "The speech recognition model this software runs."
+
+  - type: conference-paper
+    title: >-
+      Low-Latency Sequence-to-Sequence Speech Recognition and Translation
+      by Partial Hypothesis Selection
+    authors:
+      - family-names: Liu
+        given-names: Danni
+      - family-names: Spanakis
+        given-names: Gerasimos
+      - family-names: Niehues
+        given-names: Jan
+    collection-title: "Interspeech 2020"
+    start: 3620
+    end: 3624
+    year: 2020
+    doi: "10.21437/Interspeech.2020-2897"
+    notes: "Origin of the local agreement policy implemented as C7.3."
+
+  - type: conference-paper
+    title: "Turning Whisper into Real-Time Transcription System"
+    authors:
+      - family-names: Macháček
+        given-names: Dominik
+      - family-names: Dabre
+        given-names: Raj
+      - family-names: Bojar
+        given-names: Ondřej
+    collection-title: >-
+      Proceedings of the 13th International Joint Conference on Natural
+      Language Processing and the 3rd Conference of the Asia-Pacific Chapter
+      of the Association for Computational Linguistics: System Demonstrations
+    year: 2023
+    url: "https://arxiv.org/abs/2307.14743"
+    notes: "Demonstrated local agreement applied to Whisper for streaming."
+
+  - type: software
+    title: "Silero VAD"
+    authors:
+      - name: "Silero Team"
+    year: 2021
+    url: "https://github.com/snakers4/silero-vad"
+    notes: "Client-side voice activity detection model, redistributed here."
+
+  - type: software
+    title: faster-whisper
+    authors:
+      - name: SYSTRAN
+    url: "https://github.com/SYSTRAN/faster-whisper"
+    notes: "Whisper inference implementation, including word-level timestamps."
