@@ -1,10 +1,11 @@
 name: CI
 
 on:
+  # Every branch, not just main: the v4 line was developed on a feature branch
+  # and CI first saw 43 commits at merge time (2026-08-08). Cheap jobs, and the
+  # alternative is discovering breakage after it is already on main.
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   frontend:

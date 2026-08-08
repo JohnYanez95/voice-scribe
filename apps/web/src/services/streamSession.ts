@@ -118,7 +118,12 @@ export function openStreamSession(
 
   const sendWireFrame = (samples: Float32Array) => {
     recordWireFrameSent(samples.byteLength); // aggregate only — never PCM
-    ws.send(samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength));
+    // Copy the frame's byte range, don't send a live view: these samples are
+    // views into buffers the VAD reuses, and send() flushes asynchronously.
+    // The copy goes through a typed array because TypedArray.buffer widened to
+    // ArrayBufferLike in TS 5.7+, and send() rejects the SharedArrayBuffer half;
+    // slice() on the view yields a fresh ArrayBuffer-backed copy.
+    ws.send(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength).slice().buffer);
     lastFrameSentAt = Date.now();
   };
 

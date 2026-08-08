@@ -493,6 +493,18 @@ persisted post-C7.12; senior-engineer re-review confirmed two tick-path defects)
   boundary split a cluster). C7.11 interaction: flush-only languages whose tokens carry
   no leading spaces (ja/zh/th) merge to one `Word` per utterance — acceptable at flush,
   where no per-word vetoes apply and partials were already whole-utterance.
+- **C8.2 amendment — teardown drain is bounded.** Releasing the single-session
+  slot used to wait unbounded on the cancelled decode task
+  (`await asyncio.gather(decode_task)`). Under starlette >= 1.x a client
+  disconnect can leave that task parked in an await that never returns on the
+  dead socket, so the slot was never released: the next session was refused
+  `busy` until the process restarted — a browser tab closing mid-session was
+  enough to wedge dictation. The drain is now bounded by `TEARDOWN_DRAIN_S`
+  (2 s); on expiry the slot is released anyway, because a leaked slot is worse
+  than an orphaned task that the event loop will collect. Found 2026-08-08 when
+  the merge to `main` put the v4 line in front of CI for the first time and
+  `test_disconnect_frees_slot_and_next_session_connects` failed against current
+  dependencies — the test predates the bug and caught it exactly as intended.
 - **C9.3 (new) — server-side per-tick hypothesis trace.** The sanctioned, opt-in-only
   server twin of the client wire-capture mode: `STREAM_TRACE_DIR` env var (empty
   default — no shipped launcher sets it; operator opt-in per process) writes one JSONL

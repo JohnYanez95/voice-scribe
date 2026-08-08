@@ -53,6 +53,8 @@ FLUSH_ONLY_LANGUAGES = {"ja", "zh", "th"}
 # Flush decodes shorter than this are skipped: sub-100 ms tails are below one
 # Whisper frame of usable content and reliably hallucinate.
 MIN_FLUSH_DECODE_S = 0.1
+# Teardown must complete even if a cancelled decode task never unparks (C8.2).
+TEARDOWN_DRAIN_S = 2.0
 
 
 def _policy_config() -> PolicyConfig:
@@ -778,7 +780,14 @@ async def ws_stream(websocket: WebSocket) -> None:
         if session.decode_task is not None:
             session.decode_task.cancel()
             try:
-                await asyncio.gather(session.decode_task, return_exceptions=True)
+                # Bounded: a cancelled decode task can still be parked in an
+                # await that never returns on a dead socket (observed under
+                # starlette >= 1.x). Teardown must not hang on it — the slot
+                # release below is what lets the next session connect at all.
+                await asyncio.wait_for(
+                    asyncio.gather(session.decode_task, return_exceptions=True),
+                    timeout=TEARDOWN_DRAIN_S,
+                )
             except Exception:
                 pass
         session.chunks = []
