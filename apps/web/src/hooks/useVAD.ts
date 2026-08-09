@@ -86,6 +86,9 @@ export function useVAD(options: UseVADOptions): UseVADResult {
   // another start. Without this, a MicVAD that resolves after the user pressed
   // Stop is still adopted and started, opening the microphone they just closed.
   const startTokenRef = useRef(0);
+  // A Start dropped by the re-entrancy guard, waiting to be replayed once the
+  // in-flight start settles.
+  const pendingStartRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -141,6 +144,13 @@ export function useVAD(options: UseVADOptions): UseVADResult {
     disposedRef.current = false;
     return () => {
       disposedRef.current = true;
+      // Bump the token too, because disposedRef alone does not survive a
+      // remount: Strict Mode's second setup clears it, and a start still in
+      // flight from before the cleanup would then find itself un-disposed and
+      // be adopted by a mount that never asked for it. The token has no such
+      // reset — a start from a previous mount stays stale forever.
+      startTokenRef.current += 1;
+      pendingStartRef.current = false;
       const instance = vadRef.current;
       vadRef.current = null;
       void releaseVad(instance); // cleanup cannot be async
@@ -151,7 +161,17 @@ export function useVAD(options: UseVADOptions): UseVADResult {
     // Re-entrancy guard: MicVAD.new() is async, so two overlapping calls would
     // each build an instance and orphan one — repeated start/stop cycles would
     // leak ONNX runtimes, AudioWorklets and MediaStreams until unmount.
-    if (startingRef.current || disposedRef.current) return;
+    if (startingRef.current || disposedRef.current) {
+      // Dropping the call outright is only safe while the in-flight start is
+      // still destined to go live. Once a stop has superseded it, that start
+      // returns without listening, so a Start pressed in this window would
+      // vanish and leave a dead button. Remember it and honour it below.
+      if (startingRef.current && !disposedRef.current) {
+        pendingStartRef.current = true;
+      }
+      return;
+    }
+    pendingStartRef.current = false;
     startingRef.current = true;
     const token = ++startTokenRef.current;
     // Everything past the guard sits inside the try, so the finally below is
@@ -165,6 +185,12 @@ export function useVAD(options: UseVADOptions): UseVADResult {
       const previous = vadRef.current;
       vadRef.current = null;
       await releaseVad(previous);
+      // Releasing the old instance is itself an await, and a stop can land in
+      // it. Checking here rather than only after construction means a
+      // superseded start never calls MicVAD.new at all — which would acquire a
+      // MediaStream and spin up an ONNX runtime just to destroy them, briefly
+      // reopening the microphone the user had already closed.
+      if (disposedRef.current || token !== startTokenRef.current) return;
       resetTapState();
       const vad = await MicVAD.new({
         baseAssetPath: "/",
@@ -254,13 +280,35 @@ export function useVAD(options: UseVADOptions): UseVADResult {
       setIsListening(false);
     } finally {
       startingRef.current = false;
+      // Honour a Start that arrived while this one was in flight, but only if
+      // this start was superseded — a stop is the only thing that can bump the
+      // token mid-flight, and it is exactly the case where nothing goes live
+      // and the dropped press would otherwise vanish. A start that did go live
+      // needs no replay. Not conditioned on vadRef: a stop after the instance
+      // is assigned pauses it and leaves it in place, so an instance can exist
+      // while the start that made it is already stale. Cleared before the
+      // call, so one dropped press buys exactly one replay.
+      if (
+        pendingStartRef.current &&
+        !disposedRef.current &&
+        token !== startTokenRef.current
+      ) {
+        pendingStartRef.current = false;
+        // Awaited, not fired and forgotten: callers await startListening and
+        // then read isListening, and with a bare void the promise they hold
+        // settles while the replay is still constructing — reporting "not
+        // listening" for a start that is about to succeed.
+        await startListening();
+      }
     }
   };
 
   const stopListening = (): void => {
     // Invalidate any in-flight start so it cannot resolve into a live VAD
-    // after the user has stopped.
+    // after the user has stopped. A Start queued behind that start is stale
+    // too — the user has since asked for silence.
     startTokenRef.current += 1;
+    pendingStartRef.current = false;
     if (vadRef.current) {
       // Fire-and-forget by design — the signature stays synchronous because
       // callers drive UI state, not teardown. The rejection is still caught:
@@ -268,9 +316,14 @@ export function useVAD(options: UseVADOptions): UseVADResult {
       Promise.resolve(vadRef.current.pause()).catch(() => {
         /* pause on an already-released instance */
       });
-      resetTapState();
-      setIsListening(false);
     }
+    // Outside the guard on purpose. A restart that is awaiting the previous
+    // instance's release holds no instance yet — vadRef is already null — and
+    // the token above has just invalidated it, so nothing will ever set this
+    // back. Leaving it inside the guard strands the UI claiming a live VAD
+    // that no longer exists.
+    resetTapState();
+    setIsListening(false);
   };
 
   return { startListening, stopListening, isListening, error };

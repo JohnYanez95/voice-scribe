@@ -40,6 +40,18 @@ import { MicVAD } from "@ricky0123/vad-web";
 beforeEach(() => {
   vi.clearAllMocks();
   capturedOptions = {};
+  // clearAllMocks does not drain queued mockImplementationOnce values. The race
+  // tests below arm deferred starts and destroys, and a test that fails leaves
+  // its deferral unconsumed — the next test then hangs on a promise armed by a
+  // test that already finished, failing 5 s later somewhere unrelated. Reset
+  // the queues and restore the base behaviour so a failure stays local.
+  mockVad.start.mockReset().mockResolvedValue(undefined);
+  mockVad.pause.mockReset().mockResolvedValue(undefined);
+  mockVad.destroy.mockReset().mockResolvedValue(undefined);
+  vi.mocked(MicVAD.new).mockReset().mockImplementation(async (options) => {
+    capturedOptions = options as typeof capturedOptions;
+    return mockVad;
+  });
 });
 
 describe("useVAD", () => {
@@ -357,7 +369,7 @@ describe("useVAD gray-zone gating (2026-08-02)", () => {
 // microphone and ONNX session stay live for the life of the page.
 // ---------------------------------------------------------------------------
 
-describe("unmount during start", () => {
+describe("supersession during start (unmount and stop)", () => {
   // Wait for the mocked constructor to actually be entered rather than
   // guessing a microtask count — startListening awaits the previous release
   // first, so the number of ticks before MicVAD.new is an implementation
@@ -377,6 +389,16 @@ describe("unmount during start", () => {
       await Promise.resolve();
     }
     expect(mockVad.start).toHaveBeenCalled();
+  };
+
+  // Same shape, for the replay tests: wait until the constructor has been
+  // entered n times, so a replay is observed by its effect rather than by a
+  // guessed number of ticks.
+  const untilNewCalls = async (n: number) => {
+    for (let i = 0; i < 50 && vi.mocked(MicVAD.new).mock.calls.length < n; i++) {
+      await Promise.resolve();
+    }
+    expect(vi.mocked(MicVAD.new)).toHaveBeenCalledTimes(n);
   };
 
   it("destroys an instance that resolves after unmount, and never starts it", async () => {
@@ -417,6 +439,167 @@ describe("unmount during start", () => {
     // vadRef. A second destroy from the post-start path is a double release,
     // which is the very thing the guards exist to avoid.
     expect(mockVad.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  // Disposal is not the only way a start gets superseded. The component stays
+  // mounted through all of these, so disposedRef never flips — only the start
+  // token can tell the resolved instance it is stale.
+  it("destroys an instance that resolves after stopListening, and never starts it", async () => {
+    let resolveNew: (v: typeof mockVad) => void = () => {};
+    vi.mocked(MicVAD.new).mockImplementationOnce(
+      () => new Promise((res) => { resolveNew = res as (v: typeof mockVad) => void; })
+    );
+
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    let started: Promise<void> = Promise.resolve();
+    act(() => { started = result.current.startListening(); });
+    await act(async () => { await untilNewCalled(); });
+
+    act(() => { result.current.stopListening(); });   // user stops mid-construction
+    await act(async () => { resolveNew(mockVad); await started; });
+
+    // Without the token this instance is adopted and started — reopening the
+    // microphone the user just closed, with no UI state that says so.
+    expect(mockVad.start).not.toHaveBeenCalled();
+    expect(mockVad.destroy).toHaveBeenCalled();
+    expect(result.current.isListening).toBe(false);
+  });
+
+  it("does not report listening when stopListening lands during start()", async () => {
+    let resolveStart: () => void = () => {};
+    mockVad.start.mockImplementationOnce(
+      () => new Promise<void>((res) => { resolveStart = res; })
+    );
+
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    let started: Promise<void> = Promise.resolve();
+    act(() => { started = result.current.startListening(); });
+    // Park on `await vad.start()`: the instance has reached vadRef, so the stop
+    // can pause it — this is the path where the VAD is real and the stop is
+    // the only thing making the pending start stale.
+    await act(async () => { await untilNewCalled(); await untilStartCalled(); });
+
+    act(() => { result.current.stopListening(); });
+    await act(async () => { resolveStart(); await started; });
+
+    expect(mockVad.pause).toHaveBeenCalled();
+    // The stop is authoritative: a start resolving afterwards must not flip
+    // the UI back to listening.
+    expect(result.current.isListening).toBe(false);
+  });
+
+  it("clears listening when stop lands while a restart awaits the old release", async () => {
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    await act(async () => { await result.current.startListening(); });
+    expect(result.current.isListening).toBe(true);
+
+    // Restart: the hook takes ownership of the old instance and nulls vadRef
+    // before awaiting destroy(), so there is a window with no instance at all.
+    let resolveDestroy: () => void = () => {};
+    mockVad.destroy.mockImplementationOnce(
+      () => new Promise<void>((res) => { resolveDestroy = res; })
+    );
+    let restarted: Promise<void> = Promise.resolve();
+    act(() => { restarted = result.current.startListening(); });
+    await act(async () => {
+      for (let i = 0; i < 50 && mockVad.destroy.mock.calls.length === 0; i++) {
+        await Promise.resolve();
+      }
+      expect(mockVad.destroy).toHaveBeenCalledTimes(1); // parked on the release
+    });
+
+    act(() => { result.current.stopListening(); });   // stop inside that window
+    await act(async () => { resolveDestroy(); await restarted; });
+
+    // vadRef was null when the stop arrived, so a guard around setIsListening
+    // would have skipped it and left the UI claiming a VAD that never came
+    // back — the superseded start returns without ever setting it.
+    expect(result.current.isListening).toBe(false);
+    expect(mockVad.start).toHaveBeenCalledTimes(1); // only the original start
+    // And the superseded restart aborts at the post-release check, before
+    // construction: building a MicVAD here would acquire a MediaStream and an
+    // ONNX runtime only to destroy them, reopening the mic mid-stop.
+    expect(MicVAD.new).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays a Start that was dropped while an in-flight start was superseded", async () => {
+    let resolveNew: (v: typeof mockVad) => void = () => {};
+    vi.mocked(MicVAD.new).mockImplementationOnce(
+      () => new Promise((res) => { resolveNew = res as (v: typeof mockVad) => void; })
+    );
+    // The first start is superseded before it ever reaches vad.start(), so this
+    // deferral lands on the REPLAY's start. That gives the replay a suspension
+    // point outliving act()'s microtask drain — without one, an awaited replay
+    // and a fired-and-forgotten one are indistinguishable from a test.
+    let resolveReplayStart: () => void = () => {};
+    mockVad.start.mockImplementationOnce(
+      () => new Promise<void>((res) => { resolveReplayStart = res; })
+    );
+
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    let started: Promise<void> = Promise.resolve();
+    act(() => { started = result.current.startListening(); });
+    await act(async () => { await untilNewCalled(); });
+
+    let startedSettled = false;
+    void started.then(() => { startedSettled = true; });
+
+    // Stop, then Start again — both while the first construction is pending.
+    act(() => { result.current.stopListening(); });
+    act(() => { void result.current.startListening(); });   // dropped by the guard
+
+    await act(async () => { resolveNew(mockVad); await untilNewCalls(2); });
+
+    // The replay is parked on its start(). Because the finally awaits it, the
+    // promise the caller holds cannot have settled — a voided replay would
+    // have let it resolve back when the superseded start returned.
+    expect(startedSettled).toBe(false);
+
+    await act(async () => { resolveReplayStart(); await started; });
+    expect(startedSettled).toBe(true);
+
+    // If the dropped press is not replayed, the user is left staring at a
+    // Start button that did nothing — the token would have traded one bug for
+    // another.
+    expect(result.current.isListening).toBe(true);
+    expect(MicVAD.new).toHaveBeenCalledTimes(2);
+  });
+
+  it("replays a dropped Start when the stop lands after the instance is assigned", async () => {
+    // Two deferrals: the first start parks on start() so the stop can land
+    // after assignment, the second gives the replay a suspension point of its
+    // own — the same trick the sibling test uses to observe the await.
+    let resolveStart: () => void = () => {};
+    let resolveReplayStart: () => void = () => {};
+    mockVad.start
+      .mockImplementationOnce(() => new Promise<void>((res) => { resolveStart = res; }))
+      .mockImplementationOnce(() => new Promise<void>((res) => { resolveReplayStart = res; }));
+
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    let started: Promise<void> = Promise.resolve();
+    act(() => { started = result.current.startListening(); });
+    // Far enough in that vadRef holds the instance — stopListening pauses it
+    // and leaves it in place, so an instance exists while the start that built
+    // it is already stale. A replay gated on "no instance" misses this.
+    await act(async () => { await untilNewCalled(); await untilStartCalled(); });
+
+    let startedSettled = false;
+    void started.then(() => { startedSettled = true; });
+
+    act(() => { result.current.stopListening(); });
+    act(() => { void result.current.startListening(); });   // dropped by the guard
+
+    await act(async () => { resolveStart(); await untilNewCalls(2); });
+
+    expect(startedSettled).toBe(false);
+
+    await act(async () => { resolveReplayStart(); await started; });
+    expect(startedSettled).toBe(true);
+
+    expect(result.current.isListening).toBe(true);
+    // Exactly one replay: the dropped press is honoured once, and neither the
+    // superseded start nor the replay leaves an extra instance behind.
+    expect(MicVAD.new).toHaveBeenCalledTimes(2);
   });
 });
 

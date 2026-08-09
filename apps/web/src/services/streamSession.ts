@@ -39,6 +39,10 @@ const WIRE_FRAME_SAMPLES = 1536;
 // push the next one a full interval away, which for a small idle_timeout_s
 // lands past the server's deadline. See makeReady.
 const PING_SUPPRESS_MS = 2000;
+
+// Server message types that carry a required utterance_id (§4). Kept in step
+// with the four utterance-scoped models in schemas.py.
+const ID_REQUIRED = new Set(["partial", "committed", "final", "ack"]);
 // A server may accept the socket and then never send `ready` (wedged model
 // load, half-open connection). §1 gives the server an idle timeout but the
 // client had no deadline of its own, so the session waited forever instead of
@@ -255,11 +259,19 @@ export function openStreamSession(
     ) {
       return;
     }
-    // utterance_id feeds the §4 stale filter. A non-numeric one poisons
-    // maxUtteranceId, and every later comparison against NaN is false — the
-    // filter would stop dropping stale messages without any visible failure.
+    // utterance_id feeds the §4 stale filter. A bad one poisons maxUtteranceId
+    // — Math.max against undefined is NaN, and every later comparison against
+    // NaN is false — so the filter silently stops dropping stale messages.
+    // Missing is as damaging as non-numeric, and the four utterance-scoped
+    // types declare it required on both sides of the wire, so demand it there
+    // and merely type-check it anywhere else.
     const uid = (parsed as { utterance_id?: unknown }).utterance_id;
-    if (uid !== undefined && (typeof uid !== "number" || !Number.isFinite(uid))) {
+    // isSafeInteger, not isFinite: the wire type is an int, and a fractional
+    // or out-of-range id is malformed even though it compares harmlessly.
+    const badId = typeof uid !== "number" || !Number.isSafeInteger(uid);
+    if (ID_REQUIRED.has((parsed as { type: string }).type)) {
+      if (badId) return;
+    } else if (uid !== undefined && badId) {
       return;
     }
     const msg = parsed as WsStreamServerMessage;
@@ -395,11 +407,13 @@ export function openStreamSession(
         if (!wasClosed) cb.onStopped?.();
         return;
       }
-      drainPending(true);
       state = "stopping";
       clearPing();
-      // Arm before sending: if ws.send throws, the session must still complete
-      // rather than sit in "stopping" forever with no deadline.
+      // Arm before anything is sent: every send below goes through ws.send,
+      // which throws on a socket that has already closed. The final drain is
+      // as capable of throwing as the control that follows it, so both sit
+      // inside the guard and neither can escape stop() and leave the session
+      // wedged in "stopping" with no deadline to complete it.
       stopTimer = setTimeout(() => {
         if (state !== "stopping") return;
         // eslint-disable-next-line no-console
@@ -408,6 +422,7 @@ export function openStreamSession(
         cb.onStopped?.();
       }, STOP_ACK_TIMEOUT_MS);
       try {
+        drainPending(true);
         sendControl({ type: "stop" });
       } catch {
         /* socket already gone — the deadline above completes the stop */
