@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { StrictMode } from "react";
 import { renderHook, act } from "@testing-library/react";
 import { useVAD } from "../src/hooks/useVAD";
 
@@ -410,12 +411,13 @@ describe("unmount during start", () => {
 
 describe("strict mode and frame retention", () => {
   it("stays usable after a Strict-Mode setup/cleanup/setup cycle", async () => {
-    // renderHook mounts once; simulate the extra cycle React runs in Strict
-    // Mode by unmounting a first hook instance before using a second.
-    const first = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
-    first.unmount();
-
-    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    // Render through an actual StrictMode wrapper rather than approximating it
+    // with two mounts: React runs setup, cleanup, setup on the SAME instance,
+    // and it is that second setup on a disposed instance that used to wedge
+    // the hook.
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }), {
+      wrapper: ({ children }) => <StrictMode>{children}</StrictMode>,
+    });
     await act(async () => { await result.current.startListening(); });
     expect(result.current.isListening).toBe(true);
   });

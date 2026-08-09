@@ -75,6 +75,11 @@ export function useVAD(options: UseVADOptions): UseVADResult {
   // instance is adopted AFTER cleanup ran and nothing ever releases it — the
   // microphone and ONNX session stay live for the life of the page.
   const disposedRef = useRef(false);
+  // Invalidates in-flight starts. Disposal covers unmount, but a start can also
+  // be superseded while its awaits are pending — by stopListening, or by
+  // another start. Without this, a MicVAD that resolves after the user pressed
+  // Stop is still adopted and started, opening the microphone they just closed.
+  const startTokenRef = useRef(0);
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -148,6 +153,7 @@ export function useVAD(options: UseVADOptions): UseVADResult {
     // the destroy below exists to prevent.
     if (startingRef.current || disposedRef.current) return;
     startingRef.current = true;
+    const token = ++startTokenRef.current;
     // Take ownership first, then await the release: a later cleanup must never
     // touch a destroyed instance, and the old ONNX runtime/AudioWorklet should
     // be gone before the replacement claims the microphone.
@@ -211,18 +217,19 @@ export function useVAD(options: UseVADOptions): UseVADResult {
           onVADMisfireRef.current?.();
         },
       });
-      // Unmounted while constructing: never assigned, so the cleanup could not
-      // have seen it. This path owns it.
-      if (disposedRef.current) {
+      // Superseded while constructing — unmounted, stopped, or restarted. Never
+      // assigned, so no other path can see it: this one owns it.
+      if (disposedRef.current || token !== startTokenRef.current) {
         await releaseVad(vad);
         return;
       }
       vadRef.current = vad;
       await vad.start();
-      // Unmounted during start(): the instance was already assigned, so the
-      // cleanup owns it and has released it. Releasing again here would be a
-      // double destroy — just stop before touching state.
-      if (disposedRef.current) return;
+      // Superseded during start(). The instance was already assigned, so it is
+      // owned elsewhere — by the cleanup if disposed, or by stopListening,
+      // which has paused it. Releasing here would double-destroy; reporting
+      // "listening" would contradict the stop the user just asked for.
+      if (disposedRef.current || token !== startTokenRef.current) return;
       setError(null);
       setIsListening(true);
     } catch (err) {
@@ -247,6 +254,9 @@ export function useVAD(options: UseVADOptions): UseVADResult {
   };
 
   const stopListening = (): void => {
+    // Invalidate any in-flight start so it cannot resolve into a live VAD
+    // after the user has stopped.
+    startTokenRef.current += 1;
     if (vadRef.current) {
       // Fire-and-forget by design — the signature stays synchronous because
       // callers drive UI state, not teardown. The rejection is still caught:
