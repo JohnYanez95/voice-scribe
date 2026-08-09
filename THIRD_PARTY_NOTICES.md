@@ -12,20 +12,31 @@ licenses at their own sources.
 
 | Redistributed file | Upstream project | License |
 | --- | --- | --- |
-| `apps/web/public/silero_vad_v5.onnx` | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT |
-| `apps/web/public/silero_vad_legacy.onnx` | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT |
+| `apps/web/public/silero_vad_v5.onnx` | [Silero VAD](https://github.com/snakers4/silero-vad), obtained via `@ricky0123/vad-web` | MIT |
+| `apps/web/public/silero_vad_legacy.onnx` | [Silero VAD](https://github.com/snakers4/silero-vad), obtained via `@ricky0123/vad-web` | MIT |
 | `apps/web/public/vad.worklet.bundle.min.js` | [@ricky0123/vad-web](https://github.com/ricky0123/vad) | ISC |
-| `apps/web/public/fonts/HankenGrotesk-Latin.woff2` | [Hanken Grotesk](https://github.com/marceloneves/HankenGrotesk) | SIL OFL 1.1 |
+| `apps/web/public/fonts/HankenGrotesk-Latin.woff2` | [Hanken Grotesk](https://github.com/marcologous/hanken-grotesk) | SIL OFL 1.1 |
 | `apps/web/public/fonts/CrimsonPro-Regular-Latin.woff2` | [Crimson Pro](https://github.com/Fonthausen/CrimsonPro) | SIL OFL 1.1 |
 | `apps/web/public/fonts/CrimsonPro-Italic-Latin.woff2` | [Crimson Pro](https://github.com/Fonthausen/CrimsonPro) | SIL OFL 1.1 |
+
+Provenance note: the two `.onnx` files are **byte-identical** (verified by hash)
+to those shipped in `@ricky0123/vad-web`'s `dist/`, and the worklet bundle is
+likewise identical to that package's. So the models are Silero's work obtained
+through vad-web rather than fetched from Silero directly — vad-web's own LICENSE
+records the same split, ISC for its code and MIT for the bundled models. The
+worklet bundle carries no embedded third-party code of its own.
+
+All copyright lines below were read from the upstream license files rather than
+inferred from author names; an earlier revision of this file attributed the two
+fonts to individual designers and vad-web to MIT, all of which were wrong.
 
 ---
 
 ## MIT License
 
-Applies to **Silero VAD** (Copyright © Silero Team).
+Applies to the **Silero VAD** models, `Copyright (c) 2020-present Silero Team`.
 
-```
+```text
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -75,9 +86,12 @@ Applies to the **Hanken Grotesk** and **Crimson Pro** font files. The fonts are
 subsetted to the Latin range; they are otherwise unmodified. Neither font is
 sold, and neither is distributed under a Reserved Font Name.
 
-```
-Copyright (c) Alfredo Marco Pradil (Hanken Grotesk)
-Copyright (c) Jacques Le Bailly (Crimson Pro)
+```text
+Copyright 2021 The Hanken Grotesk Project Authors
+(https://github.com/marcologous/hanken-grotesk)
+
+Copyright 2018 The Crimson Pro Project Authors
+(https://github.com/Fonthausen/CrimsonPro)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
