@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { StrictMode } from "react";
 import { renderHook, act } from "@testing-library/react";
 import { useVAD } from "../src/hooks/useVAD";
 
@@ -346,5 +347,107 @@ describe("useVAD gray-zone gating (2026-08-02)", () => {
     expect(frames.map((f) => f[0])).toEqual([
       0, 1, ...Array.from({ length: 28 }, (_, k) => k + 2), 30,
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unmount during an in-flight start (2026-08-09 review). MicVAD.new() and
+// start() are async; a component can unmount mid-flight, and the resolved
+// instance must not be adopted after cleanup has already run — otherwise the
+// microphone and ONNX session stay live for the life of the page.
+// ---------------------------------------------------------------------------
+
+describe("unmount during start", () => {
+  // Wait for the mocked constructor to actually be entered rather than
+  // guessing a microtask count — startListening awaits the previous release
+  // first, so the number of ticks before MicVAD.new is an implementation
+  // detail these tests must not encode.
+  const untilNewCalled = async () => {
+    for (let i = 0; i < 50 && vi.mocked(MicVAD.new).mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+    // Assert rather than fall through: if the constructor is never entered the
+    // test would otherwise fail later on a confusing assertion about destroy.
+    expect(vi.mocked(MicVAD.new)).toHaveBeenCalled();
+  };
+
+  // Wait on the observable effect instead of a fixed number of microtasks.
+  const untilStartCalled = async () => {
+    for (let i = 0; i < 50 && mockVad.start.mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(mockVad.start).toHaveBeenCalled();
+  };
+
+  it("destroys an instance that resolves after unmount, and never starts it", async () => {
+    let resolveNew: (v: typeof mockVad) => void = () => {};
+    vi.mocked(MicVAD.new).mockImplementationOnce(
+      () => new Promise((res) => { resolveNew = res as (v: typeof mockVad) => void; })
+    );
+
+    const { result, unmount } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    let started: Promise<void> = Promise.resolve();
+    act(() => { started = result.current.startListening(); });
+    await act(async () => { await untilNewCalled(); });
+
+    unmount();                       // cleanup runs while MicVAD.new is pending
+    await act(async () => { resolveNew(mockVad); await started; });
+
+    expect(mockVad.destroy).toHaveBeenCalled();
+    expect(mockVad.start).not.toHaveBeenCalled();
+  });
+
+  it("releases the instance when unmount lands during start()", async () => {
+    let resolveStart: () => void = () => {};
+    mockVad.start.mockImplementationOnce(
+      () => new Promise<void>((res) => { resolveStart = res; })
+    );
+
+    const { result, unmount } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
+    let started: Promise<void> = Promise.resolve();
+    act(() => { started = result.current.startListening(); });
+    // Let MicVAD.new resolve and the instance reach vadRef, so the cleanup —
+    // not startListening — is the owner when unmount lands.
+    await act(async () => { await untilNewCalled(); await untilStartCalled(); });
+
+    unmount();                       // cleanup runs while start() is pending
+    await act(async () => { resolveStart(); await started; });
+
+    // Exactly once: the cleanup owns an instance that was already assigned to
+    // vadRef. A second destroy from the post-start path is a double release,
+    // which is the very thing the guards exist to avoid.
+    expect(mockVad.destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("strict mode and frame retention", () => {
+  it("stays usable after a Strict-Mode setup/cleanup/setup cycle", async () => {
+    // Render through an actual StrictMode wrapper rather than approximating it
+    // with two mounts: React runs setup, cleanup, setup on the SAME instance,
+    // and it is that second setup on a disposed instance that used to wedge
+    // the hook.
+    const { result } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }), {
+      wrapper: ({ children }) => <StrictMode>{children}</StrictMode>,
+    });
+    await act(async () => { await result.current.startListening(); });
+    expect(result.current.isListening).toBe(true);
+  });
+
+  it("copies retained frames so a reused capture buffer cannot rewrite them", async () => {
+    const delivered: Float32Array[] = [];
+    const { result } = renderHook(() =>
+      useVAD({ onSpeechEnd: vi.fn(), onSpeechFrame: (f) => delivered.push(f) })
+    );
+    await act(async () => { await result.current.startListening(); });
+
+    // Pre-roll: a silent frame is retained in the ring, then vad-web reuses
+    // that same buffer before speech onset replays it.
+    const reused = new Float32Array([0.75]);
+    act(() => { feedSilence(reused); });
+    reused[0] = -1;
+    act(() => { capturedOptions.onSpeechStart?.(); });
+
+    expect(delivered.length).toBeGreaterThan(0);
+    expect(delivered[0][0]).toBe(0.75);
   });
 });
