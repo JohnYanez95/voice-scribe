@@ -11,6 +11,7 @@ import {
   makeAck,
 } from "./helpers/fakeStreamSocket";
 import { openStreamSession } from "../src/services/streamSession";
+import type { WsStreamServerMessage } from "../src/types";
 import type { StreamSessionCallbacks } from "../src/services/streamSession";
 
 function makeCallbacks(): StreamSessionCallbacks & Record<string, ReturnType<typeof vi.fn>> {
@@ -203,6 +204,31 @@ describe("utterance_id and seq handling (§4)", () => {
     ]);
   });
 
+  // Both halves of the same failure: Math.max against a non-number yields NaN,
+  // and every later `<` against NaN is false, so the filter keeps running and
+  // silently stops dropping anything. Missing is as damaging as malformed.
+  it.each([
+    ["missing", undefined],
+    ["non-numeric", "3" as unknown],
+    ["NaN", Number.NaN],
+    ["fractional", 6.5],
+  ])("ignores an ack with a %s utterance_id rather than poisoning the filter", (_label, uid) => {
+    const { ws, cb } = openReadySession();
+    ws.serverMessage(makePartial(5, "current"));
+    // A reset ack, not a stop ack: stop tears the session down, which would
+    // drop the follow-up message for reasons that have nothing to do with the
+    // filter and hide the very poisoning this asserts.
+    const bad = { ...makeAck("reset", 6) } as Record<string, unknown>;
+    if (uid === undefined) delete bad.utterance_id;
+    else bad.utterance_id = uid;
+    ws.serverMessage(bad as unknown as WsStreamServerMessage);
+
+    // The filter must still be intact: a stale message is still dropped.
+    ws.serverMessage(makePartial(4, "stale"));
+    expect(cb.onPartial).toHaveBeenCalledOnce();
+    expect(cb.onPartial.mock.calls[0][0].text).toBe("current");
+  });
+
   it("warns on seq regression but does not fail the session", () => {
     const { ws, cb } = openReadySession();
     ws.serverMessage({ ...makePartial(0, "a"), seq: 100 });
@@ -268,6 +294,23 @@ describe("stop lifecycle (C3.5)", () => {
     const framesAtStop = ws.sentFrames.length;
     session.sendAudio(samples(1536));
     expect(ws.sentFrames).toHaveLength(framesAtStop);
+  });
+
+  it("completes the stop when the final audio drain throws", async () => {
+    const { session, ws, cb } = openReadySession();
+    session.sendAudio(samples(100)); // sub-frame remainder: stop() must drain it
+    // A socket that has closed under us: ws.send throws InvalidStateError. The
+    // drain hits it before the stop control does, so a drain outside the guard
+    // throws straight out of stop() — no state change, no deadline, and a
+    // caller left waiting on an onStopped that can never arrive.
+    ws.send = () => {
+      throw new Error("InvalidStateError");
+    };
+
+    expect(() => session.stop()).not.toThrow();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cb.onStopped).toHaveBeenCalledOnce();
+    expect(session.state).toBe("closed");
   });
 
   it("server close racing the stop ack still fires onStopped once", () => {
