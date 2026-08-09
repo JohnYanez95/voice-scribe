@@ -9,6 +9,14 @@ export function encodeWavBuffer(
   samples: Float32Array,
   sampleRate: number
 ): ArrayBuffer {
+  // The RIFF header stores sampleRate and byteRate as uint32. A non-integer,
+  // non-positive, or oversized rate silently writes a corrupt header that
+  // decoders interpret as garbage rather than rejecting — fail loudly instead.
+  if (!Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > 0xffffffff / 2) {
+    throw new RangeError(
+      `encodeWavBuffer: sampleRate must be a positive integer that fits the WAV header, got ${sampleRate}`
+    );
+  }
   const numSamples = samples.length;
   const numChannels = 1;
   const bitsPerSample = 16;

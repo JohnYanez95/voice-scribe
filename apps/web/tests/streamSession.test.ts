@@ -300,3 +300,78 @@ describe("teardown", () => {
     expect(cb.onDegrade).toHaveBeenCalledOnce();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Robustness fixes from the 2026-08-09 review passes. These cover behavior that
+// voice-scribe shipped without; the inverse migration carries them upstream.
+// ---------------------------------------------------------------------------
+
+describe("robustness", () => {
+  it("degrades when the server accepts the socket but never sends ready", async () => {
+    const cb = makeCallbacks();
+    openStreamSession({}, cb);
+    const sock = FakeWebSocket.instances[0];
+    sock.serverOpen(); // socket opens, `start` goes out, no `ready` ever arrives
+    expect(cb.onDegrade).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(cb.onDegrade).toHaveBeenCalledWith({ kind: "connect_failed" });
+  });
+
+  it("degrades when the socket never leaves CONNECTING", async () => {
+    const cb = makeCallbacks();
+    openStreamSession({}, cb);
+    // No serverOpen(): the connect stalls, so onopen never fires. Arming the
+    // deadline in onopen would have left this case unguarded entirely.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(cb.onDegrade).toHaveBeenCalledWith({ kind: "connect_failed" });
+  });
+
+  it("does not degrade on the ready timeout once ready has arrived", async () => {
+    const cb = makeCallbacks();
+    openReadySession(cb);
+    void 0;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(cb.onDegrade).not.toHaveBeenCalled();
+  });
+
+  it("copies queued samples so a reused capture buffer cannot mutate them", () => {
+    const cb = makeCallbacks();
+    const { session, ws } = openReadySession(cb);
+    // A sub-frame remainder stays queued; vad-web reuses this buffer.
+    const reused = new Float32Array([0.5, 0.5, 0.5]);
+    session.sendAudio(reused);
+    reused.fill(-1); // caller's buffer is recycled before the next drain
+    session.sendAudio(samples(1536, 0.25));
+    const sent = ws.sentSamples();
+    expect(Array.from(sent.slice(0, 3))).toEqual([0.5, 0.5, 0.5]);
+  });
+
+  it("signals onStopped when stop() is called before the session is ready", () => {
+    const cb = makeCallbacks();
+    const session = openStreamSession({}, cb);
+    session.stop();
+    expect(cb.onStopped).toHaveBeenCalled();
+  });
+});
+
+describe("malformed input and stop deadline", () => {
+  it("survives a JSON null payload and still handles the next valid message", () => {
+    const cb = makeCallbacks();
+    const { ws } = openReadySession(cb);
+    // JSON.stringify(null) === "null": valid JSON, not a message object.
+    ws.serverMessage(null as unknown as Parameters<typeof ws.serverMessage>[0]);
+    ws.serverMessage(makePartial(0, "after junk"));
+    expect(cb.onPartial).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "after junk" })
+    );
+  });
+
+  it("completes the stop when the peer never acks", async () => {
+    const cb = makeCallbacks();
+    const { session } = openReadySession(cb);
+    session.stop();
+    expect(cb.onStopped).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(cb.onStopped).toHaveBeenCalled();
+  });
+});

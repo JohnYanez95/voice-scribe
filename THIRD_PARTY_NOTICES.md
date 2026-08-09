@@ -14,7 +14,7 @@ licenses at their own sources.
 | --- | --- | --- |
 | `apps/web/public/silero_vad_v5.onnx` | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT |
 | `apps/web/public/silero_vad_legacy.onnx` | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT |
-| `apps/web/public/vad.worklet.bundle.min.js` | [@ricky0123/vad-web](https://github.com/ricky0123/vad) | MIT |
+| `apps/web/public/vad.worklet.bundle.min.js` | [@ricky0123/vad-web](https://github.com/ricky0123/vad) | ISC |
 | `apps/web/public/fonts/HankenGrotesk-Latin.woff2` | [Hanken Grotesk](https://github.com/marceloneves/HankenGrotesk) | SIL OFL 1.1 |
 | `apps/web/public/fonts/CrimsonPro-Regular-Latin.woff2` | [Crimson Pro](https://github.com/Fonthausen/CrimsonPro) | SIL OFL 1.1 |
 | `apps/web/public/fonts/CrimsonPro-Italic-Latin.woff2` | [Crimson Pro](https://github.com/Fonthausen/CrimsonPro) | SIL OFL 1.1 |
@@ -23,8 +23,7 @@ licenses at their own sources.
 
 ## MIT License
 
-Applies to **Silero VAD** (Copyright © Silero Team) and **vad-web**
-(Copyright © Ricky Boyce).
+Applies to **Silero VAD** (Copyright © Silero Team).
 
 ```
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -44,6 +43,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+---
+
+## ISC License
+
+Applies to **@ricky0123/vad-web**, Copyright (c) 2022-present ricky0123.
+This file previously listed it as MIT, which was incorrect — the package
+declares ISC. Corrected 2026-08-09.
+
+```text
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
 ---

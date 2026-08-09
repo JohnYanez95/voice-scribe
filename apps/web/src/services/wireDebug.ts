@@ -86,8 +86,13 @@ export function exportWireLog(): void {
   const a = document.createElement("a");
   a.href = url;
   a.download = `voice-scribe-wire-log-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  // Attach before clicking: a detached anchor does not start a download in
+  // every browser. Revoke on a later task — revoking in this one can cancel a
+  // download that has not started yet, producing an empty file.
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 if (enabled && typeof window !== "undefined") {

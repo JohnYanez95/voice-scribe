@@ -19,15 +19,33 @@ import type {
 import { clearWireLog, recordWire, recordWireFrameSent } from "./wireDebug";
 
 const API_PORT = import.meta.env.VITE_API_PORT || "8084";
-const WS_BASE_URL = `ws://localhost:${API_PORT}`;
+// Derive scheme and host from the page rather than hardcoding ws://localhost:
+// over HTTPS a fixed ws:// is blocked as mixed content, and a fixed localhost
+// breaks access from any other host. Local-first stays the default because the
+// page itself is normally served from localhost.
+const WS_SCHEME = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws";
+const WS_HOST =
+  typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "localhost";
+const WS_BASE_URL = `${WS_SCHEME}://${WS_HOST}:${API_PORT}`;
 
 // Wire framing: fixed 1536-sample (96 ms, 6144-byte) frames — the profile
 // stream_bench benched. vad-web's legacy model delivers exactly this size, so
 // batching is a pass-through in the default configuration; the remainder is
 // drained before flush/stop controls.
 const WIRE_FRAME_SAMPLES = 1536;
-// Ping only counts as needed when no frame went out recently (C3.8).
+// Ping only counts as needed when no frame went out recently (C3.8). The
+// window is capped at a third of the ping interval so a short idle_timeout_s
+// cannot suppress the ping past the server's deadline — see makeReady.
 const PING_SUPPRESS_MS = 2000;
+// A server may accept the socket and then never send `ready` (wedged model
+// load, half-open connection). §1 gives the server an idle timeout but the
+// client had no deadline of its own, so the session waited forever instead of
+// degrading. Generous: model load on a cold cache is slow.
+const READY_TIMEOUT_MS = 15000;
+// A peer that never acks `stop` would leave the session in "stopping" and the
+// caller waiting on onStopped forever. Stopping is what the user asked for, so
+// on expiry we complete rather than degrade.
+const STOP_ACK_TIMEOUT_MS = 5000;
 
 export type DegradeReason =
   | { kind: "connect_failed" }
@@ -77,6 +95,8 @@ export function openStreamSession(
   let lastSeq = 0;
   let lastFrameSentAt = 0;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
+  let readyTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopTimer: ReturnType<typeof setTimeout> | null = null;
   const openedAt = Date.now();
 
   const pending: Float32Array[] = [];
@@ -92,9 +112,25 @@ export function openStreamSession(
     }
   };
 
+  const clearReadyTimer = () => {
+    if (readyTimer !== null) {
+      clearTimeout(readyTimer);
+      readyTimer = null;
+    }
+  };
+
+  const clearStopTimer = () => {
+    if (stopTimer !== null) {
+      clearTimeout(stopTimer);
+      stopTimer = null;
+    }
+  };
+
   const teardown = () => {
     state = "closed";
     clearPing();
+    clearReadyTimer();
+    clearStopTimer();
     pending.length = 0;
     pendingSamples = 0;
     try {
@@ -110,6 +146,17 @@ export function openStreamSession(
     teardown();
     cb.onDegrade(reason);
   };
+
+  // Armed at construction, not in onopen: a connect that stalls in CONNECTING
+  // never fires onopen, so arming there left exactly the case this guard exists
+  // for — a socket that never becomes usable — with no deadline at all. Covers
+  // both stalls now: never opens, and opens but never sends `ready`.
+  readyTimer = setTimeout(() => {
+    if (ready || state === "closed") return;
+    // eslint-disable-next-line no-console
+    console.error("stream: no ready within timeout — degrading to one-shot");
+    degrade({ kind: "connect_failed" });
+  }, READY_TIMEOUT_MS);
 
   const sendControl = (msg: Record<string, unknown>) => {
     recordWire("out", msg);
@@ -189,12 +236,24 @@ export function openStreamSession(
 
   ws.onmessage = (event) => {
     if (state === "closed") return;
-    let msg: WsStreamServerMessage;
+    let parsed: unknown;
     try {
-      msg = JSON.parse(event.data as string) as WsStreamServerMessage;
+      parsed = JSON.parse(event.data as string);
     } catch {
       return;
     }
+    // JSON.parse accepts null, arrays and scalars. Reading .seq/.type off those
+    // throws inside the handler; drop them and keep the session open — a peer
+    // sending junk is not a reason to lose a live capture session.
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      typeof (parsed as { type?: unknown }).type !== "string"
+    ) {
+      return;
+    }
+    const msg = parsed as WsStreamServerMessage;
     // Dev mode: capture BEFORE the §4 stale filter — a message dropped as
     // stale is exactly what the diagnostic exists to see.
     recordWire("in", msg as unknown as Record<string, unknown>);
@@ -210,18 +269,24 @@ export function openStreamSession(
       if (msg.type === "ready") {
         ready = true;
         state = "open";
+        clearReadyTimer();
         // Arm the keepalive AT ready (a session opened and left silent must
         // survive the idle timeout), and only when the server advertises it —
         // a v4.0 server would fatally reject ping (C3.8 skew guard).
         lastFrameSentAt = Date.now();
         const idleS = msg.idle_timeout_s;
         if (typeof idleS === "number" && idleS > 0) {
+          const intervalMs = (idleS * 1000) / 3;
+          // Never suppress for longer than the interval itself: with a small
+          // idle_timeout_s a fixed 2 s window would skip every ping and the
+          // server would time the session out mid-silence.
+          const suppressMs = Math.min(PING_SUPPRESS_MS, intervalMs);
           pingTimer = setInterval(() => {
             if (state !== "open") return;
-            if (Date.now() - lastFrameSentAt > PING_SUPPRESS_MS) {
+            if (Date.now() - lastFrameSentAt > suppressMs) {
               sendControl({ type: "ping" });
             }
-          }, (idleS * 1000) / 3);
+          }, intervalMs);
         }
         cb.onReady?.(msg);
       } else if (msg.type === "error") {
@@ -252,6 +317,10 @@ export function openStreamSession(
           const wasStopping = state === "stopping";
           teardown();
           if (wasStopping) cb.onStopped?.();
+          // A stop ack we did not ask for means the server ended the session
+          // out from under us; the caller must fall back rather than sit on a
+          // dead socket believing it is live.
+          else cb.onDegrade({ kind: "closed" });
         }
         return;
       default:
@@ -283,7 +352,12 @@ export function openStreamSession(
   return {
     sendAudio(samples: Float32Array) {
       if (state !== "open" || !ready) return; // incl. explicit no-op post-stop
-      pending.push(samples);
+      // Copy at the QUEUE boundary, not at the send boundary. These arrays are
+      // views into a buffer vad-web reuses (see useVAD's frame tap); a
+      // sub-frame remainder can sit in `pending` across several VAD callbacks,
+      // and would mutate underneath us before reaching the wire. Transmitted
+      // audio must equal captured audio.
+      pending.push(new Float32Array(samples));
       pendingSamples += samples.length;
       drainPending(false);
     },
@@ -300,13 +374,25 @@ export function openStreamSession(
     },
     stop() {
       if (state !== "open" || !ready) {
+        // Stopping a session that never opened still completes: callers gate
+        // their "done" transition on onStopped, and without this they wait on
+        // a callback that can no longer arrive.
+        const wasClosed = state === "closed";
         teardown();
+        if (!wasClosed) cb.onStopped?.();
         return;
       }
       drainPending(true);
       state = "stopping";
       clearPing();
       sendControl({ type: "stop" });
+      stopTimer = setTimeout(() => {
+        if (state !== "stopping") return;
+        // eslint-disable-next-line no-console
+        console.error("stream: no stop ack within timeout — completing anyway");
+        teardown();
+        cb.onStopped?.();
+      }, STOP_ACK_TIMEOUT_MS);
     },
     close() {
       if (state === "closed") return;

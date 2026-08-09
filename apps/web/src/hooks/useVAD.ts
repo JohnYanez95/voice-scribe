@@ -1,6 +1,15 @@
 import { useRef, useState, useEffect } from "react";
 import { MicVAD } from "@ricky0123/vad-web";
 
+// DEV-ONLY PATH. Vite serves /node_modules/ from the dev server; a production
+// bundle has no such route. This repo DOES have a build (`tsc -b && vite
+// build`), so a bundle produced by it will fail to load the ONNX runtime.
+// Nothing has caught it because the desktop shell is exercised via `cargo tauri
+// dev`, which points at the Vite dev server — the production path has never
+// been run. Fix is a build-time copy of the two wasm files onnxruntime-web
+// actually loads; vendoring is not an option (the dist ships 76 MB of
+// variants). Left as-is here deliberately: the desktop shell is frozen, and
+// changing the build is out of scope for a fix-forward port.
 const ONNX_WASM_BASE_PATH = "/node_modules/onnxruntime-web/dist/";
 
 // VAD tuning passed explicitly to MicVAD.new — the tap's constants below are
@@ -58,6 +67,14 @@ export interface UseVADResult {
 
 export function useVAD(options: UseVADOptions): UseVADResult {
   const vadRef = useRef<Awaited<ReturnType<typeof MicVAD.new>> | null>(null);
+  // True while startListening is mid-flight; MicVAD.new() is async and two
+  // overlapping starts would orphan an instance.
+  const startingRef = useRef(false);
+  // Set by the unmount cleanup. MicVAD.new() and start() are async, so a
+  // component can unmount while one is in flight; without this the resolved
+  // instance is adopted AFTER cleanup ran and nothing ever releases it — the
+  // microphone and ONNX session stay live for the life of the page.
+  const disposedRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,10 +105,34 @@ export function useVAD(options: UseVADOptions): UseVADResult {
     speakingRef.current = false;
   };
 
-  // Destroy VAD instance on unmount.
+  // Single owner for destruction, and the only place destroy() is called.
+  // pause() may already have released the ONNX session, so destroy() can throw
+  // synchronously or reject; both are contained here. An exception thrown out
+  // of a React cleanup function is swallowed and skips the rest of the cleanup.
+  const releaseVad = async (
+    instance: Awaited<ReturnType<typeof MicVAD.new>> | null
+  ): Promise<void> => {
+    if (!instance) return;
+    try {
+      await instance.destroy();
+    } catch {
+      /* already released */
+    }
+  };
+
+  // Ownership rule, so no instance is ever released twice:
+  //   - an instance ASSIGNED to vadRef is owned by this cleanup;
+  //   - an instance that resolves before assignment is owned by startListening.
   useEffect(() => {
+    // Reset on every setup. React Strict Mode runs setup, cleanup, setup; the
+    // cleanup marks disposal, so without this the second setup starts disposed
+    // and startListening refuses to run for the life of the component.
+    disposedRef.current = false;
     return () => {
-      vadRef.current?.destroy();
+      disposedRef.current = true;
+      const instance = vadRef.current;
+      vadRef.current = null;
+      void releaseVad(instance); // cleanup cannot be async
     };
   }, []);
 
@@ -102,7 +143,17 @@ export function useVAD(options: UseVADOptions): UseVADResult {
     // pause() internally releases the ONNX session; destroy() may then
     // attempt a second release and throw. Suppress — we're replacing the
     // instance regardless.
-    try { vadRef.current?.destroy(); } catch (_) {}
+    // Re-entrancy guard: MicVAD.new() is async, so two overlapping calls would
+    // each build an instance and the first would be orphaned — the exact leak
+    // the destroy below exists to prevent.
+    if (startingRef.current || disposedRef.current) return;
+    startingRef.current = true;
+    // Take ownership first, then await the release: a later cleanup must never
+    // touch a destroyed instance, and the old ONNX runtime/AudioWorklet should
+    // be gone before the replacement claims the microphone.
+    const previous = vadRef.current;
+    vadRef.current = null;
+    await releaseVad(previous);
     resetTapState();
     try {
       const vad = await MicVAD.new({
@@ -114,15 +165,18 @@ export function useVAD(options: UseVADOptions): UseVADResult {
         redemptionMs: REDEMPTION_MS,
         minSpeechMs: MIN_SPEECH_MS,
         onFrameProcessed: (probs: { isSpeech: number }, frame: Float32Array) => {
+          // Copy on retain: `frame` is a view into a buffer vad-web reuses, and
+          // both the ring and the held array replay their contents later. A
+          // retained view would deliver whatever the buffer holds by then.
           if (!speakingRef.current) {
-            ringRef.current.push(frame);
+            ringRef.current.push(new Float32Array(frame));
             if (ringRef.current.length > RING_FRAMES) ringRef.current.shift();
             return;
           }
           if (probs.isSpeech < POS_SPEECH_THRESHOLD) {
             // Possible redemption window (vad-web's counter is not reset
             // below the positive threshold) — hold, bounded by the cap.
-            heldRef.current.push(frame);
+            heldRef.current.push(new Float32Array(frame));
             if (heldRef.current.length > HELD_MAX_FRAMES) {
               const oldest = heldRef.current.shift();
               if (oldest) onSpeechFrameRef.current?.(oldest);
@@ -157,19 +211,49 @@ export function useVAD(options: UseVADOptions): UseVADResult {
           onVADMisfireRef.current?.();
         },
       });
+      // Unmounted while constructing: never assigned, so the cleanup could not
+      // have seen it. This path owns it.
+      if (disposedRef.current) {
+        await releaseVad(vad);
+        return;
+      }
       vadRef.current = vad;
       await vad.start();
+      // Unmounted during start(): the instance was already assigned, so the
+      // cleanup owns it and has released it. Releasing again here would be a
+      // double destroy — just stop before touching state.
+      if (disposedRef.current) return;
+      setError(null);
       setIsListening(true);
     } catch (err) {
+      // start() can reject after assignment. If this path still owns the
+      // instance, release it — otherwise it lives until unmount holding the
+      // microphone. If disposal already took it, the cleanup is the owner.
+      const orphan = vadRef.current;
+      if (orphan && !disposedRef.current) {
+        vadRef.current = null;
+        await releaseVad(orphan);
+      }
+      if (disposedRef.current) return;
       const message =
         err instanceof Error ? err.message : "VAD initialization failed";
       setError(message);
+      // A failed start must not leave the UI claiming an active VAD from the
+      // previous successful start — there is no instance now.
+      setIsListening(false);
+    } finally {
+      startingRef.current = false;
     }
   };
 
   const stopListening = (): void => {
     if (vadRef.current) {
-      vadRef.current.pause();
+      // Fire-and-forget by design — the signature stays synchronous because
+      // callers drive UI state, not teardown. The rejection is still caught:
+      // un-awaited, it would surface as an unhandled promise rejection.
+      Promise.resolve(vadRef.current.pause()).catch(() => {
+        /* pause on an already-released instance */
+      });
       resetTapState();
       setIsListening(false);
     }

@@ -59,7 +59,11 @@ export type WsMessage = WsSegmentMessage | WsCompleteMessage | WsErrorMessage;
 
 // --- /ws/stream protocol v1 (docs/v4/protocol.md) — mirrors app/schemas.py ---
 
-export type StreamErrorCode =
+// Known codes are exhaustive as of protocol v1 (docs/v4/protocol.md §8). The
+// open form below keeps an unknown code from a newer server representable
+// rather than a type error — the client's rule is to honor `fatal`, not to
+// recognize the code, so an unrecognized fatal must still degrade.
+export type KnownStreamErrorCode =
   | "busy"
   | "preempted"
   | "protocol_violation"
@@ -70,6 +74,8 @@ export type StreamErrorCode =
   | "decode_failure"
   | "overrun"
   | "session_timeout";
+
+export type StreamErrorCode = KnownStreamErrorCode | (string & {});
 
 export interface WsStreamReadyMessage {
   type: "ready";

@@ -1922,6 +1922,42 @@ need. The labeling app's shell decision is its own and does not require this she
 to stay warm — the sidecar pattern is captured as working code at the frozen SHA.
 Deferred by design, not by omission.
 
+**Upstream hardening from Voice Lab (2026-08-09).** The capture layer was
+migrated into `voice-lab` and reviewed there by CodeRabbit across five passes.
+Every finding landed on code byte-identical to this repo's, so they were
+pre-existing defects here, not migration artifacts. Fixed there first, then
+carried back on `fix/upstream-capture-hardening`:
+
+- **Data integrity (two halves of one bug):** `streamSession.sendAudio` queued
+  the caller's `Float32Array` by reference, and `useVAD`'s pre-roll ring and
+  held-frame array retained the frames vad-web hands in. Both are views into a
+  buffer vad-web reuses, and both are replayed later — so transmitted audio
+  could differ from captured audio. Copy at both boundaries; the fixes must
+  travel together, since either alone still lets a reused buffer reach the wire.
+- **Availability:** no client-side deadline on connect/handshake (a socket that
+  stalled or never sent `ready` hung forever with no degrade); `stop()` before
+  ready never emitted `onStopped`; an unsolicited stop ack left the caller on a
+  dead socket; a small `idle_timeout_s` could suppress every ping past the
+  server's deadline; a peer that never acked `stop` left the session `stopping`.
+- **Lifecycle:** `destroy()` unguarded in React cleanup; `vadRef` not cleared
+  after destroy; no re-entrancy guard; `isListening` left true when
+  `MicVAD.new` rejected; a VAD instance resolving after unmount was adopted and
+  started, holding the microphone for the life of the page; **Strict Mode** left
+  the hook permanently disposed after its first setup/cleanup cycle.
+- **Correctness:** malformed JSON (`null`, arrays) threw inside the message
+  handler; `encodeWavBuffer` accepted sample rates that write a corrupt RIFF
+  header; unknown server error codes were not representable; the wire-log export
+  revoked its object URL in the same task as `click()`.
+- **Licensing:** `THIRD_PARTY_NOTICES.md` listed `@ricky0123/vad-web` as MIT; it
+  is **ISC**. Corrected — this was live in a public repo.
+
+Known and deliberately not fixed: `useVAD`'s ONNX WASM base path points at
+`/node_modules/`, which only exists under the Vite dev server. A production
+bundle would fail to load the runtime. Nothing has caught it because the desktop
+shell is exercised via `cargo tauri dev`, which points at the dev server — the
+production path has never been run. The fix is a build-time copy; the shell is
+frozen, so it is recorded rather than changed.
+
 **Resolution-pass record (2026-08-04/05, executed per the approved plan after the
 sign-off review; commits `3f3f672`…):**
 
