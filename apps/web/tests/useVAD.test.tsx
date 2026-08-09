@@ -366,6 +366,17 @@ describe("unmount during start", () => {
     for (let i = 0; i < 50 && vi.mocked(MicVAD.new).mock.calls.length === 0; i++) {
       await Promise.resolve();
     }
+    // Assert rather than fall through: if the constructor is never entered the
+    // test would otherwise fail later on a confusing assertion about destroy.
+    expect(vi.mocked(MicVAD.new)).toHaveBeenCalled();
+  };
+
+  // Wait on the observable effect instead of a fixed number of microtasks.
+  const untilStartCalled = async () => {
+    for (let i = 0; i < 50 && mockVad.start.mock.calls.length === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(mockVad.start).toHaveBeenCalled();
   };
 
   it("destroys an instance that resolves after unmount, and never starts it", async () => {
@@ -375,7 +386,7 @@ describe("unmount during start", () => {
     );
 
     const { result, unmount } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
-    let started: Promise<void>;
+    let started: Promise<void> = Promise.resolve();
     act(() => { started = result.current.startListening(); });
     await act(async () => { await untilNewCalled(); });
 
@@ -393,11 +404,11 @@ describe("unmount during start", () => {
     );
 
     const { result, unmount } = renderHook(() => useVAD({ onSpeechEnd: vi.fn() }));
-    let started: Promise<void>;
+    let started: Promise<void> = Promise.resolve();
     act(() => { started = result.current.startListening(); });
     // Let MicVAD.new resolve and the instance reach vadRef, so the cleanup —
     // not startListening — is the owner when unmount lands.
-    await act(async () => { await untilNewCalled(); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await untilNewCalled(); await untilStartCalled(); });
 
     unmount();                       // cleanup runs while start() is pending
     await act(async () => { resolveStart(); await started; });

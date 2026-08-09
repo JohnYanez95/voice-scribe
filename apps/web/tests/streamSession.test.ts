@@ -329,7 +329,6 @@ describe("robustness", () => {
   it("does not degrade on the ready timeout once ready has arrived", async () => {
     const cb = makeCallbacks();
     openReadySession(cb);
-    void 0;
     await vi.advanceTimersByTimeAsync(30_000);
     expect(cb.onDegrade).not.toHaveBeenCalled();
   });
@@ -344,6 +343,14 @@ describe("robustness", () => {
     session.sendAudio(samples(1536, 0.25));
     const sent = ws.sentSamples();
     expect(Array.from(sent.slice(0, 3))).toEqual([0.5, 0.5, 0.5]);
+  });
+
+  it("does not signal onStopped twice when stop() follows close()", () => {
+    const cb = makeCallbacks();
+    const session = openStreamSession({}, cb);
+    session.close();
+    session.stop();
+    expect(cb.onStopped).not.toHaveBeenCalled();
   });
 
   it("signals onStopped when stop() is called before the session is ready", () => {

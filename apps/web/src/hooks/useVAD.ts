@@ -52,6 +52,12 @@ export interface UseVADOptions {
    * frame until speech end — except held redemption-window silence, which is
    * released in order only if speech resumes. Frames are shared with vad-web's
    * internal buffer: treat as read-only. */
+  /**
+   * Per-frame tap. The frame is a VIEW into a buffer vad-web reuses: it is
+   * valid only for the synchronous duration of this callback. Retaining it —
+   * queueing, buffering, deferring a send — delivers whatever the buffer holds
+   * later, not what was captured. Copy first if you need to keep it.
+   */
   onSpeechFrame?: (frame: Float32Array) => void;
   /** Speech segment shorter than minSpeechMs — pre-roll frames were already
    * streamed; the streaming client must reset the server utterance. */
@@ -142,26 +148,24 @@ export function useVAD(options: UseVADOptions): UseVADResult {
   }, []);
 
   const startListening = async (): Promise<void> => {
-    // Destroy any previous paused instance before creating a new one.
-    // Without this, repeated start/stop cycles orphan MicVAD instances
-    // (ONNX runtime + AudioWorklet + MediaStream) until component unmount.
-    // pause() internally releases the ONNX session; destroy() may then
-    // attempt a second release and throw. Suppress — we're replacing the
-    // instance regardless.
     // Re-entrancy guard: MicVAD.new() is async, so two overlapping calls would
-    // each build an instance and the first would be orphaned — the exact leak
-    // the destroy below exists to prevent.
+    // each build an instance and orphan one — repeated start/stop cycles would
+    // leak ONNX runtimes, AudioWorklets and MediaStreams until unmount.
     if (startingRef.current || disposedRef.current) return;
     startingRef.current = true;
     const token = ++startTokenRef.current;
-    // Take ownership first, then await the release: a later cleanup must never
-    // touch a destroyed instance, and the old ONNX runtime/AudioWorklet should
-    // be gone before the replacement claims the microphone.
-    const previous = vadRef.current;
-    vadRef.current = null;
-    await releaseVad(previous);
-    resetTapState();
+    // Everything past the guard sits inside the try, so the finally below is
+    // the single place that clears startingRef — a throw before it would
+    // otherwise wedge the hook against every future start.
     try {
+      // Take ownership first, then await the release: a later cleanup must
+      // never touch a destroyed instance, and the old runtime should be gone
+      // before the replacement claims the microphone. releaseVad contains any
+      // failure, including the double-release pause() can provoke.
+      const previous = vadRef.current;
+      vadRef.current = null;
+      await releaseVad(previous);
+      resetTapState();
       const vad = await MicVAD.new({
         baseAssetPath: "/",
         onnxWASMBasePath: ONNX_WASM_BASE_PATH,
@@ -241,7 +245,7 @@ export function useVAD(options: UseVADOptions): UseVADResult {
         vadRef.current = null;
         await releaseVad(orphan);
       }
-      if (disposedRef.current) return;
+      if (disposedRef.current || token !== startTokenRef.current) return;
       const message =
         err instanceof Error ? err.message : "VAD initialization failed";
       setError(message);

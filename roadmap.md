@@ -1953,10 +1953,19 @@ carried back on `fix/upstream-capture-hardening`:
 
 Known and deliberately not fixed: `useVAD`'s ONNX WASM base path points at
 `/node_modules/`, which only exists under the Vite dev server. A production
-bundle would fail to load the runtime. Nothing has caught it because the desktop
-shell is exercised via `cargo tauri dev`, which points at the dev server — the
-production path has never been run. The fix is a build-time copy; the shell is
-frozen, so it is recorded rather than changed.
+bundle would fail to load the runtime.
+
+**Scope decision (2026-08-09): production capture is out of scope for v4.x, and
+this records why rather than leaving it implied.** Neither supported path builds
+a bundle — browser mode runs `make dev` (the Vite dev server), and the desktop
+shell runs `cargo tauri dev`, whose `devUrl` also points at that server. So the
+production path has never executed, which is exactly why this defect has never
+been observed. It becomes real the first time anyone runs `vite build` in
+earnest: a Tauri release bundle, or serving the frontend as static files. The
+fix is a build-time copy of the two wasm files `onnxruntime-web` actually loads,
+plus a smoke test asserting `MicVAD` initializes from the emitted path — and it
+belongs to whichever milestone first needs a real build, not to this one. The
+desktop shell is frozen, so nothing here is currently able to consume the fix.
 
 **Resolution-pass record (2026-08-04/05, executed per the approved plan after the
 sign-off review; commits `3f3f672`…):**

@@ -34,8 +34,10 @@ const WS_BASE_URL = `${WS_SCHEME}://${WS_HOST}:${API_PORT}`;
 // drained before flush/stop controls.
 const WIRE_FRAME_SAMPLES = 1536;
 // Ping only counts as needed when no frame went out recently (C3.8). The
-// window is capped at a third of the ping interval so a short idle_timeout_s
-// cannot suppress the ping past the server's deadline — see makeReady.
+// window is capped at HALF the ping interval, strictly below it: a cap equal to
+// the interval would let a frame sent just before a tick suppress that ping and
+// push the next one a full interval away, which for a small idle_timeout_s
+// lands past the server's deadline. See makeReady.
 const PING_SUPPRESS_MS = 2000;
 // A server may accept the socket and then never send `ready` (wedged model
 // load, half-open connection). §1 gives the server an idle timeout but the
@@ -253,6 +255,13 @@ export function openStreamSession(
     ) {
       return;
     }
+    // utterance_id feeds the §4 stale filter. A non-numeric one poisons
+    // maxUtteranceId, and every later comparison against NaN is false — the
+    // filter would stop dropping stale messages without any visible failure.
+    const uid = (parsed as { utterance_id?: unknown }).utterance_id;
+    if (uid !== undefined && (typeof uid !== "number" || !Number.isFinite(uid))) {
+      return;
+    }
     const msg = parsed as WsStreamServerMessage;
     // Dev mode: capture BEFORE the §4 stale filter — a message dropped as
     // stale is exactly what the diagnostic exists to see.
@@ -280,7 +289,7 @@ export function openStreamSession(
           // Never suppress for longer than the interval itself: with a small
           // idle_timeout_s a fixed 2 s window would skip every ping and the
           // server would time the session out mid-silence.
-          const suppressMs = Math.min(PING_SUPPRESS_MS, intervalMs);
+          const suppressMs = Math.min(PING_SUPPRESS_MS, intervalMs / 2);
           pingTimer = setInterval(() => {
             if (state !== "open") return;
             if (Date.now() - lastFrameSentAt > suppressMs) {
@@ -315,12 +324,16 @@ export function openStreamSession(
         maxUtteranceId = Math.max(maxUtteranceId, msg.utterance_id);
         if (msg.of === "stop") {
           const wasStopping = state === "stopping";
-          teardown();
-          if (wasStopping) cb.onStopped?.();
-          // A stop ack we did not ask for means the server ended the session
-          // out from under us; the caller must fall back rather than sit on a
-          // dead socket believing it is live.
-          else cb.onDegrade({ kind: "closed" });
+          if (wasStopping) {
+            teardown();
+            cb.onStopped?.();
+          } else {
+            // A stop ack we did not ask for means the server ended the session
+            // out from under us. Route through degrade() rather than calling
+            // the callback directly, so the degradeFired guard stays
+            // authoritative and teardown ordering matches every other path.
+            degrade({ kind: "closed" });
+          }
         }
         return;
       default:
@@ -385,7 +398,8 @@ export function openStreamSession(
       drainPending(true);
       state = "stopping";
       clearPing();
-      sendControl({ type: "stop" });
+      // Arm before sending: if ws.send throws, the session must still complete
+      // rather than sit in "stopping" forever with no deadline.
       stopTimer = setTimeout(() => {
         if (state !== "stopping") return;
         // eslint-disable-next-line no-console
@@ -393,6 +407,11 @@ export function openStreamSession(
         teardown();
         cb.onStopped?.();
       }, STOP_ACK_TIMEOUT_MS);
+      try {
+        sendControl({ type: "stop" });
+      } catch {
+        /* socket already gone — the deadline above completes the stop */
+      }
     },
     close() {
       if (state === "closed") return;
